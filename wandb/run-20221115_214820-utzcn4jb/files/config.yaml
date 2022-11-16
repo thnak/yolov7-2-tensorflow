@@ -1,0 +1,180 @@
+wandb_version: 1
+
+_wandb:
+  desc: null
+  value:
+    cli_version: 0.13.5
+    framework: torch
+    is_jupyter_run: false
+    is_kaggle_kernel: false
+    python_version: 3.10.7
+    start_time: 1668523700.765444
+    t:
+      1:
+      - 1
+      - 2
+      - 3
+      - 41
+      - 55
+      3:
+      - 13
+      - 16
+      - 23
+      4: 3.10.7
+      5: 0.13.5
+      8:
+      - 3
+      - 5
+adam:
+  desc: null
+  value: false
+artifact_alias:
+  desc: null
+  value: latest
+batch_size:
+  desc: null
+  value: 2
+bbox_interval:
+  desc: null
+  value: -1
+bucket:
+  desc: null
+  value: ''
+cache_images:
+  desc: null
+  value: true
+cfg:
+  desc: null
+  value: cfg/training/yolov7-tiny-silu.yaml
+data:
+  desc: null
+  value: mydataset.yaml
+device:
+  desc: null
+  value: cpu
+entity:
+  desc: null
+  value: null
+epochs:
+  desc: null
+  value: 1
+evolve:
+  desc: null
+  value: false
+exist_ok:
+  desc: null
+  value: false
+freeze:
+  desc: null
+  value:
+  - 0
+global_rank:
+  desc: null
+  value: -1
+hyp:
+  desc: null
+  value:
+    anchor_t: 4.0
+    box: 0.05
+    cls: 0.3
+    cls_pw: 1.0
+    copy_paste: 0.0
+    degrees: 0.0
+    fl_gamma: 0.0
+    fliplr: 0.5
+    flipud: 0.0
+    hsv_h: 0.015
+    hsv_s: 0.7
+    hsv_v: 0.4
+    iou_t: 0.2
+    loss_ota: 1
+    lr0: 0.01
+    lrf: 0.1
+    mixup: 0.15
+    momentum: 0.937
+    mosaic: 1.0
+    obj: 0.7
+    obj_pw: 1.0
+    paste_in: 0.15
+    perspective: 0.0
+    scale: 0.9
+    shear: 0.0
+    translate: 0.2
+    warmup_bias_lr: 0.1
+    warmup_epochs: 3.0
+    warmup_momentum: 0.8
+    weight_decay: 0.0005
+image_weights:
+  desc: null
+  value: false
+img_size:
+  desc: null
+  value:
+  - 320
+  - 320
+label_smoothing:
+  desc: null
+  value: 0.0
+linear_lr:
+  desc: null
+  value: false
+local_rank:
+  desc: null
+  value: -1
+multi_scale:
+  desc: null
+  value: false
+name:
+  desc: null
+  value: exp
+noautoanchor:
+  desc: null
+  value: false
+nosave:
+  desc: null
+  value: false
+notest:
+  desc: null
+  value: false
+project:
+  desc: null
+  value: runs/train
+quad:
+  desc: null
+  value: false
+rect:
+  desc: null
+  value: false
+resume:
+  desc: null
+  value: false
+save_dir:
+  desc: null
+  value: runs\train\exp2
+save_period:
+  desc: null
+  value: -1
+single_cls:
+  desc: null
+  value: false
+sync_bn:
+  desc: null
+  value: false
+total_batch_size:
+  desc: null
+  value: 2
+upload_dataset:
+  desc: null
+  value: false
+v5_metric:
+  desc: null
+  value: false
+weights:
+  desc: null
+  value: yolov7.pt
+workers:
+  desc: null
+  value: 8
+world_size:
+  desc: null
+  value: 1

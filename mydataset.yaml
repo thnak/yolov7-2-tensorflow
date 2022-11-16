@@ -1,0 +1,5 @@
+train: ./Hard-Hat-Workers-14/train
+val: ./Hard-Hat-Workers-14/valid
+
+nc: 1
+names: ['hat']
