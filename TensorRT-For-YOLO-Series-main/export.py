@@ -227,9 +227,9 @@ class EngineBuilder:
             if not self.builder.platform_has_fast_int8:
                 print("INT8 is not supported natively on this platform/device")
             else:
-                if self.builder.platform_has_fast_fp16:
-                    # Also enable fp16, as some layers may be even more efficient in fp16 than int8
-                    self.config.set_flag(trt.BuilderFlag.FP16)
+                # if self.builder.platform_has_fast_fp16:
+                #     # Also enable fp16, as some layers may be even more efficient in fp16 than int8
+                #     self.config.set_flag(trt.BuilderFlag.FP16)
                 self.config.set_flag(trt.BuilderFlag.INT8)
                 self.config.int8_calibrator = EngineCalibrator(calib_cache)
                 if not os.path.exists(calib_cache):
@@ -238,10 +238,13 @@ class EngineBuilder:
                     self.config.int8_calibrator.set_image_batcher(
                         ImageBatcher(calib_input, calib_shape, calib_dtype, max_num_images=calib_num_images,
                                      exact_batches=True))
+                
 
         with self.builder.build_engine(self.network, self.config) as engine, open(engine_path, "wb") as f:
             print("Serializing engine to file: {:}".format(engine_path))
             f.write(engine.serialize())
+        f.close()
+        print('Finished convertion\nConfig:',self.config)
 
 def main(args):
     builder = EngineBuilder(args.verbose, args.workspace)
