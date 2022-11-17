@@ -221,6 +221,7 @@ def model_info(model, verbose=False, img_size=640):
         fs = ', %.1f GFLOPS' % (flops * img_size[0] / stride * img_size[1] / stride)  # 640x640 GFLOPS
     except (ImportError, Exception):
         fs = ''
+        print(Exception)
 
     logger.info(f"Model Summary: {len(list(model.modules()))} layers, {n_p} parameters, {n_g} gradients{fs}")
 
