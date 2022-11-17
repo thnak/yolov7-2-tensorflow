@@ -220,10 +220,10 @@ def model_info(model, verbose=False, img_size=640):
         img_size = img_size if isinstance(img_size, list) else [img_size, img_size]  # expand if int/float
         fs = ', %.1f GFLOPS' % (flops * img_size[0] / stride * img_size[1] / stride)  # 640x640 GFLOPS
     except (ImportError, Exception):
-        fs = ''
-        print(Exception)
+        fs = '? GFLOPS'
+        print("pip install thop to compute model'Gflops")
 
-    logger.info(f"Model Summary: {len(list(model.modules()))} layers, {n_p} parameters, {n_g} gradients{fs}")
+    logger.info(f"Model Summary: {len(list(model.modules()))} layers, {n_p} parameters, {n_g} gradients {fs}")
 
 
 def load_classifier(name='resnet101', n=2):
