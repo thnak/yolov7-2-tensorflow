@@ -27,7 +27,7 @@ from torchvision.utils import save_image
 from torchvision.ops import roi_pool, roi_align, ps_roi_pool, ps_roi_align
 
 from utils.general import check_requirements, xyxy2xywh, xywh2xyxy, xywhn2xyxy, xyn2xy, segment2box, segments2boxes, \
-    resample_segments, clean_str
+    resample_segments, clean_str, colorstr
 from utils.torch_utils import torch_distributed_zero_first
 
 # Parameters
@@ -366,7 +366,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         self.mosaic_border = [-img_size // 2, -img_size // 2]
         self.stride = stride
         self.path = path        
-        #self.albumentations = Albumentations() if augment else None
+        self.albumentations = Albumentations() if augment else None
 
         try:
             f = []  # image files
@@ -584,7 +584,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                                                  perspective=hyp['perspective'])
             
             
-            #img, labels = self.albumentations(img, labels)
+            # img, labels = self.albumentations(img, labels)
 
             # Augment colorspace
             augment_hsv(img, hgain=hyp['hsv_h'], sgain=hyp['hsv_s'], vgain=hyp['hsv_v'])
@@ -1222,7 +1222,6 @@ def pastein(image, labels, sample_labels, sample_images, sample_masks):
     return labels
 
 class Albumentations:
-    # YOLOv5 Albumentations class (optional, only used if package is installed)
     def __init__(self):
         self.transform = None
         import albumentations as A
@@ -1235,9 +1234,8 @@ class Albumentations:
             A.MedianBlur(p=0.01),
             A.ToGray(p=0.01),
             A.ImageCompression(quality_lower=75, p=0.01),],
-            bbox_params=A.BboxParams(format='pascal_voc', label_fields=['class_labels']))
-
-            #logging.info(colorstr('albumentations: ') + ', '.join(f'{x}' for x in self.transform.transforms if x.p))
+            bbox_params=A.BboxParams(format='yolo', label_fields=['class_labels']))
+        logging.info(colorstr('albumentations: ') + ', '.join(f'{x}' for x in self.transform.transforms if x.p))
 
     def __call__(self, im, labels, p=1.0):
         if self.transform and random.random() < p:
