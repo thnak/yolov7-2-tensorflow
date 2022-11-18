@@ -79,7 +79,6 @@ for _ in range(14):
     transformed = transform(image=image, bboxes=bboxes, category_ids=category_ids)
     img = visualize(transformed['image'],transformed['bboxes'], transformed['category_ids'],category_id_to_name,name)
     cv2.namedWindow('a',cv2.WINDOW_NORMAL)
-    
     cv2.imwrite(name,img,[cv2.IMWRITE_JPEG_QUALITY, 75])
     cv2.imshow('a',img)
     if cv2.waitKey(200) == 27:
