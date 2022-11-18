@@ -73,7 +73,8 @@ transform = A.Compose(
      A.RandomGamma(),
      A.RandomScale(),
      A.RandomSunFlare(),
-     A.Rotate(limit=(180,-180))
+     A.Rotate(limit=(180,-180)),
+     A.HueSaturationValue()
      ],
     bbox_params=A.BboxParams(format='yolo', label_fields=['category_ids']),
 )

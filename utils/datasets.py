@@ -584,7 +584,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                                                  perspective=hyp['perspective'])
             
             
-            # img, labels = self.albumentations(img, labels)
+            img, labels = self.albumentations(img, labels)
 
             # Augment colorspace
             augment_hsv(img, hgain=hyp['hsv_h'], sgain=hyp['hsv_s'], vgain=hyp['hsv_v'])
