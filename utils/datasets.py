@@ -366,7 +366,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         self.mosaic_border = [-img_size // 2, -img_size // 2]
         self.stride = stride
         self.path = path        
-        self.albumentations = Albumentations() if augment else None
+        # self.albumentations = Albumentations() if augment else None
 
         try:
             f = []  # image files
@@ -584,8 +584,8 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                                                  perspective=hyp['perspective'])
             
             
-            img, labels = self.albumentations(img, labels)
-
+            # img, labels = self.albumentations(img, labels)
+            # nL = len(labels)
             # Augment colorspace
             augment_hsv(img, hgain=hyp['hsv_h'], sgain=hyp['hsv_s'], vgain=hyp['hsv_v'])
 
@@ -1227,14 +1227,14 @@ class Albumentations:
         import albumentations as A
 
         self.transform = A.Compose([
-            A.CLAHE(p=0.01),
-            A.RandomBrightnessContrast(brightness_limit=0.2, contrast_limit=0.2, p=0.01),
-            A.RandomGamma(gamma_limit=[80, 120], p=0.01),
-            A.Blur(p=0.01),
-            A.MedianBlur(p=0.01),
-            A.ToGray(p=0.01),
-            A.ImageCompression(quality_lower=75, p=0.01),],
-            bbox_params=A.BboxParams(format='yolo', label_fields=['class_labels']))
+            A.CLAHE(p=0.5),
+            A.RandomBrightnessContrast(brightness_limit=0.2, contrast_limit=0.2, p=0.5),
+            A.RandomGamma(gamma_limit=[80, 120], p=0.5),
+            A.Blur(p=0.5),
+            A.MedianBlur(p=0.5),
+            A.ToGray(p=0.5),
+            A.ImageCompression(quality_lower=75, p=0.5),],
+            bbox_params=A.BboxParams(format='pascal_voc', label_fields=['class_labels']))
         logging.info(colorstr('albumentations: ') + ', '.join(f'{x}' for x in self.transform.transforms if x.p))
 
     def __call__(self, im, labels, p=1.0):
