@@ -56,14 +56,14 @@ category_ids = [17,18]
 category_id_to_name = {17: 'cat',18:'dog'}
 
 p = 1
-p = p/6
+p = p/4
 transform = A.Compose(
     [
      A.RandomBrightnessContrast(p=p),
      A.RandomGamma(p=p),
      A.RandomSunFlare(p=p),
      A.HueSaturationValue(p=p),
-     A.ToGray(p=p/7),
+     A.ToGray(p=0.2),
      A.HorizontalFlip(p=p),
      A.VerticalFlip(p=p),
      A.RandomRain(p=p),
@@ -73,13 +73,13 @@ transform = A.Compose(
     bbox_params=A.BboxParams(format='yolo', label_fields=['category_ids']),
 )
 count = 0
-for _ in range(14):
-    name = 'img_' +str(count)+'.jpg'
+for _ in range(40):
+    name = 'app/img_s' +str(count)+'.png'
     count+=1
     transformed = transform(image=image, bboxes=bboxes, category_ids=category_ids)
     img = visualize(transformed['image'],transformed['bboxes'], transformed['category_ids'],category_id_to_name,name)
     cv2.namedWindow('a',cv2.WINDOW_NORMAL)
     cv2.imwrite(name,img,[cv2.IMWRITE_JPEG_QUALITY, 75])
     cv2.imshow('a',img)
-    if cv2.waitKey(200) == 27:
+    if cv2.waitKey(1) == 27:
         break
