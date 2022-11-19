@@ -1,8 +1,4 @@
-import random
-
 import cv2
-from matplotlib import pyplot as plt
-
 import albumentations as A
 
 
@@ -11,17 +7,13 @@ TEXT_COLOR = (255, 255, 255) # White
 
 
 def visualize_bbox(img, bbox, class_name, color=BOX_COLOR, thickness=2):
-    """Visualizes a single bounding box on the image"""
     h,w,c = img.shape
     x,y,witdh,height = bbox
-    x_min = x - witdh/2
-    y_min = y - height/2
-    x_max = x_min + witdh
-    y_max = y_min + height
-    x_min = x_min*w
-    x_max = x_max*w
-    y_min = y_min*h
-    y_max = y_max*h
+    x_min = (x - witdh/2)*w
+    y_min = (y - height/2)*h
+    x_max = (x_min + witdh)*w
+    y_max = (y_min + height)*h
+    
     x_min, x_max, y_min, y_max = int(x_min), int(x_max ), int(y_min), int(y_max)
     cv2.rectangle(img, (x_min, y_min), (x_max, y_max), color=color, thickness=thickness)
     ((text_width, text_height), _) = cv2.getTextSize(class_name, cv2.FONT_HERSHEY_SIMPLEX, 0.35, 1)    
