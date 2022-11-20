@@ -2,7 +2,7 @@ import cv2
 import albumentations as A
 import os
 import sys
-
+from termcolor import colored
 
 def visualize_bbox(img, bbox, class_name, thickness=2):
     h,w = img.shape[:2]
@@ -80,7 +80,7 @@ def DataArgumentation(imgInputPath='', bboxInputPath='', bboxOutputPath='', imgO
             else:
                 arrImageInputPath.append(imgInputPath+'/'+imgpath)
             cou+=1
-    print(f'Found total {cou} image files')
+    print(colored(f'Found total {cou} image files','green'))
     
     if bboxInputPath =='':
         bboxInputPath = imgInputPath
@@ -104,7 +104,7 @@ def DataArgumentation(imgInputPath='', bboxInputPath='', bboxOutputPath='', imgO
             else:
                 arrBboxInputPath.append(bboxInputPath+'/'+imgpath)
             cou +=1
-    print(f'Found total {cou} txt files')
+    print(colored(f'Found total {cou} txt files','green'))
     
     img_bbox = []
     for imgpath in arrImageInputPath:
@@ -119,7 +119,7 @@ def DataArgumentation(imgInputPath='', bboxInputPath='', bboxOutputPath='', imgO
         else:
             print(f'{imgpath} were not labeled')
     
-    print(f'Total {len(img_bbox)} files was labeled, processing...')
+    print(colored(f'Total {len(img_bbox)} files was labeled, processing...'), 'yellow')
     if imgOutputPath =='':
         imgOutputPath = imgInputPath
     else:
