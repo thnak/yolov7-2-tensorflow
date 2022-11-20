@@ -1,5 +1,5 @@
-train: ./Hard-Hat-Workers-14/train
-val: ./Hard-Hat-Workers-14/valid
+train: ./TrainRes
+val: ./TrainRes
 
 nc: 1
-names: ['hat']
+names: ['pig']

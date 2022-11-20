@@ -641,7 +641,7 @@ if __name__ == '__main__':
                         help='use SyncBatchNorm, only available in DDP mode')
     parser.add_argument('--local_rank', type=int, default=-1,
                         help='DDP parameter, do not modify')
-    parser.add_argument('--workers', type=int, default=8,
+    parser.add_argument('--workers', type=int, default=16,
                         help='maximum number of dataloader workers')
     parser.add_argument('--project', default='runs/train',
                         help='save to project/name')

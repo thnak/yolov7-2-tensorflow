@@ -84,7 +84,7 @@ def DataArgumentation(imgInputPath='', bboxInputPath='', bboxOutputPath='', imgO
     
     if bboxInputPath =='':
         bboxInputPath = imgInputPath
-        print('Bbox input path is empty, using image input path to scan...')
+        print('Bbox input path is empty, using image input path to scan')
     else:
         print(f'Scaning folder: {bboxInputPath}')
         print(f'save output image to: {imgOutputPath}')
@@ -119,7 +119,7 @@ def DataArgumentation(imgInputPath='', bboxInputPath='', bboxOutputPath='', imgO
         else:
             print(f'{imgpath} were not labeled')
     
-    print(colored(f'Total {len(img_bbox)} files was labeled, processing...'), 'yellow')
+    print(colored(f'Total {len(img_bbox)} files was labeled, processing...', 'yellow'))
     if imgOutputPath =='':
         imgOutputPath = imgInputPath
     else:
@@ -145,7 +145,7 @@ def DataArgumentation(imgInputPath='', bboxInputPath='', bboxOutputPath='', imgO
         process(rangeArgumentation=rangeArgumentation,imgPath=image_, bboxes=bbox, category_ids=cate, imgIndex=inx, viewImg=True, imgOutputPath=imgOutputPath, bboxOutputPath=bboxOutputPath)
         inx+=1
         
-def process(imgPath='',rangeArgumentation = 1, cropSizeRate=[1,1] , viewImg_miliseconds=1, bboxes=[], category_ids=[], category_id_to_name={0: 'pig',1:'dog'}, imgIndex=0, viewImg=False,save=True,imgOutputPath='', bboxOutputPath=''):
+def process(imgPath='',rangeArgumentation = 1, cropSizeRate=[1,1] , viewImg_miliseconds=1, bboxes=[], category_ids=[], category_id_to_name={0: 'pig',1:'dog'}, imgIndex=0, viewImg=False,save=False,imgOutputPath='', bboxOutputPath=''):
     image = cv2.imread(imgPath)
     h,w = image.shape[:2]
     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
@@ -167,8 +167,6 @@ def process(imgPath='',rangeArgumentation = 1, cropSizeRate=[1,1] , viewImg_mili
         bbox_params=A.BboxParams(format='yolo', label_fields=['category_ids']),
     )
     count = 0
-    # print(f'bboxes: {bboxes}')
-    # print(f'category id: {category_ids}')
     for _ in range(rangeArgumentation):
         
         nameImg = imgOutputPath+fileName+'_DataArgumentation_index_' +str(imgIndex)+'_'+str(count)+'.jpg'
