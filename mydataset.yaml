@@ -1,5 +1,5 @@
-train: ./TrainRes
-val: ./TrainRes
-
-nc: 1
-names: ['pig']
+train: ./TrainRes/cattle
+val: ./TrainRes/cattle
+test: ./TrainRes/cattle
+nc: 23
+names: ['person', 'cow','dairy cow','buffalo','pig','sheep','burro','horse','rabbit','deer','goat','dog','cat','chicken', 'duck','mallard','dove','googse','musk duck','galeeny','turkey','eel','cock roach']
