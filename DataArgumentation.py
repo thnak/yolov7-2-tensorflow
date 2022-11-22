@@ -256,7 +256,102 @@ def reWriteIndex(inputFolder='', outputFolder='', changesCateOldIndex_newIndex=[
     else:
         print(f'inputFolder or outputFolder does not exists')
 
-
+def splitDataset(inputFolder='',outputFolder='', trainRatio=0.75):
+    img_formats = ['.bmp', '.jpg', '.jpeg', '.png', '.tif', '.tiff', '.dng', '.webp', '.mpo']
+    
+    yoloArrFiles = [[],[]]
+    if os.path.isdir(inputFolder) and os.path.isdir(outputFolder):
+        imagesInputFolder = os.path.join(inputFolder,'images')
+        labelsInputFolder = os.path.join(inputFolder,'labels')         
+        for item in os.listdir(imagesInputFolder):
+            for exImage in img_formats:
+                if item.endswith(exImage):
+                    imageNamed = os.path.join(imagesInputFolder,item)
+                    labelNamed = imageNamed.replace(imagesInputFolder, labelsInputFolder)
+                    for _ in img_formats:
+                        labelNamed = labelNamed.replace(_,'.txt')
+                    labelNamed = os.path.join(labelNamed)
+                    if os.path.exists(labelNamed) and imageNamed:
+                        yoloArrFiles[1].append(labelNamed)
+                        yoloArrFiles[0].append(imageNamed)
+        print(f'total image files: {len(yoloArrFiles[0])}, total label files: {len(yoloArrFiles[1])}')
+        if os.listdir(outputFolder):
+            print('The output folder is not empty, require empty folder for train, val, test sub-folder inside')
+        else:
+            valRatio = (1 - trainRatio) * 0.4
+            testRatio = (1 - trainRatio) * 0.6
+            print(f'Starting split folder... {trainRatio*100}% train, {valRatio*100}% val, {testRatio*100}% test.')
+            trainFolder = os.path.join(outputFolder,'train')
+            trainFolder_, valFolder_, testFolder_ = [], [], []
+            valFolder = os.path.join(outputFolder,'val')
+            testFolder = os.path.join(outputFolder, 'test')
+            if not os.path.isdir(trainFolder):
+                os.makedirs(trainFolder)
+                trainFolder_.append(os.path.join(trainFolder,'images'))
+                trainFolder_.append(os.path.join(trainFolder,'labels'))
+                for _ in trainFolder_:
+                    os.makedirs(_)
+            else:
+                trainFolder_.append(os.path.join(trainFolder,'images'))
+                trainFolder_.append(os.path.join(trainFolder,'labels'))
+            if not os.path.isdir(valFolder):
+                os.makedirs(valFolder) 
+                valFolder_.append(os.path.join(valFolder,'images'))
+                valFolder_.append(os.path.join(valFolder,'labels'))    
+                for _ in valFolder_:
+                    os.makedirs(_)
+            else:
+                valFolder_.append(os.path.join(valFolder,'images'))
+                valFolder_.append(os.path.join(valFolder,'labels'))   
+            if not os.path.isdir(testFolder):
+                os.makedirs(testFolder)
+                testFolder_.append(os.path.join(testFolder,'images'))
+                testFolder_.append(os.path.join(testFolder,'labels'))    
+                for _ in testFolder_:   
+                    os.makedirs(_)
+            else:
+                testFolder_.append(os.path.join(testFolder,'images'))
+                testFolder_.append(os.path.join(testFolder,'labels'))  
+            import random
+            import shutil
+            tempArray = yoloArrFiles
+            itempathTrain, itempathVal, itempathTest = [[],[]], [[],[]], [[],[]]
+            for _ in range(int(round(float(len(tempArray[0]))*valRatio,0))):
+                im = random.randrange(0,len(tempArray[0]) - 1)                    
+                itempathVal[0].append(tempArray[0][im].replace(imagesInputFolder,'')[1:])
+                itempathVal[1].append(tempArray[1][im].replace(labelsInputFolder,'')[1:])
+                
+                shutil.copyfile(yoloArrFiles[0][im], os.path.join(valFolder_[0],tempArray[0][im].replace(imagesInputFolder,'')[1:]))
+                shutil.copyfile(yoloArrFiles[1][im], os.path.join(valFolder_[1],tempArray[1][im].replace(labelsInputFolder,'')[1:]))
+                tempArray[0].remove(tempArray[0][im])
+                tempArray[1].remove(tempArray[1][im])
+                
+            print(f'valFolder: {len(itempathVal[0])} files, finished')
+            
+            for _ in range(int(round(float(len(tempArray[0]))*testRatio,0))):
+                im = random.randrange(0,len(tempArray[0]) - 1)                    
+                itempathTest[0].append(tempArray[0][im].replace(imagesInputFolder,'')[1:])
+                itempathTest[1].append(tempArray[1][im].replace(labelsInputFolder,'')[1:])
+                shutil.copyfile(yoloArrFiles[0][im], os.path.join(testFolder_[0],tempArray[0][im].replace(imagesInputFolder,'')[1:]))
+                shutil.copyfile(yoloArrFiles[1][im], os.path.join(testFolder_[1],tempArray[1][im].replace(labelsInputFolder,'')[1:]))
+                tempArray[0].remove(tempArray[0][im])
+                tempArray[1].remove(tempArray[1][im])
+                
+                
+            print(f'testFolder: {len(itempathTest[0])} files, finished')
+            itempathTrain = tempArray
+            for im in range(len(itempathTrain[0])):
+                shutil.copyfile(yoloArrFiles[0][im], os.path.join(trainFolder_[0],itempathTrain[0][im].replace(imagesInputFolder,'')[1:]))
+                shutil.copyfile(yoloArrFiles[1][im], os.path.join(trainFolder_[1],itempathTrain[1][im].replace(labelsInputFolder,'')[1:]))
+            print(f'trainFolder: {len(itempathTrain[0])} files, finished')
+            
+            
+            
+            
+            
+             
+    
+splitDataset(inputFolder="D:/Users/Downloads/Pig behavior.v1-walking.yolov7pytorch/train", outputFolder="D:/Users/Downloads/Pig behavior.v1-walking.yolov7pytorch/train/cattle") 
 # DataArgumentation(showImg=True, save=True, imgOutputPath="D:/Users/Downloads/Pig behavior.v1-walking.yolov7pytorch/train/newimage", bboxOutputPath="D:/Users/Downloads/Pig behavior.v1-walking.yolov7pytorch/train/newlabel",
 #                   imgInputPath="D:/Users/Downloads/Pig behavior.v1-walking.yolov7pytorch/train/images", bboxInputPath="D:/Users/Downloads/Pig behavior.v1-walking.yolov7pytorch/train/labels")
 
