@@ -454,7 +454,9 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         if cache_images:
             if len(self.img_files) > 10000:
                 cache_images = 'disk'
-                print(colored(f'Using {cache_images} cache for large dataset ({len(self.img_files)} image files)','yellow'))
+                print(colored(f'datasets:', 'blue'),f'Using {cache_images} cache for large dataset ({len(self.img_files)} image files)')
+            else:
+                print(colored(f'datasets:', 'blue'),f'Using {cache_images} cache for large dataset ({len(self.img_files)} image files)')
             if cache_images == 'disk':
                 self.im_cache_dir = Path(Path(self.img_files[0]).parent.as_posix() + '_npy')
                 self.img_npy = [self.im_cache_dir / Path(f).with_suffix('.npy').name for f in self.img_files]
