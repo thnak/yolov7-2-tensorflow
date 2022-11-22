@@ -452,8 +452,9 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         # Cache images into memory for faster training (WARNING: large datasets may exceed system RAM)
         self.imgs = [None] * n
         if cache_images:
+            if len(self.img_files) > 10000:
+                cache_images = 'disk'
             if cache_images == 'disk':
-                
                 self.im_cache_dir = Path(Path(self.img_files[0]).parent.as_posix() + '_npy')
                 self.img_npy = [self.im_cache_dir / Path(f).with_suffix('.npy').name for f in self.img_files]
                 self.im_cache_dir.mkdir(parents=True, exist_ok=True)

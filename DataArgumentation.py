@@ -74,7 +74,8 @@ def DataArgumentation(imgInputPath='', bboxInputPath='', bboxOutputPath='', imgO
     else:
         imgInputPath = imgInputPath+'/'
 
-    print(colored(f'Scaning folder:','yellow'), colored(f'{imgInputPath}','white'))
+    print(colored(f'Scaning folder:', 'yellow'),
+          colored(f'{imgInputPath}', 'white'))
     arrImageInputPath_, arrImageInputPath = [], []
     arrImageInputPath_ = os.listdir(imgInputPath)
     cou = 0
@@ -91,7 +92,8 @@ def DataArgumentation(imgInputPath='', bboxInputPath='', bboxOutputPath='', imgO
         bboxInputPath = imgInputPath
         print('Bbox input path is empty, using image input path to scan')
     else:
-        print(colored(f'Scaning folder:','yellow'), colored(f'{bboxInputPath}','white'))
+        print(colored(f'Scaning folder:', 'yellow'),
+              colored(f'{bboxInputPath}', 'white'))
 
     if bboxInputPath.endswith('/'):
         pass
@@ -120,10 +122,11 @@ def DataArgumentation(imgInputPath='', bboxInputPath='', bboxOutputPath='', imgO
             ar = [imgpath, txtPath]
             img_bbox.append(ar)
         else:
-            print(colored(f'{imgpath} were not labeled','red'))
+            print(colored(f'{imgpath} were not labeled', 'red'))
     print(f'Save output images to: {imgOutputPath}')
     print(f'Save output labels to: {bboxOutputPath}')
-    print(colored(f'Total {len(img_bbox)} files was labeled, processing with {rangeArgumentation} argumentation...', 'yellow'))
+    print(colored(
+        f'Total {len(img_bbox)} files was labeled, processing with {rangeArgumentation} argumentation...', 'yellow'))
     if imgOutputPath == '':
         imgOutputPath = imgInputPath
     else:
@@ -147,7 +150,7 @@ def DataArgumentation(imgInputPath='', bboxInputPath='', bboxOutputPath='', imgO
         sys.stdout.write(('='*int((inx/lengImg_bbox)*100))+(''*(lengImg_bbox-inx)
                                                             )+("\r [ %d" % int((inx/lengImg_bbox)*100)+"% ] "))
         sys.stdout.flush()
-        process(rangeArgumentation=rangeArgumentation, 
+        process(rangeArgumentation=rangeArgumentation,
                 imgPath=image_, bboxes=bbox, category_ids=cate,
                 imgIndex=inx, viewImg=True, imgOutputPath=imgOutputPath,
                 save=save,
@@ -155,7 +158,8 @@ def DataArgumentation(imgInputPath='', bboxInputPath='', bboxOutputPath='', imgO
         inx += 1
     print('Finished')
 
-def process(imgPath='', rangeArgumentation=1, cropSizeRate=[1, 1], viewImg_miliseconds=1, bboxes=[], category_ids=[], category_id_to_name={0: 'person', 1: 'cow', 2:'dairy cow', 3:'buffalo',4:'pig',5:'sheep', 6:'burro',7:'horse',8:'rabbit',9:'deer',10:'goat', 11:'dog', 12:'cat', 13:'chicken', 14:'duck', 15:'mallard', 16:'dove', 17:'googse', 18:'musk duck', 19:'galeeny', 20:'turkey', 21:'eel',22:'cockroach'}, imgIndex=0, viewImg=False, save=False, imgOutputPath='', bboxOutputPath=''):
+
+def process(imgPath='', rangeArgumentation=1, cropSizeRate=[1, 1], viewImg_miliseconds=1, bboxes=[], category_ids=[], category_id_to_name={0: 'person', 1: 'cow', 2: 'dairy cow', 3: 'buffalo', 4: 'pig', 5: 'sheep', 6: 'burro', 7: 'horse', 8: 'rabbit', 9: 'deer', 10: 'goat', 11: 'dog', 12: 'cat', 13: 'chicken', 14: 'duck', 15: 'mallard', 16: 'dove', 17: 'googse', 18: 'musk duck', 19: 'galeeny', 20: 'turkey', 21: 'eel', 22: 'cockroach'}, imgIndex=0, viewImg=False, save=False, imgOutputPath='', bboxOutputPath=''):
     image = cv2.imread(imgPath)
     h, w = image.shape[:2]
     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
@@ -240,17 +244,21 @@ def reWriteIndex(inputFolder='', outputFolder='', changesCateOldIndex_newIndex=[
                             print('dif')
                 stringTxt = ''
                 for _ in range(len(cate)):
-                    stringTxt += str(cate[_]) +' '+ str(bbox[_][0])+' '+ str(bbox[_][1])+' '+ str(bbox[_][2])+' '+ str(bbox[_][3])+'\n'
+                    stringTxt += str(cate[_]) + ' ' + str(bbox[_][0])+' ' + str(
+                        bbox[_][1])+' ' + str(bbox[_][2])+' ' + str(bbox[_][3])+'\n'
                 stringTxt = stringTxt[:-1]
                 print(f'cate: {cate}, bbox: {bbox}')
                 print(stringTxt)
                 item = item.replace(inputFolder, outputFolder)
-                fileTxt = open(item,'w')
+                fileTxt = open(item, 'w')
                 fileTxt.write(stringTxt)
                 fileTxt.close()
     else:
         print(f'inputFolder or outputFolder does not exists')
-DataArgumentation(showImg=True,save=True,imgOutputPath="D:/Users/Downloads/Pig behavior.v1-walking.yolov7pytorch/train/newimage",bboxOutputPath="D:/Users/Downloads/Pig behavior.v1-walking.yolov7pytorch/train/newlabel",imgInputPath="D:/Users/Downloads/Pig behavior.v1-walking.yolov7pytorch/train/images", bboxInputPath="D:/Users/Downloads/Pig behavior.v1-walking.yolov7pytorch/train/labels")
+
+
+DataArgumentation(showImg=True, save=True, imgOutputPath="D:/Users/Downloads/Pig behavior.v1-walking.yolov7pytorch/train/newimage", bboxOutputPath="D:/Users/Downloads/Pig behavior.v1-walking.yolov7pytorch/train/newlabel",
+                  imgInputPath="D:/Users/Downloads/Pig behavior.v1-walking.yolov7pytorch/train/images", bboxInputPath="D:/Users/Downloads/Pig behavior.v1-walking.yolov7pytorch/train/labels")
 
 
 # reWriteIndex(inputFolder="D:/Users/Downloads/Pig behavior.v1-walking.yolov7pytorch/train/labels", outputFolder="D:/Users/Downloads/Pig behavior.v1-walking.yolov7pytorch/train/newlabel")
