@@ -29,7 +29,7 @@ from torchvision.ops import roi_pool, roi_align, ps_roi_pool, ps_roi_align
 from utils.general import check_requirements, xyxy2xywh, xywh2xyxy, xywhn2xyxy, xyn2xy, segment2box, segments2boxes, \
     resample_segments, clean_str, colorstr
 from utils.torch_utils import torch_distributed_zero_first
-
+from termcolor import colored
 # Parameters
 help_url = 'https://github.com/ultralytics/yolov5/wiki/Train-Custom-Data'
 img_formats = ['bmp', 'jpg', 'jpeg', 'png', 'tif', 'tiff', 'dng', 'webp', 'mpo']  # acceptable image suffixes
@@ -454,6 +454,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         if cache_images:
             if len(self.img_files) > 10000:
                 cache_images = 'disk'
+                print(colored(f'Using {cache_images} cache for large dataset ({len(self.img_files)} image files)','yellow'))
             if cache_images == 'disk':
                 self.im_cache_dir = Path(Path(self.img_files[0]).parent.as_posix() + '_npy')
                 self.img_npy = [self.im_cache_dir / Path(f).with_suffix('.npy').name for f in self.img_files]

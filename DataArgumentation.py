@@ -257,8 +257,8 @@ def reWriteIndex(inputFolder='', outputFolder='', changesCateOldIndex_newIndex=[
         print(f'inputFolder or outputFolder does not exists')
 
 
-DataArgumentation(showImg=True, save=True, imgOutputPath="D:/Users/Downloads/Pig behavior.v1-walking.yolov7pytorch/train/newimage", bboxOutputPath="D:/Users/Downloads/Pig behavior.v1-walking.yolov7pytorch/train/newlabel",
-                  imgInputPath="D:/Users/Downloads/Pig behavior.v1-walking.yolov7pytorch/train/images", bboxInputPath="D:/Users/Downloads/Pig behavior.v1-walking.yolov7pytorch/train/labels")
+# DataArgumentation(showImg=True, save=True, imgOutputPath="D:/Users/Downloads/Pig behavior.v1-walking.yolov7pytorch/train/newimage", bboxOutputPath="D:/Users/Downloads/Pig behavior.v1-walking.yolov7pytorch/train/newlabel",
+#                   imgInputPath="D:/Users/Downloads/Pig behavior.v1-walking.yolov7pytorch/train/images", bboxInputPath="D:/Users/Downloads/Pig behavior.v1-walking.yolov7pytorch/train/labels")
 
 
 # reWriteIndex(inputFolder="D:/Users/Downloads/Pig behavior.v1-walking.yolov7pytorch/train/labels", outputFolder="D:/Users/Downloads/Pig behavior.v1-walking.yolov7pytorch/train/newlabel")
