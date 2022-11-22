@@ -19,9 +19,7 @@ import torch.nn.functional as F
 from PIL import Image, ExifTags
 from torch.utils.data import Dataset
 from tqdm import tqdm
-
-import pickle
-from copy import deepcopy
+import psutil
 #from pycocotools import mask as maskUtils
 from torchvision.utils import save_image
 from torchvision.ops import roi_pool, roi_align, ps_roi_pool, ps_roi_align
@@ -452,11 +450,20 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         # Cache images into memory for faster training (WARNING: large datasets may exceed system RAM)
         self.imgs = [None] * n
         if cache_images:
-            if len(self.img_files) > 10000:
-                cache_images = 'disk'
-                print(colored(f'datasets:', 'blue'),f'Using {cache_images} cache for large dataset ({len(self.img_files)} image files)')
+            sizeOfDataset = 0
+            totalRam = psutil.virtual_memory()[0]
+            for file_i in self.img_files:
+                try:
+                    sizeOfDataset += os.path.getsize(file_i)
+                except  Exception as ex:
+                    print(colored(f'{ex}','red'))
+            
+            if sizeOfDataset > totalRam:
+                print(colored(f'The dataset is larger than Total RAM, the program may be interrupted unexpectedly','red'),colored(f'dataset size: {sizeOfDataset / 1E9:.1f}GB, total RAM size{totalRam / 1E9:.1f}GB','red'))
+            elif sizeOfDataset*7 > totalRam:
+                print(colored(f'Estimated buffer size is 10GB and it is larger than RAM capacity, set the batch-size value smaller','red'),colored(f'dataset size: {sizeOfDataset / 1E9:.1f}GB, total RAM size{totalRam / 1E9:.1f}GB','red'))
             else:
-                print(colored(f'datasets:', 'blue'),f'Using {cache_images} cache for large dataset ({len(self.img_files)} image files)')
+                print(colored(f'Dataset size: {sizeOfDataset / 1E9:.1f}GB, total RAM size{totalRam / 1E9:.1f}GB','green'))
             if cache_images == 'disk':
                 self.im_cache_dir = Path(Path(self.img_files[0]).parent.as_posix() + '_npy')
                 self.img_npy = [self.im_cache_dir / Path(f).with_suffix('.npy').name for f in self.img_files]
