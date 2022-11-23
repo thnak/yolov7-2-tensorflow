@@ -463,7 +463,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             elif sizeOfDataset*7 > totalRam:
                 print(colored(f'Estimated buffer size is 10GB and it is larger than RAM capacity, set the batch-size value smaller','red'),colored(f'dataset size: {sizeOfDataset / 1E9:.1f}GB, total RAM size{totalRam / 1E9:.1f}GB','red'))
             else:
-                print(colored(f'Dataset size: {sizeOfDataset / 1E9:.1f}GB, total RAM size{totalRam / 1E9:.1f}GB','green'))
+                print(colored(f'Dataset size: {sizeOfDataset / 1E9:.1f}GB, total RAM size {totalRam / 1E9:.1f}GB','green'))
             if cache_images == 'disk':
                 self.im_cache_dir = Path(Path(self.img_files[0]).parent.as_posix() + '_npy')
                 self.img_npy = [self.im_cache_dir / Path(f).with_suffix('.npy').name for f in self.img_files]
