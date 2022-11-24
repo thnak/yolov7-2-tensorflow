@@ -16,5 +16,9 @@
   <li><a href=""><img src='https://user-images.githubusercontent.com/117495750/202673299-5cb2884a-f746-42f6-9b6d-3d309790eaee.png'>Albumentations do more with less data</img></li>
     <li><a href="https://blog.csdn.net/qq_56591814/article/details/127172215?spm=1001.2101.3001.6650.3&utm_medium=distribute.pc_relevant.none-task-blog-2%7Edefault%7EYuanLiJiHua%7EPosition-3-127172215-blog-115369068.pc_relevant_default&depth_1-utm_source=distribute.pc_relevant.none-task-blog-2%7Edefault%7EYuanLiJiHua%7EPosition-3-127172215-blog-115369068.pc_relevant_default&utm_relevant_index=6">Phân tích siêu tham số</a></li>
     <li><a href="https://qiita.com/omiita/items/bfbba775597624056987">Sự ra đời và giải thích về hàm kích hoạt FReLU</a></li>
+    <li><a href="https://codelabs.developers.google.com/tensorflowjs-transfer-learning-teachable-machine#12">No name</a></li>
+    <li><a href="https://js.tensorflow.org/api/4.0.0/">TensorFlow JS document</a></li>
+    <li><a href="https://blog.tensorflow.org/2021/01/custom-object-detection-in-browser.html?_gl=1*nskhnx*_ga*MTYxODU4MzAzMS4xNjY2NTIwMzc2*_ga_W0YLR4190T*MTY2OTI2Mzk4NC4zLjEuMTY2OTI2Mzk5Ny4wLjAuMA..">Custom object detection in the browser using TensorFlow.js</a></li>
+  <li><a href="https://developer.mozilla.org/en-US/docs/Web/API/WebGL_API/By_example/Detect_WebGL">Detect WebGL<a/></li>
 </ul>
 </details>
