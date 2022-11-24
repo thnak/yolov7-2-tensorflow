@@ -18,5 +18,6 @@
     <li><a href="https://qiita.com/omiita/items/bfbba775597624056987">Sự ra đời và giải thích về hàm kích hoạt FReLU</a></li>
     <li><a href="https://codelabs.developers.google.com/tensorflowjs-transfer-learning-teachable-machine#12">No name</a></li>
     <li><a href="https://js.tensorflow.org/api/4.0.0/">TensorFlow JS document</a></li>
+    <li><a href="https://blog.tensorflow.org/2021/01/custom-object-detection-in-browser.html?_gl=1*nskhnx*_ga*MTYxODU4MzAzMS4xNjY2NTIwMzc2*_ga_W0YLR4190T*MTY2OTI2Mzk4NC4zLjEuMTY2OTI2Mzk5Ny4wLjAuMA..">Custom object detection in the browser using TensorFlow.js</a></li>
 </ul>
 </details>
