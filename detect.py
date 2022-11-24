@@ -6,7 +6,7 @@ import cv2
 import torch
 import torch.backends.cudnn as cudnn
 from numpy import random
-
+from termcolor import colored
 from models.experimental import attempt_load
 from utils.datasets import LoadStreams, LoadImages
 from utils.general import check_img_size, check_requirements, check_imshow, non_max_suppression, apply_classifier, \
@@ -28,10 +28,10 @@ def detect(save_img=False):
     # Initialize
     set_logging()
     device = select_device(opt.device)
-    # half = device.type != 'cpu'  # half precision only supported on CUDA
-    compute_capability = torch.cuda.get_device_capability(device=device)
-    print(f"compute_capability = {compute_capability} ")
-    half = (device.type != 'cpu') and (compute_capability[0] >= 7)  # half precision only supported on CUDA
+    half = device.type != 'cpu'  # half precision only supported on CUDA
+    # compute_capability = torch.cuda.get_device_capability(device=device)
+    # print(f"compute_capability = {compute_capability} ")
+    # half = (device.type != 'cpu') and (compute_capability[0] >= 7)  # half precision only supported on CUDA
     
     # Load model
     model = attempt_load(weights, map_location=device)  # load FP32 model
@@ -41,9 +41,9 @@ def detect(save_img=False):
     if trace:
         model = TracedModel(model, device, opt.img_size)
         
-    compute_capability = torch.cuda.get_device_capability(device=device)
-    print(f"compute_capability = {compute_capability} ")
-    half = device.type != 'cpu' and half and (compute_capability[0] >= 7)  # half precision only supported on CUDA
+    # compute_capability = torch.cuda.get_device_capability(device=device)
+    # print(f"compute_capability = {compute_capability} ")
+    # half = device.type != 'cpu' and half and (compute_capability[0] >= 7)  # half precision only supported on CUDA
     if half:
         model.half()  # to FP16
 
@@ -174,8 +174,8 @@ def detect(save_img=False):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--weights', nargs='+', type=str, default='yolov7.pt', help='model.pt path(s)')
-    parser.add_argument('--source', type=str, default='inference/images', help='source')  # file/folder, 0 for webcam
+    parser.add_argument('--weights', nargs='+', type=str, default='./models/yolov7.pt', help='model.pt path(s)')
+    parser.add_argument('--source', type=str, default='inference/images/arton122.jpg', help='source')  # file/folder, 0 for webcam
     parser.add_argument('--img-size', type=int, default=640, help='inference size (pixels)')
     parser.add_argument('--conf-thres', type=float, default=0.25, help='object confidence threshold')
     parser.add_argument('--iou-thres', type=float, default=0.45, help='IOU threshold for NMS')

@@ -1,4 +1,5 @@
 # this is my homework
+
 <div align="center">
   <h1>Trường Đại Hoc Giao Thông Vận Tải<br>Phân Hiệu Tại TP. Hồ Chí Minh</h1>
 </div>
@@ -19,6 +20,7 @@
     <li><a href="https://codelabs.developers.google.com/tensorflowjs-transfer-learning-teachable-machine#12">No name</a></li>
     <li><a href="https://js.tensorflow.org/api/4.0.0/">TensorFlow JS document</a></li>
     <li><a href="https://blog.tensorflow.org/2021/01/custom-object-detection-in-browser.html?_gl=1*nskhnx*_ga*MTYxODU4MzAzMS4xNjY2NTIwMzc2*_ga_W0YLR4190T*MTY2OTI2Mzk4NC4zLjEuMTY2OTI2Mzk5Ny4wLjAuMA..">Custom object detection in the browser using TensorFlow.js</a></li>
-  <li><a href="https://developer.mozilla.org/en-US/docs/Web/API/WebGL_API/By_example/Detect_WebGL">Detect WebGL<a/></li>
+  <li><a href="https://developer.mozilla.org/en-US/docs/Web/API/WebGL_API/By_example/Detect_WebGL">Detect WebGL</a></li>
+  <li><a href="https://pureadmin.qub.ac.uk/ws/portalfiles/portal/258394935/Deep.pdf">Automated Individual Pig Localisation Tracking and Behaviour Metric Extraction Using Deep Learning</a></li>
 </ul>
 </details>

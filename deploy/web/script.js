@@ -59,12 +59,9 @@ let predict = false;
  * Loads the MobileNet model and warms it up so ready for use.
  **/
 async function loadMobileNetFeatureModel() {
-    const URL =
-        'https://tfhub.dev/google/tfjs-model/imagenet/mobilenet_v3_large_100_224/feature_vector/5/default/1';
-
-    mobilenet = await tf.loadGraphModel(URL, { fromTFHub: true });
+    const URL ='./model/model.json';
+    mobilenet = await tf.loadGraphModel(URL, { fromTFHub: false });
     STATUS.innerText = 'MobileNet v3 loaded successfully!';
-
     // Warm up the model by passing zeros through it once.
     tf.tidy(function () {
         let answer = mobilenet.predict(tf.zeros([1, MOBILE_NET_INPUT_HEIGHT, MOBILE_NET_INPUT_WIDTH, 3]));
@@ -78,7 +75,7 @@ loadMobileNetFeatureModel();
 
 
 let model = tf.sequential();
-model.add(tf.layers.dense({ inputShape: [1280], units: 128, activation: 'relu' }));
+model.add(tf.layers.dense({ inputShape: [1024], units: 128, activation: 'relu' }));
 model.add(tf.layers.dense({ units: CLASS_NAMES.length, activation: 'softmax' }));
 
 model.summary();
@@ -181,6 +178,7 @@ function dataGatherLoop() {
             MOBILE_NET_INPUT_WIDTH], true);
   
         let imageFeatures = mobilenet.predict(resizedTensorFrame.expandDims());
+        console.log(imageFeatures)
         let prediction = model.predict(imageFeatures).squeeze();
         let highestIndex = prediction.argMax().arraySync();
         let predictionArray = prediction.arraySync();

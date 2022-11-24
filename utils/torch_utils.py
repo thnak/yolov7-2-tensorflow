@@ -10,7 +10,7 @@ import time
 from contextlib import contextmanager
 from copy import deepcopy
 from pathlib import Path
-
+from termcolor import colored
 import torch
 import torch.backends.cudnn as cudnn
 import torch.nn as nn
@@ -219,9 +219,9 @@ def model_info(model, verbose=False, img_size=640):
         flops = profile(deepcopy(model), inputs=(img,), verbose=False)[0] / 1E9 * 2  # stride GFLOPS
         img_size = img_size if isinstance(img_size, list) else [img_size, img_size]  # expand if int/float
         fs = ', %.3f GFLOPS' % (flops * img_size[0] / stride * img_size[1] / stride)  # 640x640 GFLOPS
-    except (ImportError, Exception):
+    except Exception as ex:
         fs = '? GFLOPS'
-        print("pip install thop to compute model'Gflops")
+        print(colored(f"pip install thop to compute model'Gflops {ex}",'red'))
 
     logger.info(f"Model Summary: {len(list(model.modules()))} layers, {n_p} parameters, {n_g} gradients {fs}")
 
