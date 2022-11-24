@@ -176,7 +176,7 @@ class ConfusionMatrix:
                        yticklabels=names + ['background FN'] if labels else "auto").set_facecolor((1, 1, 1))
             fig.axes[0].set_xlabel('True')
             fig.axes[0].set_ylabel('Predicted')
-            fig.savefig(Path(save_dir) / 'confusion_matrix.png', dpi=250)
+            fig.savefig(Path(save_dir) / 'confusion_matrix.png', dpi=300)
         except Exception as e:
             pass
 
@@ -204,7 +204,7 @@ def plot_pr_curve(px, py, ap, save_dir='pr_curve.png', names=()):
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
     plt.legend(bbox_to_anchor=(1.04, 1), loc="upper left")
-    fig.savefig(Path(save_dir), dpi=250)
+    fig.savefig(Path(save_dir), dpi=300)
 
 
 def plot_mc_curve(px, py, save_dir='mc_curve.png', names=(), xlabel='Confidence', ylabel='Metric'):
@@ -224,4 +224,4 @@ def plot_mc_curve(px, py, save_dir='mc_curve.png', names=(), xlabel='Confidence'
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
     plt.legend(bbox_to_anchor=(1.04, 1), loc="upper left")
-    fig.savefig(Path(save_dir), dpi=250)
+    fig.savefig(Path(save_dir), dpi=300)

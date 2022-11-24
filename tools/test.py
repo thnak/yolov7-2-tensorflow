@@ -172,7 +172,7 @@ def test(data,
                 for p, b in zip(pred.tolist(), box.tolist()):
                     jdict.append({'image_id': image_id,
                                   'category_id': coco91class[int(p[5])] if is_coco else int(p[5]),
-                                  'bbox': [round(x, 3) for x in b],
+                                  'bbox': [round(x, 5) for x in b],
                                   'score': round(p[4], 5)})
 
             # Assign all predictions as incorrect

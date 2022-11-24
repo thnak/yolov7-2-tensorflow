@@ -346,7 +346,7 @@ class TracedModel(nn.Module):
     def __init__(self, model=None, device=None, img_size=(640,640)): 
         super(TracedModel, self).__init__()
         
-        print(" Convert model to Traced-model... ") 
+        print("Convert model to Traced-model... ") 
         self.stride = model.stride
         self.names = model.names
         self.model = model
@@ -363,11 +363,11 @@ class TracedModel(nn.Module):
         traced_script_module = torch.jit.trace(self.model, rand_example, strict=False)
         #traced_script_module = torch.jit.script(self.model)
         traced_script_module.save("traced_model.pt")
-        print(" traced_script_module saved! ")
+        print("traced_script_module saved! ")
         self.model = traced_script_module
         self.model.to(device)
         self.detect_layer.to(device)
-        print(" model is traced! \n") 
+        print("model is traced! \n") 
 
     def forward(self, x, augment=False, profile=False):
         out = self.model(x)
