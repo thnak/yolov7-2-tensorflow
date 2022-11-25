@@ -343,7 +343,7 @@ def revert_sync_batchnorm(module):
 
 class TracedModel(nn.Module):
 
-    def __init__(self, model=None, device=None, img_size=(640,640)): 
+    def __init__(self, model=None, device=None, img_size=(640,640),saveTrace=False): 
         super(TracedModel, self).__init__()
         
         print("Convert model to Traced-model... ") 
@@ -362,7 +362,8 @@ class TracedModel(nn.Module):
         
         traced_script_module = torch.jit.trace(self.model, rand_example, strict=False)
         #traced_script_module = torch.jit.script(self.model)
-        traced_script_module.save("traced_model.pt")
+        if saveTrace:
+            traced_script_module.save("traced_model.pt")
         print("traced_script_module saved! ")
         self.model = traced_script_module
         self.model.to(device)

@@ -29,9 +29,6 @@ def detect(save_img=False):
     set_logging()
     device = select_device(opt.device)
     half = device.type != 'cpu'  # half precision only supported on CUDA
-    # compute_capability = torch.cuda.get_device_capability(device=device)
-    # print(f"compute_capability = {compute_capability} ")
-    # half = (device.type != 'cpu') and (compute_capability[0] >= 7)  # half precision only supported on CUDA
     
     # Load model
     model = attempt_load(weights, map_location=device)  # load FP32 model
@@ -39,13 +36,11 @@ def detect(save_img=False):
     imgsz = check_img_size(imgsz, s=stride)  # check img_size
 
     if trace:
-        model = TracedModel(model, device, opt.img_size)
+        model = TracedModel(model=model,device=device,img_size=imgsz,saveTrace=False)
         
-    # compute_capability = torch.cuda.get_device_capability(device=device)
-    # print(f"compute_capability = {compute_capability} ")
-    # half = device.type != 'cpu' and half and (compute_capability[0] >= 7)  # half precision only supported on CUDA
     if half:
         model.half()  # to FP16
+        
 
     # Second-stage classifier
     classify = False
@@ -56,11 +51,7 @@ def detect(save_img=False):
     # Set Dataloader
     vid_path, vid_writer = None, None
     if webcam:
-        try:
-            view_img = check_imshow()
-        except Exception as ex:
-            view_img = False
-            print(f'Error: {ex}')
+        view_img = check_imshow()
         cudnn.benchmark = True  # set True to speed up constant image size inference
         dataset = LoadStreams(source, img_size=imgsz, stride=stride)
     else:
@@ -96,6 +87,7 @@ def detect(save_img=False):
         t1 = time_synchronized()
         with torch.no_grad():   # Calculating gradients would cause a GPU memory leak
             pred = model(img, augment=opt.augment)[0]
+            
         t2 = time_synchronized()
 
         # Apply NMS
