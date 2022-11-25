@@ -150,8 +150,8 @@ def detect(save_img=False):
                 if dataset.mode == 'image':
                     cv2.imwrite(save_path, im0)
                     print(f"The image with the result is saved in: {save_path}")
-                    from IPython.display import Image
-                    Image(filename=save_path,width=500, height=500)
+                    from PIL import Image
+                    Image.open(save_path)
                 else:  # 'video' or 'stream'
                     if vid_path != save_path:  # new video
                         vid_path = save_path
