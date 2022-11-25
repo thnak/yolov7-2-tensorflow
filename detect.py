@@ -56,7 +56,11 @@ def detect(save_img=False):
     # Set Dataloader
     vid_path, vid_writer = None, None
     if webcam:
-        view_img = check_imshow()
+        try:
+            view_img = check_imshow()
+        except Exception as ex:
+            view_img = False
+            print(f'Error: {ex}')
         cudnn.benchmark = True  # set True to speed up constant image size inference
         dataset = LoadStreams(source, img_size=imgsz, stride=stride)
     else:
@@ -139,7 +143,6 @@ def detect(save_img=False):
 
             # Stream results
             if view_img:
-                # im0 = cv2.resize(im0,None,fx=0.3,fy=0.3)
                 cv2.namedWindow(str(p),cv2.WINDOW_NORMAL)
                 cv2.imshow(str(p), im0)
                 if cv2.waitKey(1) == 27: 
@@ -166,10 +169,12 @@ def detect(save_img=False):
                             save_path += '.mp4'
                         vid_writer = cv2.VideoWriter(save_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (w, h))
                     vid_writer.write(im0)
+                    from PIL import Image
+                    Image.fromarray(im0)
 
     if save_txt or save_img:
         s = f"\n{len(list(save_dir.glob('labels/*.txt')))} labels saved to {save_dir / 'labels'}" if save_txt else ''
-        #print(f"Results saved to {save_dir}{s}")
+        print(f"Results saved to {save_dir}{s}")
 
     print(f'Done. ({time.time() - t0:.3f}s)')
 
@@ -177,7 +182,7 @@ def detect(save_img=False):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--weights', nargs='+', type=str, default='./models/yolov7.pt', help='model.pt path(s)')
-    parser.add_argument('--source', type=str, default='inference/images/arton122.jpg', help='source')  # file/folder, 0 for webcam
+    parser.add_argument('--source', type=str, default='inference/images/', help='source')  # file/folder, 0 for webcam
     parser.add_argument('--img-size', type=int, default=640, help='inference size (pixels)')
     parser.add_argument('--conf-thres', type=float, default=0.25, help='object confidence threshold')
     parser.add_argument('--iou-thres', type=float, default=0.45, help='IOU threshold for NMS')
@@ -201,8 +206,8 @@ if __name__ == '__main__':
 
     with torch.no_grad():
         if opt.update:  # update all models (to fix SourceChangeWarning)
-            # for opt.weights in ['yolov7.pt']:
+            for _ in opt.weights:
                 detect()
-                strip_optimizer(opt.weights)
+                strip_optimizer(_)
         else:
             detect()
