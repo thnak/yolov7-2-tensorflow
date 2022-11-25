@@ -1,5 +1,3 @@
-# Plotting utils
-
 import glob
 import math
 import os
