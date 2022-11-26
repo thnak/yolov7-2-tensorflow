@@ -13,7 +13,8 @@ torchvision>=0.8.1,!=0.13.0
 tqdm>=4.41.0
 protobuf<4.21.3
 simple_image_download==0.4
-
+pycuda
+tensorrt
 # Logging -------------------------------------
 tensorboard>=2.4.1
 wandb
