@@ -13,8 +13,8 @@ from utils.general import check_img_size, check_requirements, check_imshow, non_
     scale_coords, xyxy2xywh, strip_optimizer, set_logging, increment_path
 from utils.plots import plot_one_box
 from utils.torch_utils import select_device, load_classifier, time_synchronized, TracedModel
-
-
+import subprocess
+import shlex
 def detect(save_img=False):
     source, weights, view_img, save_txt, imgsz, trace = opt.source, opt.weights, opt.view_img, opt.save_txt, opt.img_size, not opt.no_trace
     save_img = not opt.nosave and not source.endswith('.txt')  # save inference images
@@ -154,6 +154,9 @@ def detect(save_img=False):
                         vid_path = save_path
                         if isinstance(vid_writer, cv2.VideoWriter):
                             vid_writer.release()  # release previous video writer
+                            process.stdin.close()
+                            process.wait()
+                            process.terminate()
                         if vid_cap:  # video
                             fps = vid_cap.get(cv2.CAP_PROP_FPS)
                             w = int(vid_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -161,9 +164,10 @@ def detect(save_img=False):
                         else:  # stream
                             fps, w, h = 30, im0.shape[1], im0.shape[0]
                             save_path += '.mp4'
-                        vid_writer = cv2.VideoWriter(save_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (w, h))
-                        print(f'backend quality: {vid_writer.set(cv2.VIDEOWRITER_PROP_QUALITY,75)}')
-                    vid_writer.write(im0)
+                        # vid_writer = cv2.VideoWriter(save_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (w, h))
+                        process = subprocess.Popen((f'C:/ffmpeg/bin/ffmpeg.exe -y -s {w}x{h} -pixel_format bgr24 -f rawvideo -r {fps} -i pipe: -vcodec hevc_amf -pix_fmt yuv420p -crf 24 {save_path}'), stdin=subprocess.PIPE)
+                    process.stdin.write(im0.tobytes())
+                    # vid_writer.write(im0)
                     
 
     if save_txt or save_img:
@@ -194,7 +198,6 @@ if __name__ == '__main__':
     parser.add_argument('--exist-ok', action='store_true', help='existing project/name ok, do not increment')
     parser.add_argument('--no-trace', action='store_true', help='don`t trace model')
     opt = parser.parse_args()
-    print(opt)
     with torch.no_grad():
         if opt.update:  # update all models (to fix SourceChangeWarning)
             for _ in opt.weights:

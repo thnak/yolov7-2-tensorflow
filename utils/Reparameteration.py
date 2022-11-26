@@ -56,7 +56,6 @@ def Re_parameterization(inputWeightPath='v7-tiny-training.pt', outputWeightPath 
         model.nc = ckpt['model'].nc
         
         if cfgPath in 'cfg/deploy/yolov7-tiny.yaml' or cfgPath in 'cfg/deploy/yolov7-tiny-silu.yaml' or cfgPath in 'cfg/deploy/yolov7.yaml' or cfgPath  in  'cfg/deploy/yolov7x.yaml':
-        # reparametrized YOLOR
             for i in range((model.nc+5)*anchors):
                 model.state_dict()['model.'+total_+'.m.0.weight'].data[i, :, :, :] *= state_dict['model.'+total_+'.im.0.implicit'].data[:, i, : :].squeeze()
                 model.state_dict()['model.'+total_+'.m.1.weight'].data[i, :, :, :] *= state_dict['model.'+total_+'.im.1.implicit'].data[:, i, : :].squeeze()
@@ -86,7 +85,6 @@ def Re_parameterization(inputWeightPath='v7-tiny-training.pt', outputWeightPath 
             model.state_dict()['model.{}.m.2.bias'.format(idx)].data += state_dict['model.{}.m.2.bias'.format(idx2)].data
             model.state_dict()['model.{}.m.3.bias'.format(idx)].data += state_dict['model.{}.m.3.bias'.format(idx2)].data
 
-            # reparametrized YOLOR
             for i in range((model.nc+5)*anchors):
                 model.state_dict()['model.{}.m.0.weight'.format(idx)].data[i, :, :, :] *= state_dict['model.{}.im.0.implicit'.format(idx2)].data[:, i, : :].squeeze()
                 model.state_dict()['model.{}.m.1.weight'.format(idx)].data[i, :, :, :] *= state_dict['model.{}.im.1.implicit'.format(idx2)].data[:, i, : :].squeeze()
@@ -113,4 +111,3 @@ def Re_parameterization(inputWeightPath='v7-tiny-training.pt', outputWeightPath 
         print('the arguments is not compatible')
         return False
     
-# Re_parameterization()
