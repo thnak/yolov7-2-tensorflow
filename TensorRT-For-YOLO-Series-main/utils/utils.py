@@ -3,7 +3,8 @@ import pycuda.autoinit
 import pycuda.driver as cuda
 import numpy as np
 import cv2
-
+import os
+import time
 
 class BaseEngine(object):
     def __init__(self, engine_path, imgsz=(640,640)):
@@ -60,15 +61,16 @@ class BaseEngine(object):
         data = [out['host'] for out in self.outputs]
         return data
     
-    def detect_video(self, video_path, conf=0.5, end2end=False):
+    def detect_video(self, video_path, video_outputPath='', conf=0.5, end2end=False):
+        video_outputPath = os.path.join(video_outputPath,'results2.avi')
         cap = cv2.VideoCapture(video_path)
         fourcc = cv2.VideoWriter_fourcc(*'XVID')
         fps = int(round(cap.get(cv2.CAP_PROP_FPS)))
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        out = cv2.VideoWriter('results.avi',fourcc,fps,(width,height))
+        out = cv2.VideoWriter(video_outputPath,fourcc,fps,(width,height))
         fps = 0
-        import time
+        timeStart = time.time()
         while True:
             ret, frame = cap.read()
             if not ret:
@@ -99,6 +101,7 @@ class BaseEngine(object):
         out.release()
         cap.release()
         cv2.destroyAllWindows()
+        print(f'Finished! save at {video_outputPath}, {round(time.time() - timeStart, 2)} second')
 
     def inference(self, img_path, conf=0.5, end2end=False):
         origin_img = cv2.imread(img_path)
@@ -134,7 +137,6 @@ class BaseEngine(object):
     
     def get_fps(self):
         # warmup
-        import time
         img = np.ones((1,3,self.imgsz[0], self.imgsz[1]))
         img = np.ascontiguousarray(img, dtype=np.float32)
         for _ in range(20):
@@ -324,21 +326,21 @@ def vis(img, boxes, scores, cls_ids, conf=0.5, class_names=None):
         y1 = int(box[3])
 
         color = (_COLORS[cls_id] * 255).astype(np.uint8).tolist()
-        text = '{}:{:.1f}%'.format(class_names[cls_id], score * 100)
-        txt_color = (0, 0, 0) if np.mean(_COLORS[cls_id]) > 0.5 else (255, 255, 255)
-        font = cv2.FONT_HERSHEY_SIMPLEX
-
-        txt_size = cv2.getTextSize(text, font, 0.4, 1)[0]
-        cv2.rectangle(img, (x0, y0), (x1, y1), color, 2)
-
+        text = '{}:{:.2f}'.format(class_names[cls_id], score)
         txt_bk_color = (_COLORS[cls_id] * 255 * 0.7).astype(np.uint8).tolist()
-        cv2.rectangle(
-            img,
-            (x0, y0 + 1),
-            (x0 + txt_size[0] + 1, y0 + int(1.5 * txt_size[1])),
-            txt_bk_color,
-            -1
-        )
-        cv2.putText(img, text, (x0, y0 + txt_size[1]), font, 0.4, txt_color, thickness=1)
+        txt_color = (0, 0, 0) if np.mean(_COLORS[cls_id]) > 0.5 else (255, 255, 255)
+        
+        txt_size = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.4, 1)[0]
+        cv2.rectangle(img, (x0, y0), (x1, y1), color, 2)
+        
+        c1, c2 = (x0, y0), (x1, y1)
+        c2 = c1[0] + txt_size[0], c1[1] - txt_size[1] - 3
+        cv2.drawContours(img, [np.array([(c1[0] + txt_size[0], c1[1] - txt_size[1] - 3), (c1[0] + txt_size[0], c1[1] ), (c1[0] + txt_size[0] + txt_size[1] + 3, c1[1])])], 0, color, -1, 16)
+        
+        cv2.rectangle(img, c1, c2, txt_bk_color, -1, cv2.LINE_AA)  # filled
+        
+        # cv2.rectangle(img,(x0, y0 + 1),(x0 + txt_size[0] + 1, y0 + int(1.5 * txt_size[1])),txt_bk_color,-1)
+        cv2.putText(img, text, (c1[0], c1[1] - 2), 0, 0.4, txt_color, thickness=1, lineType=cv2.LINE_AA)
+        # cv2.putText(img, text, (x0, y0 + txt_size[1]), cv2.FONT_HERSHEY_SIMPLEX, 0.4, txt_color, thickness=1)
 
     return img

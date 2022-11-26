@@ -44,16 +44,24 @@ def detect(save_img=False):
         model.half()  # to FP16
     mySys = platform.uname()
     osType = mySys.system
-    from utils.ffmpeg_ import getGPUtype
-    if torch.cuda.is_available():
-        vidCodec = 'hevc_nvenc'
-    elif osType == 'Windows' and 'AMD' in str(getGPUtype()):
-        vidCodec = 'hevc_amf'
-    elif osType == 'Linux' and 'AMD' in str(getGPUtype()):
-        vidCodec = 'hevc_vaapi'
-    else:
-        vidCodec = 'libx264'
-    print(f'Using video codec: {vidCodec}, os: {osType}, gpu: {str(getGPUtype())}')
+    try:    
+        from utils.ffmpeg_ import getGPUtype
+        if torch.cuda.is_available():
+            vidCodec = 'hevc_nvenc'
+        elif osType == 'Windows' and 'AMD' in str(getGPUtype()):
+            vidCodec = 'hevc_amf'
+        elif osType == 'Linux' and 'AMD' in str(getGPUtype()):
+            vidCodec = 'hevc_vaapi'
+        else:
+            vidCodec = 'libx264'
+        print(f'Using video codec: {vidCodec}, os: {osType}, gpu: {str(getGPUtype())}')
+    except:
+        if torch.cuda.is_available():
+            vidCodec = 'hevc_nvenc'
+        else:
+            vidCodec = 'libx264'
+        print(f'Using video codec: {vidCodec}, os: {osType}, gpu: '+ 'Nvidia' if torch.cuda.is_available() else 'Unknown')
+    
     # Second-stage classifier
     classify = False
     if classify:
