@@ -1,7 +1,7 @@
 import argparse
 import time
 from pathlib import Path
-
+from PIL import Image
 import cv2
 import torch
 import torch.backends.cudnn as cudnn
@@ -51,7 +51,6 @@ def detect(save_img=False):
     # Set Dataloader
     vid_path, vid_writer = None, None
     if webcam:
-        view_img = check_imshow()
         cudnn.benchmark = True  # set True to speed up constant image size inference
         dataset = LoadStreams(source, img_size=imgsz, stride=stride)
     else:
@@ -135,18 +134,21 @@ def detect(save_img=False):
 
             # Stream results
             if view_img:
-                cv2.namedWindow(str(p),cv2.WINDOW_NORMAL)
-                cv2.imshow(str(p), im0)
-                if cv2.waitKey(1) == 27: 
-                 break
+                if dataset.mode == 'image':
+                    im0 = cv2.cvtColor(im0,cv2.COLOR_BGR2RGB)
+                    Image.fromarray(im0, mode='RGB').show()
+                else:
+                    cv2.namedWindow(str(p),cv2.WINDOW_NORMAL)
+                    cv2.imshow(str(p), im0)
+                    if cv2.waitKey(1) == 27: 
+                        break
+             
 
             # Save results (image with detections)
             if save_img:
                 if dataset.mode == 'image':
                     cv2.imwrite(save_path, im0)
                     print(f"The image with the result is saved in: {save_path}")
-                    from PIL import Image
-                    Image.open(save_path)
                 else:  # 'video' or 'stream'
                     if vid_path != save_path:  # new video
                         vid_path = save_path
@@ -160,9 +162,9 @@ def detect(save_img=False):
                             fps, w, h = 30, im0.shape[1], im0.shape[0]
                             save_path += '.mp4'
                         vid_writer = cv2.VideoWriter(save_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (w, h))
+                        print(f'backend quality: {vid_writer.set(cv2.VIDEOWRITER_PROP_QUALITY,75)}')
                     vid_writer.write(im0)
-                    from PIL import Image
-                    Image.fromarray(im0)
+                    
 
     if save_txt or save_img:
         s = f"\n{len(list(save_dir.glob('labels/*.txt')))} labels saved to {save_dir / 'labels'}" if save_txt else ''
@@ -193,9 +195,6 @@ if __name__ == '__main__':
     parser.add_argument('--no-trace', action='store_true', help='don`t trace model')
     opt = parser.parse_args()
     print(opt)
-    
-    #check_requirements(exclude=('pycocotools', 'thop'))
-
     with torch.no_grad():
         if opt.update:  # update all models (to fix SourceChangeWarning)
             for _ in opt.weights:
