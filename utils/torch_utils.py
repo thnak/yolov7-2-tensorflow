@@ -61,7 +61,10 @@ def git_describe(path=Path(__file__).parent):  # path must be a directory
 
 
 def select_device(device='', batch_size=None):
-    # device = 'cpu' or '0' or '0,1,2,3'
+    if torch.cuda.is_available():
+        device = device if device.isnumeric() and device >= 0 and device < torch.cuda.device_count() else 'cpu'
+    else:
+        device = 'cpu'   
     s = f'YOLOv7 🚀 {git_describe() or date_modified()} torch {torch.__version__} '  # string
     cpu = device.lower() == 'cpu'
     if cpu:
@@ -83,7 +86,7 @@ def select_device(device='', batch_size=None):
         s += 'CPU\n'
 
     logger.info(s.encode().decode('ascii', 'ignore') if platform.system() == 'Windows' else s)  # emoji-safe
-    return torch.device('cuda:0' if cuda else 'cpu')
+    return torch.device(f'cuda:{device}' if cuda else 'cpu')
 
 
 def time_synchronized():

@@ -15,6 +15,8 @@ from utils.plots import plot_one_box
 from utils.torch_utils import select_device, load_classifier, time_synchronized, TracedModel
 import subprocess
 import shlex
+import platform
+
 def detect(save_img=False):
     source, weights, view_img, save_txt, imgsz, trace = opt.source, opt.weights, opt.view_img, opt.save_txt, opt.img_size, not opt.no_trace
     save_img = not opt.nosave and not source.endswith('.txt')  # save inference images
@@ -40,8 +42,18 @@ def detect(save_img=False):
         
     if half:
         model.half()  # to FP16
-        
-
+    mySys = platform.uname()
+    osType = mySys.system
+    from utils.ffmpeg_ import getGPUtype
+    if torch.cuda.is_available():
+        vidCodec = 'hevc_nvenc'
+    elif osType == 'Windows' and 'AMD' in str(getGPUtype()):
+        vidCodec = 'hevc_amf'
+    elif osType == 'Linux' and 'AMD' in str(getGPUtype()):
+        vidCodec = 'hevc_vaapi'
+    else:
+        vidCodec = 'libx264'
+    print(f'Using video codec: {vidCodec}, os: {osType}, gpu: {str(getGPUtype())}')
     # Second-stage classifier
     classify = False
     if classify:
@@ -165,7 +177,7 @@ def detect(save_img=False):
                             fps, w, h = 30, im0.shape[1], im0.shape[0]
                             save_path += '.mp4'
                         # vid_writer = cv2.VideoWriter(save_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (w, h))
-                        process = subprocess.Popen((f'C:/ffmpeg/bin/ffmpeg.exe -y -s {w}x{h} -pixel_format bgr24 -f rawvideo -r {fps} -i pipe: -vcodec hevc_amf -pix_fmt yuv420p -crf 24 {save_path}'), stdin=subprocess.PIPE)
+                        process = subprocess.Popen(shlex.split(f'ffmpeg -y -s {w}x{h} -pixel_format bgr24 -f rawvideo -r {fps} -i pipe: -vcodec {vidCodec} -pix_fmt yuv420p -crf 24')+[save_path], stdin=subprocess.PIPE)
                     process.stdin.write(im0.tobytes())
                     # vid_writer.write(im0)
                     
