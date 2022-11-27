@@ -61,14 +61,15 @@ class BaseEngine(object):
         data = [out['host'] for out in self.outputs]
         return data
     
-    def detect_video(self, video_path, video_outputPath='', conf=0.5, end2end=False):
+    def detect_video(self, video_path, video_outputPath='', conf=0.5, end2end=False, noSave=True):
         video_outputPath = os.path.join(video_outputPath,'results2.avi')
         cap = cv2.VideoCapture(video_path)
         fourcc = cv2.VideoWriter_fourcc(*'XVID')
         fps = int(round(cap.get(cv2.CAP_PROP_FPS)))
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        out = cv2.VideoWriter(video_outputPath,fourcc,fps,(width,height))
+        if not noSave:
+            out = cv2.VideoWriter(video_outputPath,fourcc,fps,(width,height))
         fps = 0
         timeStart = time.time()
         while True:
@@ -79,8 +80,10 @@ class BaseEngine(object):
             t1 = time.time()
             data = self.infer(blob)
             fps = (fps + (1. / (time.time() - t1))) / 2
+            
             frame = cv2.putText(frame, "FPS:%d " %fps, (0, 40), cv2.FONT_HERSHEY_SIMPLEX, 1,
                                 (0, 0, 255), 2)
+            t2 = time.time()
             if end2end:
                 num, final_boxes, final_scores, final_cls_inds = data
                 final_boxes = np.reshape(final_boxes/ratio, (-1, 4))
@@ -88,19 +91,16 @@ class BaseEngine(object):
             else:
                 predictions = np.reshape(data, (1, -1, int(5+self.n_classes)))[0]
                 dets = self.postprocess(predictions,ratio)
-
+    
+            print(f'FPS: {fps}, '+'nms:' if end2end else 'postprocess:'+f' {time.time() - t2}')
             if dets is not None:
-                final_boxes, final_scores, final_cls_inds = dets[:,
-                                                                :4], dets[:, 4], dets[:, 5]
-                frame = vis(frame, final_boxes, final_scores, final_cls_inds,
-                                conf=conf, class_names=self.class_names)
-            cv2.imshow('frame', frame)
-            out.write(frame)
-            if cv2.waitKey(25) & 0xFF == ord('q'):
-                break
-        out.release()
+                final_boxes, final_scores, final_cls_inds = dets[:,:4], dets[:, 4], dets[:, 5]
+                frame = vis(frame, final_boxes, final_scores, final_cls_inds,conf=conf, class_names=self.class_names)
+            if not noSave:
+                out.write(frame)
+        if not noSave:
+            out.release()
         cap.release()
-        cv2.destroyAllWindows()
         print(f'Finished! save at {video_outputPath}, {round(time.time() - timeStart, 2)} second')
 
     def inference(self, img_path, conf=0.5, end2end=False):
