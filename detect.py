@@ -87,6 +87,7 @@ def detect(save_img=False):
     old_img_b = 1
 
     t0 = time.time()
+    avgTime = [[],[]]
     for path, img, im0s, vid_cap in dataset:
         img = torch.from_numpy(img).to(device)
         img = img.half() if half else img.float()  # uint8 to fp16/32
@@ -150,7 +151,11 @@ def detect(save_img=False):
                         plot_one_box(xyxy, im0, label=label, color=colors[int(cls)], line_thickness=1)
 
             # Print time (inference + NMS)
-            print(f'{s}Done. ({(1E3 * (t2 - t1)):.1f}ms) Inference, ({(1E3 * (t3 - t2)):.1f}ms) NMS')
+            tmInf = round(1E3 * (t2 - t1),3)
+            tmNms = round(1E3 * (t3 - t2),3)
+            avgTime[0].append(tmInf)
+            avgTime[1].append(tmNms)
+            print(f'{s}Done. ({tmInf}ms) Inference, ({tmNms}ms) NMS')
 
             # Stream results
             if view_img:
@@ -194,7 +199,7 @@ def detect(save_img=False):
         s = f"\n{len(list(save_dir.glob('labels/*.txt')))} labels saved to {save_dir / 'labels'}" if save_txt else ''
         print(f"Results saved to {save_dir}{s}")
 
-    print(f'Done. ({time.time() - t0:.3f}s)')
+    print(f'Done. ({time.time() - t0:.3f}s), avgInference {round(sum(avgTime[0])/len(avgTime[0]),3)}ms, avgNMS {round(sum(avgTime[1])/len(avgTime[1]),3)}ms')
 
 
 if __name__ == '__main__':
