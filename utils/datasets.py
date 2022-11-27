@@ -449,26 +449,30 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
 
         # Cache images into memory for faster training (WARNING: large datasets may exceed system RAM)
         self.imgs = [None] * n
+        sizeOfDataset = 0
+        totalRam = psutil.virtual_memory()[0]
+        freeSpace = psutil.disk_usage('/')[2]          
+        for file_i in self.img_files:
+            try:
+                sizeOfDataset += os.path.getsize(file_i)
+            except  Exception as ex:
+                pass        
+        if sizeOfDataset > totalRam or sizeOfDataset*7 > totalRam:
+            print(colored(f'Datasets:','blue',attrs='bold'),colored(f'The dataset is larger than Total RAM, the program may be interrupted unexpectedly','red'),colored(f'dataset size: {sizeOfDataset / 1E9:.1f}GB, total RAM size{totalRam / 1E9:.1f}GB','red'))
+            print(colored(f'Datasets:','blue',attrs='bold'),colored(f'size: {sizeOfDataset / 1E9:.1f}GB. Estimated buffer size is {sizeOfDataset*7 / 1E9:.1f}GB','red'),colored(f'dataset size: {sizeOfDataset / 1E9:.1f}GB, total RAM size{totalRam / 1E9:.1f}GB','red'))
+            cache_images = 'disk'
+            if sizeOfDataset*7 > freeSpace:
+                cache_images = None
+                print(colored('Datasets:','blue',attrs='bold'),'not using cache, not enough disk space')            
+        else:
+            print(colored(f'Datasets:','blue',attrs='bold'),colored(f'size: {sizeOfDataset / 1E9:.1f}GB, total RAM size {totalRam / 1E9:.1f}GB','green'))
+            cache_images = 'ram'     
+                       
         if cache_images:
-            sizeOfDataset = 0
-            totalRam = psutil.virtual_memory()[0]
-            for file_i in self.img_files:
-                try:
-                    sizeOfDataset += os.path.getsize(file_i)
-                except  Exception as ex:
-                    print(colored(f'{ex}','red'))
-            
-            if sizeOfDataset > totalRam:
-                print(colored(f'The dataset is larger than Total RAM, the program may be interrupted unexpectedly','red'),colored(f'dataset size: {sizeOfDataset / 1E9:.1f}GB, total RAM size{totalRam / 1E9:.1f}GB','red'))
-            elif sizeOfDataset*7 > totalRam:
-                print(colored(f'Estimated buffer size is 10GB and it is larger than RAM capacity, set the batch-size value smaller','red'),colored(f'dataset size: {sizeOfDataset / 1E9:.1f}GB, total RAM size{totalRam / 1E9:.1f}GB','red'))
-            else:
-                print(colored(f'Dataset size: {sizeOfDataset / 1E9:.1f}GB, total RAM size {totalRam / 1E9:.1f}GB','green'))
             if cache_images == 'disk':
                 self.im_cache_dir = Path(Path(self.img_files[0]).parent.as_posix() + '_npy')
                 self.img_npy = [self.im_cache_dir / Path(f).with_suffix('.npy').name for f in self.img_files]
                 self.im_cache_dir.mkdir(parents=True, exist_ok=True)
-                
             gb = 0  # Gigabytes of cached images
             self.img_hw0, self.img_hw = [None] * n, [None] * n
             results = ThreadPool(8).imap(lambda x: load_image(*x), zip(repeat(self), range(n)))
@@ -481,7 +485,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                 else:
                     self.imgs[i], self.img_hw0[i], self.img_hw[i] = x
                     gb += self.imgs[i].nbytes
-                pbar.desc = f'{prefix}Caching images ({gb / 1E9:.1f}GB)'
+                pbar.desc = f'{prefix}Caching images ({gb / 1E9:.1f}GB '+'RAM' if cache_images != 'Disk' else 'disk'+')'
             pbar.close()
 
     def cache_labels(self, path=Path('./labels.cache'), prefix=''):
