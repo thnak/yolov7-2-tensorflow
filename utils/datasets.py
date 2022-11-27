@@ -364,7 +364,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         self.mosaic_border = [-img_size // 2, -img_size // 2]
         self.stride = stride
         self.path = path        
-        # self.albumentations = Albumentations() if augment else None
+        self.albumentations = Albumentations() if augment else None
 
         try:
             f = []  # image files
@@ -599,8 +599,8 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                                                  perspective=hyp['perspective'])
             
             
-            # img, labels = self.albumentations(img, labels)
-            # nL = len(labels)
+            img, labels = self.albumentations(img, labels)
+            nL = len(labels)
             # Augment colorspace
             augment_hsv(img, hgain=hyp['hsv_h'], sgain=hyp['hsv_s'], vgain=hyp['hsv_v'])
 
@@ -1238,17 +1238,18 @@ def pastein(image, labels, sample_labels, sample_images, sample_masks):
 
 class Albumentations:
     def __init__(self):
-        self.transform = None
+        # self.transform = None
         import albumentations as A
 
         self.transform = A.Compose([
-            A.CLAHE(p=0.5),
-            A.RandomBrightnessContrast(brightness_limit=0.2, contrast_limit=0.2, p=0.5),
-            A.RandomGamma(gamma_limit=[80, 120], p=0.5),
-            A.Blur(p=0.5),
-            A.MedianBlur(p=0.5),
-            A.ToGray(p=0.5),
-            A.ImageCompression(quality_lower=75, p=0.5),],
+            A.CLAHE(p=0.1),
+            A.RandomBrightnessContrast(brightness_limit=0.2, contrast_limit=0.2, p=0.1),
+            A.RandomGamma(gamma_limit=[80, 120], p=0.01),
+            A.Blur(p=0.01),
+            A.MedianBlur(p=0.01),
+            A.ToGray(p=0.33),
+            A.ImageCompression(quality_lower=75, p=0.1),],
+            A.ISONoise(p=0.01),
             bbox_params=A.BboxParams(format='pascal_voc', label_fields=['class_labels']))
         logging.info(colorstr('albumentations: ') + ', '.join(f'{x}' for x in self.transform.transforms if x.p))
 
