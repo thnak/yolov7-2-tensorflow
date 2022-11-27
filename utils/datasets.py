@@ -455,14 +455,14 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         for file_i in self.img_files:
             sizeOfDataset += os.path.getsize(file_i)
         if sizeOfDataset > totalRam or sizeOfDataset*7 > totalRam:
-            print(colorstr(f'datasets:'),colored(f'The dataset is larger than Total RAM, the program may be interrupted unexpectedly','red'),colored(f'dataset size: {sizeOfDataset / 1E9:.1f}GB, total RAM size{totalRam / 1E9:.1f}GB','red'))
-            print(colorstr(f'datasets:'),colored(f'size: {sizeOfDataset / 1E9:.1f}GB. Estimated buffer size is {sizeOfDataset*7 / 1E9:.1f}GB','red'),colored(f'dataset size: {sizeOfDataset / 1E9:.1f}GB, total RAM size{totalRam / 1E9:.1f}GB','red'))
+            print(colorstr(f'datasets:'),colored(f'The dataset is larger than Total RAM, the program may be interrupted unexpectedly','red'),colored(f'dataset size: {sizeOfDataset / 1E9:.3f}GB, total RAM size{totalRam / 1E9:.3f}GB','red'))
+            print(colorstr(f'datasets:'),colored(f'size: {sizeOfDataset / 1E9:.3f}GB. Estimated buffer size is {sizeOfDataset*7 / 1E9:.3f}GB','red'),colored(f'dataset size: {sizeOfDataset / 1E9:.3f}GB, total RAM size{totalRam / 1E9:.3f}GB','red'))
             cache_images = 'disk'
             if sizeOfDataset*7 > freeSpace:
                 cache_images = None
                 print(colorstr('datasets:'),'not using cache, not enough disk space')            
         else:
-            print(colorstr(f'datasets:'),colored(f'{sizeOfDataset / 1E9:.1f}GB size, total RAM size {totalRam / 1E9:.1f}GB','green'))
+            print(colorstr(f'datasets:'),colored(f'{sizeOfDataset / 1E9:.3f}GB size, total RAM size {totalRam / 1E9:.3f}GB','green'))
             cache_images = 'ram'     
                        
         if cache_images:
@@ -482,7 +482,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                 else:
                     self.imgs[i], self.img_hw0[i], self.img_hw[i] = x
                     gb += self.imgs[i].nbytes
-                pbar.desc = f'{prefix}Caching images ({gb / 1E9:.1f}GB '+'RAM' if cache_images != 'Disk' else 'disk'+')'
+                pbar.desc = f'{prefix}Caching images ({gb / 1E9:.3f}GB '+'RAM)' if cache_images != 'disk' else 'Disk)'
             pbar.close()
 
     def cache_labels(self, path=Path('./labels.cache'), prefix=''):

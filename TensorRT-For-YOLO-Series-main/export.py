@@ -259,7 +259,7 @@ if __name__ == "__main__":
     parser.add_argument("-p", "--precision", default="fp16", choices=["fp32", "fp16", "int8"],
                         help="The precision mode to build in, either 'fp32', 'fp16' or 'int8', default: 'fp16'")
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable more verbose log output")
-    parser.add_argument("-w", "--workspace", default=1, type=int, help="The max memory workspace size to allow in Gb, "
+    parser.add_argument("-w", "--workspace", default=8, type=int, help="The max memory workspace size to allow in Gb, "
                                                                        "default: 1")
     parser.add_argument("--calib_input", help="The directory holding images to use for calibration")
     parser.add_argument("--calib_cache", default="./calibration.cache",
