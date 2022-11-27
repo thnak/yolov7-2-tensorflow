@@ -453,19 +453,16 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         totalRam = psutil.virtual_memory()[0]
         freeSpace = psutil.disk_usage('/')[2]          
         for file_i in self.img_files:
-            try:
-                sizeOfDataset += os.path.getsize(file_i)
-            except  Exception as ex:
-                pass        
+            sizeOfDataset += os.path.getsize(file_i)
         if sizeOfDataset > totalRam or sizeOfDataset*7 > totalRam:
-            print(colored(f'Datasets:','blue',attrs='bold'),colored(f'The dataset is larger than Total RAM, the program may be interrupted unexpectedly','red'),colored(f'dataset size: {sizeOfDataset / 1E9:.1f}GB, total RAM size{totalRam / 1E9:.1f}GB','red'))
-            print(colored(f'Datasets:','blue',attrs='bold'),colored(f'size: {sizeOfDataset / 1E9:.1f}GB. Estimated buffer size is {sizeOfDataset*7 / 1E9:.1f}GB','red'),colored(f'dataset size: {sizeOfDataset / 1E9:.1f}GB, total RAM size{totalRam / 1E9:.1f}GB','red'))
+            print(colorstr(f'datasets:'),colored(f'The dataset is larger than Total RAM, the program may be interrupted unexpectedly','red'),colored(f'dataset size: {sizeOfDataset / 1E9:.1f}GB, total RAM size{totalRam / 1E9:.1f}GB','red'))
+            print(colorstr(f'datasets:'),colored(f'size: {sizeOfDataset / 1E9:.1f}GB. Estimated buffer size is {sizeOfDataset*7 / 1E9:.1f}GB','red'),colored(f'dataset size: {sizeOfDataset / 1E9:.1f}GB, total RAM size{totalRam / 1E9:.1f}GB','red'))
             cache_images = 'disk'
             if sizeOfDataset*7 > freeSpace:
                 cache_images = None
-                print(colored('Datasets:','blue',attrs='bold'),'not using cache, not enough disk space')            
+                print(colorstr('datasets:'),'not using cache, not enough disk space')            
         else:
-            print(colored(f'Datasets:','blue',attrs='bold'),colored(f'size: {sizeOfDataset / 1E9:.1f}GB, total RAM size {totalRam / 1E9:.1f}GB','green'))
+            print(colorstr(f'datasets:'),colored(f'{sizeOfDataset / 1E9:.1f}GB size, total RAM size {totalRam / 1E9:.1f}GB','green'))
             cache_images = 'ram'     
                        
         if cache_images:
@@ -1238,18 +1235,18 @@ def pastein(image, labels, sample_labels, sample_images, sample_masks):
 
 class Albumentations:
     def __init__(self):
-        # self.transform = None
+        self.transform = None
+        
         import albumentations as A
-
         self.transform = A.Compose([
             A.CLAHE(p=0.1),
             A.RandomBrightnessContrast(brightness_limit=0.2, contrast_limit=0.2, p=0.1),
             A.RandomGamma(gamma_limit=[80, 120], p=0.01),
             A.Blur(p=0.01),
             A.MedianBlur(p=0.01),
-            A.ToGray(p=0.33),
-            A.ImageCompression(quality_lower=75, p=0.1),],
-            A.ISONoise(p=0.01),
+            A.ToGray(p=0.01),
+            A.ImageCompression(quality_lower=75, p=0.01),
+            A.ISONoise(p=0.01),],
             bbox_params=A.BboxParams(format='pascal_voc', label_fields=['class_labels']))
         logging.info(colorstr('albumentations: ') + ', '.join(f'{x}' for x in self.transform.transforms if x.p))
 

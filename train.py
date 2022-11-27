@@ -746,14 +746,14 @@ if __name__ == '__main__':
                 'cls_pw': (1, 0.5, 2.0),  # cls BCELoss positive_weight
                 'obj': (1, 0.2, 4.0),  # obj loss gain (scale with pixels)
                 'obj_pw': (1, 0.5, 2.0),  # obj BCELoss positive_weight
-                'iou_t': (0, 0.1, 0.7),  # IoU training threshold
-                'anchor_t': (1, 2.0, 8.0),  # anchor-multiple threshold
+                'iou_t': (1, 0.1, 0.7),  # IoU training threshold
+                'anchor_t': (1, 1.0, 8.0),  # anchor-multiple threshold
                 # anchors per output grid (0 to ignore)
-                'anchors': (2, 2.0, 10.0),
+                'anchors': (1, 1.0, 10.0),
                 # focal loss gamma (efficientDet default gamma=1.5)
-                'fl_gamma': (0, 0.0, 2.0),
+                'fl_gamma': (1, 0.0, 2.0),
                 # image HSV-Hue augmentation (fraction)
-                'hsv_h': (1, 0.0, 0.1),
+                'hsv_h': (1, 0.0, 0.9),
                 # image HSV-Saturation augmentation (fraction)
                 'hsv_s': (1, 0.0, 0.9),
                 # image HSV-Value augmentation (fraction)
@@ -765,7 +765,7 @@ if __name__ == '__main__':
                 # image perspective (+/- fraction), range 0-0.001
                 'perspective': (0, 0.0, 0.001),
                 'flipud': (1, 0.0, 1.0),  # image flip up-down (probability)
-                'fliplr': (0, 0.0, 1.0),  # image flip left-right (probability)
+                'fliplr': (1, 0.0, 1.0),  # image flip left-right (probability)
                 'mosaic': (1, 0.0, 1.0),  # image mixup (probability)
                 'mixup': (1, 0.0, 1.0),   # image mixup (probability)
                 # segment copy-paste (probability)
@@ -901,7 +901,6 @@ if __name__ == '__main__':
         elif start_evo > end_evo:
             logger.error(
                 'Bad values, the start value to evolution is larger than the end value.')
-
         else:
             logger.warning(
                 'The evolution is finished, Total generation: '+str(end_evo-1))
