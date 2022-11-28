@@ -605,8 +605,7 @@ if __name__ == '__main__':
     parser.add_argument('--cfg', type=str, default='', help='model.yaml path')
     parser.add_argument('--data', type=str,
                         default='data/coco.yaml', help='data.yaml path')
-    parser.add_argument(
-        '--hyp', type=str, default='data/hyp.scratch.p5.yaml', help='hyperparameters path')
+    parser.add_argument('--hyp', type=str, default='data/hyp.scratch.p5.yaml', help='hyperparameters path')
     parser.add_argument('--epochs', type=int, default=300)
     parser.add_argument('--batch-size', type=int, default=16,
                         help='total batch size for all GPUs')
@@ -734,7 +733,6 @@ if __name__ == '__main__':
     else:
         # Hyperparameter evolution metadata (mutation scale 0-1, lower_limit, upper_limit)
         meta = {'lr0': (1, 1e-5, 1e-1),  # initial learning rate (SGD=1E-2, Adam=1E-3)
-                # final OneCycleLR learning rate (lr0 * lrf)
                 'lrf': (1, 0.01, 1.0),
                 'momentum': (0.3, 0.6, 0.98),  # SGD momentum/Adam beta1
                 'weight_decay': (1, 0.0, 0.001),  # optimizer weight decay
@@ -748,27 +746,20 @@ if __name__ == '__main__':
                 'obj_pw': (1, 0.5, 2.0),  # obj BCELoss positive_weight
                 'iou_t': (1, 0.1, 0.7),  # IoU training threshold
                 'anchor_t': (1, 2.0, 10.0),  # anchor-multiple threshold
-                # anchors per output grid (0 to ignore)
                 'anchors': (2, 2.0, 10.0),
-                # focal loss gamma (efficientDet default gamma=1.5)
                 'fl_gamma': (1, 0.0, 2.0),
-                # image HSV-Hue augmentation (fraction)
                 'hsv_h': (1, 0.0, 0.9),
-                # image HSV-Saturation augmentation (fraction)
                 'hsv_s': (1, 0.0, 0.9),
-                # image HSV-Value augmentation (fraction)
                 'hsv_v': (1, 0.0, 0.9),
                 'degrees': (1, 0.0, 45.0),  # image rotation (+/- deg)
                 'translate': (1, 0.0, 0.9),  # image translation (+/- fraction)
                 'scale': (1, 0.0, 0.9),  # image scale (+/- gain)
                 'shear': (1, 0.0, 10.0),  # image shear (+/- deg)
-                # image perspective (+/- fraction), range 0-0.001
                 'perspective': (0, 0.0, 0.001),
                 'flipud': (1, 0.0, 1.0),  # image flip up-down (probability)
                 'fliplr': (1, 0.0, 1.0),  # image flip left-right (probability)
                 'mosaic': (1, 0.0, 1.0),  # image mixup (probability)
                 'mixup': (1, 0.0, 1.0),   # image mixup (probability)
-                # segment copy-paste (probability)
                 'copy_paste': (1, 0.0, 1.0),
                 'paste_in': (1, 0.0, 1.0)}    # segment copy-paste (probability)
 
@@ -780,7 +771,8 @@ if __name__ == '__main__':
             f.close()
             if 'anchors' not in hyp:  # anchors commented in hyp.yaml
                 hyp['anchors'] = 3
-
+        if opt.noautoanchors:
+            del hyp['anchors'], meta['anchors']
         assert opt.local_rank == -1, 'DDP mode not implemented for --evolve'
         opt.notest, opt.nosave = True, True  # only test/save final epoch
         yaml_file = Path(opt.save_dir) / \
@@ -869,7 +861,7 @@ if __name__ == '__main__':
                     mp, s = 0.8, 0.2  # mutation probability, sigma
                     npr = np.random
                     npr.seed(int(time.time()))
-                    g = np.array([x[0] for x in meta.values()])  # gains 0-1
+                    g = np.array([meta[k][0] for k in hyp.keys()])  # gains 0-1
                     ng = len(meta)
                     v = np.ones(ng)
                     while all(v == 1):  # mutate until a change occurs (prevent duplicates)
@@ -891,7 +883,7 @@ if __name__ == '__main__':
                 # Write mutation results
                 print_mutation(hyp.copy(), results, yaml_file, opt.bucket)
                 logger.info('Gen '+str(_)+'th evo in: ' +
-                            str((time.time() - time0)/3600)+"hours")
+                            str(round((time.time() - time0)/3600,3))+"hours")
                 count += 1
                 file_ = open('./runs/train/evolve/evolve_config.txt', 'w')
                 string_evo_cfg[0][0] = str(count)
