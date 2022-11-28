@@ -50,17 +50,20 @@ def getName_extention(stringPath=''):
 
 
 def readYoLoBbox(stringPath=''):
+
     txt = open(stringPath, 'r')
     stringtxt = txt.read()
+    txt.close()
     arr = stringtxt.split('\n')
     categoryId = []
     bboxes = []
     for i in arr:
         a = i.split(' ')
-        au = list(map(float, a))
-        au[0] = int(au[0])
-        categoryId.append(au[0])
-        bboxes.append([au[1], au[2], au[3], au[4]])
+        if a != ['']:
+            au = list(map(float, a))
+            au[0] = int(au[0])
+            categoryId.append(au[0])
+            bboxes.append([au[1], au[2], au[3], au[4]])
 
     return bboxes, categoryId
 
@@ -145,8 +148,11 @@ def DataArgumentation(imgInputPath='', bboxInputPath='', bboxOutputPath='', imgO
     lengImg_bbox = len(img_bbox)
     for img_bbox_ in img_bbox:
         image_, bbox_ = img_bbox_[0], img_bbox_[1]
-        bbox, cate = readYoLoBbox(bbox_)
-
+        try:
+            bbox, cate = readYoLoBbox(bbox_)
+        except Exception as ex:
+            print(f'Error: {ex}\nPath: {bbox_}')
+            continue
         sys.stdout.write(('='*int((inx/lengImg_bbox)*100))+(''*(lengImg_bbox-inx)
                                                             )+("\r [ %d" % int((inx/lengImg_bbox)*100)+"% ] "))
         sys.stdout.flush()
@@ -159,20 +165,27 @@ def DataArgumentation(imgInputPath='', bboxInputPath='', bboxOutputPath='', imgO
     print('Finished')
 
 
-def process(imgPath='', rangeArgumentation=1, cropSizeRate=[1, 1], viewImg_miliseconds=1, bboxes=[], category_ids=[], category_id_to_name={0: 'person', 1: 'cow', 2: 'dairy cow', 3: 'buffalo', 4: 'pig', 5: 'sheep', 6: 'burro', 7: 'horse', 8: 'rabbit', 9: 'deer', 10: 'goat', 11: 'dog', 12: 'cat', 13: 'chicken', 14: 'duck', 15: 'mallard', 16: 'dove', 17: 'googse', 18: 'musk duck', 19: 'galeeny', 20: 'turkey', 21: 'eel', 22: 'cockroach'}, imgIndex=0, viewImg=False, save=False, imgOutputPath='', bboxOutputPath=''):
+def process(imgPath='', 
+            rangeArgumentation=1,
+            cropSizeRate=[1, 1], 
+            viewImg_miliseconds=1, bboxes=[], 
+            category_ids=[], category_id_to_name={0: 'person', 1: 'cow', 2: 'dairy cow', 3: 'buffalo', 4: 'pig', 5: 'sheep', 6: 'burro', 7: 'horse', 8: 'rabbit', 9: 'deer', 10: 'goat', 11: 'dog', 12: 'cat', 13: 'chicken', 14: 'duck', 15: 'mallard', 16: 'dove', 17: 'googse', 18: 'musk duck', 19: 'galeeny', 20: 'turkey', 21: 'eel', 22: 'cockroach'}, 
+            imgIndex=0, viewImg=False, save=False, 
+            imgOutputPath='', bboxOutputPath=''):
+    
     image = cv2.imread(imgPath)
     h, w = image.shape[:2]
     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     fileName = getName_extention(imgPath)[0]
 
-    p = 1/4
+    p = 0
     transform = A.Compose(
         [
             A.RandomBrightnessContrast(p=p),
             A.RandomGamma(p=p),
             A.HueSaturationValue(p=p, hue_shift_limit=50, sat_shift_limit=50,
                                  val_shift_limit=50, always_apply=False),
-            A.ToGray(p=0.2),
+            A.ToGray(p=p),
             A.HorizontalFlip(p=p),
             A.VerticalFlip(p=p),
             A.RandomRain(p=p),
@@ -182,7 +195,7 @@ def process(imgPath='', rangeArgumentation=1, cropSizeRate=[1, 1], viewImg_milis
         ],
         bbox_params=A.BboxParams(format='yolo', label_fields=['category_ids']),
     )
-    count = 0
+    count = 0.1
     for _ in range(rangeArgumentation):
 
         nameImg = imgOutputPath+fileName+'_DataArgumentation_index_' + \
@@ -195,8 +208,9 @@ def process(imgPath='', rangeArgumentation=1, cropSizeRate=[1, 1], viewImg_milis
             stringtxt += str(cate) + ' '+str(bbox[0])+' '+str(
                 bbox[1])+' '+str(bbox[2])+' '+str(bbox[3])+'\n'
         if save:
-            cv2.imwrite(nameImg, transformed['image'], [
-                        cv2.IMWRITE_JPEG_QUALITY, 75])
+            
+            cv2.imwrite(nameImg, cv2.cvtColor(transformed['image'],cv2.COLOR_BGR2RGB), [
+                        cv2.IMWRITE_JPEG_QUALITY, 55])
             nameImg = nameImg.replace(imgOutputPath, bboxOutputPath)
             nameImg = nameImg.replace('.jpg', '.txt')
             # print(f'file name: {nameImg}')
@@ -256,104 +270,146 @@ def reWriteIndex(inputFolder='', outputFolder='', changesCateOldIndex_newIndex=[
     else:
         print(f'inputFolder or outputFolder does not exists')
 
-def splitDataset(inputFolder='',outputFolder='', trainRatio=0.75):
-    img_formats = ['.bmp', '.jpg', '.jpeg', '.png', '.tif', '.tiff', '.dng', '.webp', '.mpo']
-    
-    yoloArrFiles = [[],[]]
+
+def splitDataset(inputFolder='', outputFolder='', trainRatio=0.75):
+    img_formats = ['.bmp', '.jpg', '.jpeg', '.png',
+                   '.tif', '.tiff', '.dng', '.webp', '.mpo']
+
+    yoloArrFiles = [[], []]
     if os.path.isdir(inputFolder) and os.path.isdir(outputFolder):
-        imagesInputFolder = os.path.join(inputFolder,'images')
-        labelsInputFolder = os.path.join(inputFolder,'labels')         
+        imagesInputFolder = os.path.join(inputFolder, 'images')
+        labelsInputFolder = os.path.join(inputFolder, 'labels')
         for item in os.listdir(imagesInputFolder):
             for exImage in img_formats:
                 if item.endswith(exImage):
-                    imageNamed = os.path.join(imagesInputFolder,item)
-                    labelNamed = imageNamed.replace(imagesInputFolder, labelsInputFolder)
+                    imageNamed = os.path.join(imagesInputFolder, item)
+                    labelNamed = imageNamed.replace(
+                        imagesInputFolder, labelsInputFolder)
                     for _ in img_formats:
-                        labelNamed = labelNamed.replace(_,'.txt')
+                        labelNamed = labelNamed.replace(_, '.txt')
                     labelNamed = os.path.join(labelNamed)
                     if os.path.exists(labelNamed) and imageNamed:
                         yoloArrFiles[1].append(labelNamed)
                         yoloArrFiles[0].append(imageNamed)
-        print(f'total image files: {len(yoloArrFiles[0])}, total label files: {len(yoloArrFiles[1])}')
+        print(
+            f'total image files: {len(yoloArrFiles[0])}, total label files: {len(yoloArrFiles[1])}')
         if os.listdir(outputFolder):
-            print('The output folder is not empty, require empty folder for train, val, test sub-folder inside')
+            print(
+                'The output folder is not empty, require empty folder for train, val, test sub-folder inside')
         else:
             valRatio = (1 - trainRatio) * 0.4
             testRatio = (1 - trainRatio) * 0.6
-            print(f'Starting split folder... {trainRatio*100}% train, {valRatio*100}% val, {testRatio*100}% test.')
-            trainFolder = os.path.join(outputFolder,'train')
+            print(
+                f'Starting split folder... {trainRatio*100}% train, {valRatio*100}% val, {testRatio*100}% test.')
+            trainFolder = os.path.join(outputFolder, 'train')
             trainFolder_, valFolder_, testFolder_ = [], [], []
-            valFolder = os.path.join(outputFolder,'val')
+            valFolder = os.path.join(outputFolder, 'val')
             testFolder = os.path.join(outputFolder, 'test')
             if not os.path.isdir(trainFolder):
                 os.makedirs(trainFolder)
-                trainFolder_.append(os.path.join(trainFolder,'images'))
-                trainFolder_.append(os.path.join(trainFolder,'labels'))
+                trainFolder_.append(os.path.join(trainFolder, 'images'))
+                trainFolder_.append(os.path.join(trainFolder, 'labels'))
                 for _ in trainFolder_:
                     os.makedirs(_)
             else:
-                trainFolder_.append(os.path.join(trainFolder,'images'))
-                trainFolder_.append(os.path.join(trainFolder,'labels'))
+                trainFolder_.append(os.path.join(trainFolder, 'images'))
+                trainFolder_.append(os.path.join(trainFolder, 'labels'))
             if not os.path.isdir(valFolder):
-                os.makedirs(valFolder) 
-                valFolder_.append(os.path.join(valFolder,'images'))
-                valFolder_.append(os.path.join(valFolder,'labels'))    
+                os.makedirs(valFolder)
+                valFolder_.append(os.path.join(valFolder, 'images'))
+                valFolder_.append(os.path.join(valFolder, 'labels'))
                 for _ in valFolder_:
                     os.makedirs(_)
             else:
-                valFolder_.append(os.path.join(valFolder,'images'))
-                valFolder_.append(os.path.join(valFolder,'labels'))   
+                valFolder_.append(os.path.join(valFolder, 'images'))
+                valFolder_.append(os.path.join(valFolder, 'labels'))
             if not os.path.isdir(testFolder):
                 os.makedirs(testFolder)
-                testFolder_.append(os.path.join(testFolder,'images'))
-                testFolder_.append(os.path.join(testFolder,'labels'))    
-                for _ in testFolder_:   
+                testFolder_.append(os.path.join(testFolder, 'images'))
+                testFolder_.append(os.path.join(testFolder, 'labels'))
+                for _ in testFolder_:
                     os.makedirs(_)
             else:
-                testFolder_.append(os.path.join(testFolder,'images'))
-                testFolder_.append(os.path.join(testFolder,'labels'))  
+                testFolder_.append(os.path.join(testFolder, 'images'))
+                testFolder_.append(os.path.join(testFolder, 'labels'))
             import random
             import shutil
             tempArray = yoloArrFiles
-            itempathTrain, itempathVal, itempathTest = [[],[]], [[],[]], [[],[]]
-            for _ in range(int(round(float(len(tempArray[0]))*valRatio,0))):
-                im = random.randrange(0,len(tempArray[0]) - 1)                    
-                itempathVal[0].append(tempArray[0][im].replace(imagesInputFolder,'')[1:])
-                itempathVal[1].append(tempArray[1][im].replace(labelsInputFolder,'')[1:])
-                
-                shutil.copyfile(yoloArrFiles[0][im], os.path.join(valFolder_[0],tempArray[0][im].replace(imagesInputFolder,'')[1:]))
-                shutil.copyfile(yoloArrFiles[1][im], os.path.join(valFolder_[1],tempArray[1][im].replace(labelsInputFolder,'')[1:]))
+            itempathTrain, itempathVal, itempathTest = [
+                [], []], [[], []], [[], []]
+            for _ in range(int(round(float(len(tempArray[0]))*valRatio, 0))):
+                im = random.randrange(0, len(tempArray[0]) - 1)
+                itempathVal[0].append(
+                    tempArray[0][im].replace(imagesInputFolder, '')[1:])
+                itempathVal[1].append(
+                    tempArray[1][im].replace(labelsInputFolder, '')[1:])
+
+                shutil.copyfile(yoloArrFiles[0][im], os.path.join(
+                    valFolder_[0], tempArray[0][im].replace(imagesInputFolder, '')[1:]))
+                shutil.copyfile(yoloArrFiles[1][im], os.path.join(
+                    valFolder_[1], tempArray[1][im].replace(labelsInputFolder, '')[1:]))
                 tempArray[0].remove(tempArray[0][im])
                 tempArray[1].remove(tempArray[1][im])
-                
+
             print(f'valFolder: {len(itempathVal[0])} files, finished')
-            
-            for _ in range(int(round(float(len(tempArray[0]))*testRatio,0))):
-                im = random.randrange(0,len(tempArray[0]) - 1)                    
-                itempathTest[0].append(tempArray[0][im].replace(imagesInputFolder,'')[1:])
-                itempathTest[1].append(tempArray[1][im].replace(labelsInputFolder,'')[1:])
-                shutil.copyfile(yoloArrFiles[0][im], os.path.join(testFolder_[0],tempArray[0][im].replace(imagesInputFolder,'')[1:]))
-                shutil.copyfile(yoloArrFiles[1][im], os.path.join(testFolder_[1],tempArray[1][im].replace(labelsInputFolder,'')[1:]))
+
+            for _ in range(int(round(float(len(tempArray[0]))*testRatio, 0))):
+                im = random.randrange(0, len(tempArray[0]) - 1)
+                itempathTest[0].append(
+                    tempArray[0][im].replace(imagesInputFolder, '')[1:])
+                itempathTest[1].append(
+                    tempArray[1][im].replace(labelsInputFolder, '')[1:])
+                shutil.copyfile(yoloArrFiles[0][im], os.path.join(
+                    testFolder_[0], tempArray[0][im].replace(imagesInputFolder, '')[1:]))
+                shutil.copyfile(yoloArrFiles[1][im], os.path.join(
+                    testFolder_[1], tempArray[1][im].replace(labelsInputFolder, '')[1:]))
                 tempArray[0].remove(tempArray[0][im])
                 tempArray[1].remove(tempArray[1][im])
-                
-                
+
             print(f'testFolder: {len(itempathTest[0])} files, finished')
             itempathTrain = tempArray
             for im in range(len(itempathTrain[0])):
-                shutil.copyfile(yoloArrFiles[0][im], os.path.join(trainFolder_[0],itempathTrain[0][im].replace(imagesInputFolder,'')[1:]))
-                shutil.copyfile(yoloArrFiles[1][im], os.path.join(trainFolder_[1],itempathTrain[1][im].replace(labelsInputFolder,'')[1:]))
+                shutil.copyfile(yoloArrFiles[0][im], os.path.join(
+                    trainFolder_[0], itempathTrain[0][im].replace(imagesInputFolder, '')[1:]))
+                shutil.copyfile(yoloArrFiles[1][im], os.path.join(
+                    trainFolder_[1], itempathTrain[1][im].replace(labelsInputFolder, '')[1:]))
             print(f'trainFolder: {len(itempathTrain[0])} files, finished')
-            
-            
-            
-            
-            
-             
-    
-splitDataset(inputFolder="D:/Users/Downloads/Pig behavior.v1-walking.yolov7pytorch/train", outputFolder="D:/Users/Downloads/Pig behavior.v1-walking.yolov7pytorch/train/cattle") 
-# DataArgumentation(showImg=True, save=True, imgOutputPath="D:/Users/Downloads/Pig behavior.v1-walking.yolov7pytorch/train/newimage", bboxOutputPath="D:/Users/Downloads/Pig behavior.v1-walking.yolov7pytorch/train/newlabel",
-#                   imgInputPath="D:/Users/Downloads/Pig behavior.v1-walking.yolov7pytorch/train/images", bboxInputPath="D:/Users/Downloads/Pig behavior.v1-walking.yolov7pytorch/train/labels")
+
+
+def removecls(path='', targetBbx=[]):
+    if path:
+        path = os.path.join(path)
+        listPath = os.listdir(path)
+        for item in listPath:
+            itemPath = os.path.join(path, item)
+            try:
+                bbx, catlo = readYoLoBbox(itemPath)
+            except Exception as ex:
+                print(f'Error: {ex}\nPath: {itemPath}')
+                continue
+            stringlabel = ''
+            for i in range(len(bbx)):
+                if str(catlo[i]) in targetBbx:
+                    stringlabel += str(0)+' ' + str(bbx[i][0])+' ' + str(
+                        bbx[i][1])+' ' + str(bbx[i][2])+' ' + str(bbx[i][3])+'\n'
+            print(stringlabel[:-1])
+            print('')
+            file_ = open(itemPath, 'w')
+            if stringlabel != '':
+                file_.write(stringlabel[:-1])
+            else:
+                file_.write('')
+            file_.close()
+
+# removecls(path="D:/Users/Downloads/Pig behavior.v1-walking.yolov7pytorch/train/labels_", targetBbx=['4'])
+
+
+# splitDataset(inputFolder="D:/Users/Downloads/Pig behavior.v1-walking.yolov7pytorch/train", outputFolder="D:/Users/Downloads/Pig behavior.v1-walking.yolov7pytorch/train/cattle")
+DataArgumentation(showImg=True, save=True, rangeArgumentation=5,
+                  imgOutputPath="D:/Users/Downloads/pigdataset/train/dataset/images",
+                  bboxOutputPath="D:/Users/Downloads/pigdataset/train/dataset/labels",
+                  imgInputPath="D:/Users/Downloads/pigdataset/tmr2",
+                  bboxInputPath="D:/Users/Downloads/pigdataset/train/labels")
 
 
 # reWriteIndex(inputFolder="D:/Users/Downloads/Pig behavior.v1-walking.yolov7pytorch/train/labels", outputFolder="D:/Users/Downloads/Pig behavior.v1-walking.yolov7pytorch/train/newlabel")

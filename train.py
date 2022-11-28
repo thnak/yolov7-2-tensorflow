@@ -752,7 +752,7 @@ if __name__ == '__main__':
                 'translate': (1, 0.0, 0.9),  # image translation (+/- fraction)
                 'scale': (1, 0.0, 0.9),  # image scale (+/- gain)
                 'shear': (1, 0.0, 10.0),  # image shear (+/- deg)
-                'perspective': (0, 0.0, 0.001),
+                'perspective': (1, 0.0, 0.001),
                 'flipud': (1, 0.0, 1.0),  # image flip up-down (probability)
                 'fliplr': (1, 0.0, 1.0),  # image flip left-right (probability)
                 'mosaic': (1, 0.0, 1.0),  # image mixup (probability)
