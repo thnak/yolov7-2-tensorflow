@@ -11,11 +11,12 @@ from models.experimental import attempt_load
 from utils.datasets import LoadStreams, LoadImages
 from utils.general import check_img_size, check_requirements, check_imshow, non_max_suppression, apply_classifier, \
     scale_coords, xyxy2xywh, strip_optimizer, set_logging, increment_path
-from utils.plots import plot_one_box
+from utils.plots import plot_one_box_with_return
 from utils.torch_utils import select_device, load_classifier, time_synchronized, TracedModel
 import subprocess
 import shlex
 import platform
+import os
 
 def detect(save_img=False):
     source, weights, view_img, save_txt, imgsz, trace = opt.source, opt.weights, opt.view_img, opt.save_txt, opt.img_size, not opt.no_trace
@@ -42,25 +43,26 @@ def detect(save_img=False):
         
     if half:
         model.half()  # to FP16
-    mySys = platform.uname()
-    osType = mySys.system
-    try:    
-        from utils.ffmpeg_ import getGPUtype
-        if torch.cuda.is_available():
-            vidCodec = 'hevc_nvenc'
-        elif osType == 'Windows' and 'AMD' in str(getGPUtype()):
-            vidCodec = 'hevc_amf'
-        elif osType == 'Linux' and 'AMD' in str(getGPUtype()):
-            vidCodec = 'hevc_vaapi'
-        else:
-            vidCodec = 'libx264'
-        print(f'Using video codec: {vidCodec}, os: {osType}, gpu: {str(getGPUtype())}')
-    except:
-        if torch.cuda.is_available():
-            vidCodec = 'hevc_nvenc'
-        else:
-            vidCodec = 'libx264'
-        print(f'Using video codec: {vidCodec}, os: {osType}, gpu: '+ 'Nvidia' if torch.cuda.is_available() else 'Unknown')
+    if save_img:
+        mySys = platform.uname()
+        osType = mySys.system
+        try:    
+            from utils.ffmpeg_ import getGPUtype
+            if torch.cuda.is_available():
+                vidCodec = 'hevc_nvenc'
+            elif osType == 'Windows' and 'AMD' in str(getGPUtype()):
+                vidCodec = 'hevc_amf'
+            elif osType == 'Linux' and 'AMD' in str(getGPUtype()):
+                vidCodec = 'hevc_vaapi'
+            else:
+                vidCodec = 'libx264'
+            print(f'Using video codec: {vidCodec}, os: {osType}, gpu: {str(getGPUtype())}')
+        except:
+            if torch.cuda.is_available():
+                vidCodec = 'hevc_nvenc'
+            else:
+                vidCodec = 'libx264'
+            print(f'Using video codec: {vidCodec}, os: {osType}, gpu: '+ 'Nvidia' if torch.cuda.is_available() else 'Unknown')
     
     # Second-stage classifier
     classify = False
@@ -88,6 +90,8 @@ def detect(save_img=False):
 
     t0 = time.time()
     avgTime = [[],[]]
+    if opt.datacollection:
+        save_txt = True
     for path, img, im0s, vid_cap in dataset:
         img = torch.from_numpy(img).to(device)
         img = img.half() if half else img.float()  # uint8 to fp16/32
@@ -97,17 +101,17 @@ def detect(save_img=False):
 
         # Warmup
         if device.type != 'cpu' and (old_img_b != img.shape[0] or old_img_h != img.shape[2] or old_img_w != img.shape[3]):
+            twrm = time.time()
             old_img_b = img.shape[0]
             old_img_h = img.shape[2]
             old_img_w = img.shape[3]
             for i in range(3):
                 model(img, augment=opt.augment)[0]
-
+            print(f'{time.time() - twrm:0.3f} warm up finished')
         # Inference
         t1 = time_synchronized()
         with torch.no_grad():   # Calculating gradients would cause a GPU memory leak
             pred = model(img, augment=opt.augment)[0]
-            
         t2 = time_synchronized()
 
         # Apply NMS
@@ -119,21 +123,22 @@ def detect(save_img=False):
             pred = apply_classifier(pred, modelc, img, im0s)
 
         # Process detections
+        t4 = time.time()
         for i, det in enumerate(pred):  # detections per image
             if webcam:  # batch_size >= 1
                 p, s, im0, frame = path[i], '%g: ' % i, im0s[i].copy(), dataset.count
             else:
                 p, s, im0, frame = path, '', im0s, getattr(dataset, 'frame', 0)
-
+            imOrigin = im0
             p = Path(p)  # to Path
             save_path = str(save_dir / p.name)  # img.jpg
-            txt_path = str(save_dir / 'labels' / p.stem) + ('' if dataset.mode == 'image' else f'_{frame}')  # img.txt
+            if not opt.datacollection:
+                txt_path = str(save_dir / 'labels' / p.stem) + ('' if dataset.mode == 'image' else f'_{frame}')  # img.txt
+            else:
+                txt_path = str(save_dir / 'labels') + ('' if dataset.mode == 'image' else f'_{frame}')  # img.txt
             gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh
             if len(det):
-                # Rescale boxes from img_size to im0 size
                 det[:, :4] = scale_coords(img.shape[2:], det[:, :4], im0.shape).round()
-
-                # Print results
                 for c in det[:, -1].unique():
                     n = (det[:, -1] == c).sum()  # detections per class
                     s += f"{n} {names[int(c)]}{'s' * (n > 1)}, "  # add to string
@@ -143,16 +148,15 @@ def detect(save_img=False):
                     if save_txt:  # Write to file
                         xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
                         line = (cls, *xywh, conf) if opt.save_conf else (cls, *xywh)  # label format
-                        with open(txt_path + '.txt', 'a') as f:
-                            f.write(('%g ' * len(line)).rstrip() % line + '\n')
-
-                    if save_img or view_img:  # Add bbox to image
+                        f = open(os.path.join(txt_path+'.txt'), 'a')
+                        f.write(('%g ' * len(line)).rstrip() % line + '\n')
+                        f.close()
+                    if (save_img or view_img) and not opt.datacollection:
                         label = f'{names[int(cls)]} {conf:.2f}'
-                        plot_one_box(xyxy, im0, label=label, color=colors[int(cls)], line_thickness=1)
-
+                        im0 = plot_one_box_with_return(xyxy, im0, label=label, color=colors[int(cls)], line_thickness=1)
+                
             # Print time (inference + NMS)
-            tmInf = round(1E3 * (t2 - t1),3)
-            tmNms = round(1E3 * (t3 - t2),3)
+            tmInf, tmNms = round(1E3 * (t2 - t1),3), round(1E3 * (t3 - t2),3)
             avgTime[0].append(tmInf)
             avgTime[1].append(tmNms)
             print(f'{s}Done. ({tmInf}ms) Inference, ({tmNms}ms) NMS')
@@ -168,33 +172,41 @@ def detect(save_img=False):
                     if cv2.waitKey(1) == 27: 
                         break
              
-
             # Save results (image with detections)
-            if save_img:
+            if save_img or opt.datacollection:
                 if dataset.mode == 'image':
-                    cv2.imwrite(save_path, im0)
+                    cv2.imwrite(save_path, cv2.cvtColor(im0,cv2.COLOR_BGR2RGB),[cv2.IMWRITE_JPEG_QUALITY,65])
                     print(f"The image with the result is saved in: {save_path}")
                 else:  # 'video' or 'stream'
-                    if vid_path != save_path:  # new video
-                        vid_path = save_path
-                        if isinstance(vid_writer, cv2.VideoWriter):
-                            vid_writer.release()  # release previous video writer
-                            process.stdin.close()
-                            process.wait()
-                            process.terminate()
-                        if vid_cap:  # video
-                            fps = vid_cap.get(cv2.CAP_PROP_FPS)
-                            w = int(vid_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-                            h = int(vid_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-                        else:  # stream
-                            fps, w, h = 30, im0.shape[1], im0.shape[0]
-                            save_path += '.mp4'
-                        # vid_writer = cv2.VideoWriter(save_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (w, h))
-                        process = subprocess.Popen(shlex.split(f'ffmpeg -y -s {w}x{h} -pixel_format bgr24 -f rawvideo -r {fps} -i pipe: -vcodec {vidCodec} -pix_fmt yuv420p -crf 24')+[save_path], stdin=subprocess.PIPE)
-                    process.stdin.write(im0.tobytes())
-                    # vid_writer.write(im0)
+                    if opt.datacollection:
+                        mpx = 1250000
+                        h,w = imOrigin.shape[:2]
+                        scalePcnt = 100
+                        if (h*w) > mpx:
+                            scalePcnt = round(((h*w) / mpx)*100,0)
+                            scalePcnt = round((100*100) / scalePcnt,1)
+                        imOrigin = cv2.resize(imOrigin,(int(imOrigin.shape[1] * scalePcnt / 100),int(imOrigin.shape[0] * scalePcnt / 100)))
+                        cv2.imwrite(txt_path+'.jpg', imOrigin,[cv2.IMWRITE_JPEG_QUALITY,65])
+                        print(f"Collected image with the result is saved in: {txt_path}")
+                    else:        
+                        if vid_path != save_path:  # new video
+                            vid_path = save_path
+                            if isinstance(vid_writer, cv2.VideoWriter):
+                                vid_writer.release()  # release previous video writer
+                                process.stdin.close()
+                                process.wait()
+                                process.terminate()
+                            if vid_cap:  # video
+                                fps = vid_cap.get(cv2.CAP_PROP_FPS)
+                                w = int(vid_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                                h = int(vid_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                            else:  # stream
+                                fps, w, h = 30, im0.shape[1], im0.shape[0]
+                                save_path += '.mp4'
+                            process = subprocess.Popen(shlex.split(f'ffmpeg -y -s {w}x{h} -pixel_format bgr24 -f rawvideo -r {fps} -i pipe: -vcodec {vidCodec} -pix_fmt yuv420p -crf 24')+[save_path], stdin=subprocess.PIPE)
+                        process.stdin.write(im0.tobytes())
                     
-
+        print(f'pre-processing {time.time() - t4:0.3f}s')
     if save_txt or save_img:
         s = f"\n{len(list(save_dir.glob('labels/*.txt')))} labels saved to {save_dir / 'labels'}" if save_txt else ''
         print(f"Results saved to {save_dir}{s}")
@@ -214,6 +226,7 @@ if __name__ == '__main__':
     parser.add_argument('--save-txt', action='store_true', help='save results to *.txt')
     parser.add_argument('--save-conf', action='store_true', help='save confidences in --save-txt labels')
     parser.add_argument('--nosave', action='store_true', help='do not save images/videos')
+    parser.add_argument('--datacollection', action='store_true', help='save image and labels')
     parser.add_argument('--classes', nargs='+', type=int, help='filter by class: --class 0, or --class 0 2 3')
     parser.add_argument('--agnostic-nms', action='store_true', help='class-agnostic NMS')
     parser.add_argument('--augment', action='store_true', help='augmented inference')
