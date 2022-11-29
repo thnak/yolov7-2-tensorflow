@@ -124,6 +124,7 @@ def detect(save_img=False):
 
         # Process detections
         t4 = time.time()
+        saveImgCollect = False
         for i, det in enumerate(pred):  # detections per image
             if webcam:  # batch_size >= 1
                 p, s, im0, frame = path[i], '%g: ' % i, im0s[i].copy(), dataset.count
@@ -148,6 +149,7 @@ def detect(save_img=False):
                     if save_txt:  # Write to file
                         xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
                         line = (cls, *xywh, conf) if opt.save_conf else (cls, *xywh)  # label format
+                        saveImgCollect = True
                         f = open(os.path.join(txt_path+'.txt'), 'a')
                         f.write(('%g ' * len(line)).rstrip() % line + '\n')
                         f.close()
@@ -178,7 +180,7 @@ def detect(save_img=False):
                     cv2.imwrite(save_path, cv2.cvtColor(im0,cv2.COLOR_BGR2RGB),[cv2.IMWRITE_JPEG_QUALITY,65])
                     print(f"The image with the result is saved in: {save_path}")
                 else:  # 'video' or 'stream'
-                    if opt.datacollection:
+                    if opt.datacollection and saveImgCollect:
                         mpx = 1250000
                         h,w = imOrigin.shape[:2]
                         scalePcnt = 100
@@ -188,7 +190,7 @@ def detect(save_img=False):
                         imOrigin = cv2.resize(imOrigin,(int(imOrigin.shape[1] * scalePcnt / 100),int(imOrigin.shape[0] * scalePcnt / 100)))
                         cv2.imwrite(txt_path+'.jpg', imOrigin,[cv2.IMWRITE_JPEG_QUALITY,65])
                         print(f"Collected image with the result is saved in: {txt_path}")
-                    else:        
+                    elif not opt.datacollection:        
                         if vid_path != save_path:  # new video
                             vid_path = save_path
                             if isinstance(vid_writer, cv2.VideoWriter):
