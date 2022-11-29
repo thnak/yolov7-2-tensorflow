@@ -1,6 +1,6 @@
-train: ./TrainRes/cattle/train
-val: ./TrainRes/cattle/val
-test: ./TrainRes/cattle/test
+train: ./TrainRes/dataset
+val: ./TrainRes/dataset
+test: ./TrainRes/dataset
 nc: 23
 names:
   [

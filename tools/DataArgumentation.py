@@ -405,11 +405,21 @@ def removecls(path='', targetBbx=[]):
 
 
 # splitDataset(inputFolder="D:/Users/Downloads/Pig behavior.v1-walking.yolov7pytorch/train", outputFolder="D:/Users/Downloads/Pig behavior.v1-walking.yolov7pytorch/train/cattle")
-DataArgumentation(showImg=True, save=True, rangeArgumentation=5,
-                  imgOutputPath="D:/Users/Downloads/pigdataset/train/dataset/images",
-                  bboxOutputPath="D:/Users/Downloads/pigdataset/train/dataset/labels",
-                  imgInputPath="D:/Users/Downloads/pigdataset/tmr2",
-                  bboxInputPath="D:/Users/Downloads/pigdataset/train/labels")
+# DataArgumentation(showImg=True, save=True, rangeArgumentation=5,
+#                   imgOutputPath="D:/Users/Downloads/pigdataset/train/dataset/images",
+#                   bboxOutputPath="D:/Users/Downloads/pigdataset/train/dataset/labels",
+#                   imgInputPath="D:/Users/Downloads/pigdataset/tmr2",
+#                   bboxInputPath="D:/Users/Downloads/pigdataset/train/labels")
+
+def reduce_Quality_of_PNG_image(path='', outpath='',count=0, jpgQuality=50):
+    listpath = os.listdir(path)
+    for item in listpath:
+        itemPath = os.path.join(path,item)
+        img = cv2.imread(itemPath)
+        savePath = os.path.join(outpath,f'background_{count}.jpg')
+        cv2.imwrite(savePath,img,[cv2.IMWRITE_JPEG_QUALITY,jpgQuality])
+        count+=1
+reduce_Quality_of_PNG_image("D:/Users/Downloads/New folder", "D:/Users/Downloads/New folder (3)")
 
 
 # reWriteIndex(inputFolder="D:/Users/Downloads/Pig behavior.v1-walking.yolov7pytorch/train/labels", outputFolder="D:/Users/Downloads/Pig behavior.v1-walking.yolov7pytorch/train/newlabel")
