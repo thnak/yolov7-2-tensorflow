@@ -130,13 +130,13 @@ def detect(save_img=False):
                 p, s, im0, frame = path[i], '%g: ' % i, im0s[i].copy(), dataset.count
             else:
                 p, s, im0, frame = path, '', im0s, getattr(dataset, 'frame', 0)
-            imOrigin = im0
+            imOrigin = im0.copy()
             p = Path(p)  # to Path
             save_path = str(save_dir / p.name)  # img.jpg
-            if not opt.datacollection:
-                txt_path = str(save_dir / 'labels' / p.stem) + ('' if dataset.mode == 'image' else f'_{frame}')  # img.txt
-            else:
-                txt_path = str(save_dir / 'labels') + ('' if dataset.mode == 'image' else f'_{frame}')  # img.txt
+            
+            os.makedirs(str(save_dir / 'labels'),exist_ok=True)
+            txt_path = os.path.join(save_dir,'labels',p.stem) if dataset.mode == 'image' else os.path.join(save_dir,'labels',p.stem+f'_{frame}')
+            
             gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh
             if len(det):
                 det[:, :4] = scale_coords(img.shape[2:], det[:, :4], im0.shape).round()
@@ -153,7 +153,7 @@ def detect(save_img=False):
                         f = open(os.path.join(txt_path+'.txt'), 'a')
                         f.write(('%g ' * len(line)).rstrip() % line + '\n')
                         f.close()
-                    if (save_img or view_img) and not opt.datacollection:
+                    if save_img or view_img:
                         label = f'{names[int(cls)]} {conf:.2f}'
                         im0 = plot_one_box_with_return(xyxy, im0, label=label, color=colors[int(cls)], line_thickness=1)
                 
@@ -164,20 +164,20 @@ def detect(save_img=False):
             print(f'{s}Done. ({tmInf}ms) Inference, ({tmNms}ms) NMS')
 
             # Stream results
-            if view_img:
-                if dataset.mode == 'image':
+            if view_img :
+                if dataset.mode != 'image':
                     im0 = cv2.cvtColor(im0,cv2.COLOR_BGR2RGB)
                     Image.fromarray(im0, mode='RGB').show()
                 else:
-                    cv2.namedWindow(str(p),cv2.WINDOW_NORMAL)
-                    cv2.imshow(str(p), im0)
+                    cv2.namedWindow('str(p)',cv2.WINDOW_NORMAL)
+                    cv2.imshow('str(p)', im0)
                     if cv2.waitKey(1) == 27: 
                         break
              
             # Save results (image with detections)
             if save_img or opt.datacollection:
-                if dataset.mode == 'image':
-                    cv2.imwrite(save_path, cv2.cvtColor(im0,cv2.COLOR_BGR2RGB),[cv2.IMWRITE_JPEG_QUALITY,65])
+                if dataset.mode == 'image' and not opt.datacollection:
+                    cv2.imwrite(save_path, imOrigin,[cv2.IMWRITE_JPEG_QUALITY,65])
                     print(f"The image with the result is saved in: {save_path}")
                 else:  # 'video' or 'stream'
                     if opt.datacollection and saveImgCollect:
@@ -188,9 +188,9 @@ def detect(save_img=False):
                             scalePcnt = round(((h*w) / mpx)*100,0)
                             scalePcnt = round((100*100) / scalePcnt,1)
                         imOrigin = cv2.resize(imOrigin,(int(imOrigin.shape[1] * scalePcnt / 100),int(imOrigin.shape[0] * scalePcnt / 100)))
-                        cv2.imwrite(txt_path+'.jpg', imOrigin,[cv2.IMWRITE_JPEG_QUALITY,65])
-                        print(f"Collected image with the result is saved in: {txt_path}")
-                    elif not opt.datacollection:        
+                        cv2.imwrite(save_path, imOrigin,[cv2.IMWRITE_JPEG_QUALITY,65])
+                        print(f"Collected image with the result is saved in: {save_path}")
+                    elif not opt.datacollection and dataset.mode != 'image':        
                         if vid_path != save_path:  # new video
                             vid_path = save_path
                             if isinstance(vid_writer, cv2.VideoWriter):
@@ -207,12 +207,13 @@ def detect(save_img=False):
                                 save_path += '.mp4'
                             process = subprocess.Popen(shlex.split(f'ffmpeg -y -s {w}x{h} -pixel_format bgr24 -f rawvideo -r {fps} -i pipe: -vcodec {vidCodec} -pix_fmt yuv420p -crf 24')+[save_path], stdin=subprocess.PIPE)
                         process.stdin.write(im0.tobytes())
-                    
+                    else:
+                        print('Nothing to save!')
         print(f'pre-processing {time.time() - t4:0.3f}s')
     if save_txt or save_img:
         s = f"\n{len(list(save_dir.glob('labels/*.txt')))} labels saved to {save_dir / 'labels'}" if save_txt else ''
         print(f"Results saved to {save_dir}{s}")
-
+    cv2.destroyAllWindows()
     print(f'Done. ({time.time() - t0:.3f}s), avgInference {round(sum(avgTime[0])/len(avgTime[0]),3)}ms, avgNMS {round(sum(avgTime[1])/len(avgTime[1]),3)}ms')
 
 
