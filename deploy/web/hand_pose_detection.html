@@ -1,0 +1,340 @@
+<div id="main">
+<div class="container">
+<div class="canvas-wrapper"><canvas id="output"></canvas> <video id="video" playsinline="" style="-webkit-transform: scaleX(-1); transform: scaleX(-1); visibility: hidden; width: auto; height: auto;">
+        </video></div>
+<div id="emo">&nbsp;</div>
+</div>
+</div>
+<!-- Require the peer dependencies of hand-pose-detection. -->
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter"></script>
+<!-- You must explicitly require a TF.js backend if you're not using the TF.js union bundle. -->
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/hand-pose-detection"></script>
+<!--<script src="https://tistory3.daumcdn.net/tistory/5290078/skin/images/camera.js"></script> -->
+<script>
+/**
+ * @license
+ * Copyright 2021 Google LLC. All Rights Reserved.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ * =============================================================================
+ */
+
+
+
+let detector, camera, stats;
+let startInferenceTime, numInferences = 0;
+let inferenceTimeSum = 0, lastPanelUpdate = 0;
+
+const fingerLookupIndices = {
+  thumb: [0, 1, 2, 3, 4],
+  indexFinger: [0, 5, 6, 7, 8],
+  middleFinger: [0, 9, 10, 11, 12],
+  ringFinger: [0, 13, 14, 15, 16],
+  pinky: [0, 17, 18, 19, 20],
+}; // for rendering each finger as a polyline
+
+function isiOS() {
+  return /iPhone|iPad|iPod/i.test(navigator.userAgent);
+}
+
+function isAndroid() {
+  return /Android/i.test(navigator.userAgent);
+}
+
+function isMobile() {
+  return isAndroid() || isiOS();
+}
+
+class Camera {
+  constructor() {
+    this.video = document.getElementById('video');
+    this.canvas = document.getElementById('output');
+    this.ctx = this.canvas.getContext('2d');
+  }
+
+  /**
+   * Initiate a Camera instance and wait for the camera stream to be ready.
+   */
+  static async setupCamera() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      throw new Error(
+        'Browser API navigator.mediaDevices.getUserMedia not available');
+    }
+
+    const $size = { width: 640, height: 480 };
+    const $m_size = { width: 360, height: 270 };
+    const videoConfig = {
+      'audio': false,
+      'video': {
+        facingMode: 'user',
+        // Only setting the video to a specified size for large screen, on
+        // mobile devices accept the default size.
+        width: isMobile() ? $m_size.width : $size.width,
+        height: isMobile() ? $m_size.height : $size.height,
+      }
+    };
+
+    const stream = await navigator.mediaDevices.getUserMedia(videoConfig);
+
+    const camera = new Camera();
+    camera.video.srcObject = stream;
+
+    await new Promise((resolve) => {
+      camera.video.onloadedmetadata = () => {
+        resolve(video);
+      };
+    });
+
+    camera.video.play();
+
+    const videoWidth = camera.video.videoWidth;
+    const videoHeight = camera.video.videoHeight;
+    // Must set below two lines, otherwise video element doesn't show.
+    camera.video.width = videoWidth;
+    camera.video.height = videoHeight;
+
+    camera.canvas.width = videoWidth;
+    camera.canvas.height = videoHeight;
+    const canvasContainer = document.querySelector('.canvas-wrapper');
+    canvasContainer.style = `width: ${videoWidth}px; height: ${videoHeight}px`;
+
+    // Because the image from camera is mirrored, need to flip horizontally.
+    camera.ctx.translate(camera.video.videoWidth, 0);
+    camera.ctx.scale(-1, 1);
+
+    return camera;
+  }
+
+  drawCtx() {
+    this.ctx.drawImage(
+      this.video, 0, 0, this.video.videoWidth, this.video.videoHeight);
+  }
+
+  clearCtx() {
+    this.ctx.clearRect(0, 0, this.video.videoWidth, this.video.videoHeight);
+  }
+
+  /**
+   * Draw the keypoints on the video.
+   * @param hands A list of hands to render.
+   */
+  drawResults(hands) {
+    // Sort by right to left hands.
+    hands.sort((hand1, hand2) => {
+      if (hand1.handedness < hand2.handedness) return 1;
+      if (hand1.handedness > hand2.handedness) return -1;
+      return 0;
+    });
+
+    // Pad hands to clear empty scatter GL plots.
+    while (hands.length < 2) hands.push({});
+
+    for (let i = 0; i < hands.length; ++i) {
+
+      this.drawResult(hands[i]);
+    }
+  }
+
+  /**
+   * Draw the keypoints on the video.
+   * @param hand A hand with keypoints to render.
+   * @param ctxt Scatter GL context to render 3D keypoints to.
+   */
+  drawResult(hand) {
+    if (hand.keypoints != null) {
+      this.drawKeypoints(hand.keypoints, hand.handedness);
+      const emo_type = this.drawEmoticon(hand.keypoints)
+
+      if (emo_type == 'up') {
+        emo.innerHTML = '<figure contenteditable="false" data-ke-type="emoticon" data-ke-align="alignCenter" data-emoticon-type="friends1" data-emoticon-name="032" data-emoticon-isanimation="false" data-emoticon-src="https://t1.daumcdn.net/keditor/emoticon/friends1/large/032.gif"><img src="https://t1.daumcdn.net/keditor/emoticon/friends1/large/032.gif" width="150" /></figure>';
+      }
+      else if (emo_type == 'down') {
+        emo.innerHTML = '<figure contenteditable="false" data-ke-type="emoticon" data-ke-align="alignCenter" data-emoticon-type="niniz" data-emoticon-name="029" data-emoticon-isanimation="false" data-emoticon-src="https://t1.daumcdn.net/keditor/emoticon/niniz/large/029.gif"><img src="https://t1.daumcdn.net/keditor/emoticon/niniz/large/029.gif" width="150" /></figure>'
+      }
+      else {
+        emo.innerHTML = '<p></p>'
+      }
+    }
+
+
+  }
+  drawEmoticon(keypoints) {
+    const keypointsArray = keypoints;
+
+    const thumb_tip = keypointsArray[4].y;
+    const thumb_ip = keypointsArray[3].y;
+    const thumb_mcp = keypointsArray[2].y;
+    const index_finger_mcp = keypointsArray[5].y;
+    const middle_finger_mcp = keypointsArray[9].y;
+    const ring_finger_mcp = keypointsArray[13].y;
+    const pinky_finger_mcp = keypointsArray[17].y;
+
+    if (thumb_tip < thumb_mcp
+      && index_finger_mcp < middle_finger_mcp
+      && middle_finger_mcp < ring_finger_mcp
+      && ring_finger_mcp < pinky_finger_mcp
+      && thumb_ip < pinky_finger_mcp) {
+      return this.is_up_or_down(keypoints, true)
+
+    }
+    else if (thumb_tip > thumb_mcp
+      && index_finger_mcp > middle_finger_mcp
+      && middle_finger_mcp > ring_finger_mcp
+      && ring_finger_mcp > pinky_finger_mcp
+      && thumb_ip > pinky_finger_mcp) {
+      return this.is_up_or_down(keypoints, false)
+    }
+    else {
+      return 'none'
+    }
+  }
+
+  is_up_or_down(keypoints, is_up) {
+    const keypointsArray = keypoints;
+    // for x axis
+    const wrist = keypointsArray[0].x;
+    const index_finger_pip = keypointsArray[6].x;
+    const index_finger_tip = keypointsArray[8].x;
+    const ring_finger_pip = keypointsArray[14].x;
+    const ring_finger_tip = keypointsArray[16].x;
+
+    if (
+      (wrist > index_finger_pip
+        && index_finger_tip > index_finger_pip
+        && ring_finger_tip > ring_finger_pip)
+      || (wrist < index_finger_pip
+        && index_finger_tip < index_finger_pip
+        && ring_finger_tip < ring_finger_pip)) {
+      if (is_up == true) {
+        return 'up'
+      }
+      else {
+        return 'down'
+      }
+    }
+    else {
+      return 'none'
+    }
+  }
+
+
+  /**
+   * Draw the keypoints on the video.
+   * @param keypoints A list of keypoints.
+   * @param handedness Label of hand (either Left or Right).
+   */
+  drawKeypoints(keypoints, handedness) {
+    const keypointsArray = keypoints;
+    this.ctx.fillStyle = handedness === 'Left' ? 'Red' : 'Blue';
+    this.ctx.strokeStyle = 'White';
+    this.ctx.lineWidth = 2;
+
+    for (let i = 0; i < keypointsArray.length; i++) {
+      const y = keypointsArray[i].x;
+      const x = keypointsArray[i].y;
+      this.drawPoint(x - 2, y - 2, 3);
+    }
+
+    const fingers = Object.keys(fingerLookupIndices);
+    for (let i = 0; i < fingers.length; i++) {
+      const finger = fingers[i];
+      const points = fingerLookupIndices[finger].map(idx => keypoints[idx]);
+      this.drawPath(points, false);
+    }
+  }
+
+  drawPath(points, closePath) {
+    const region = new Path2D();
+    region.moveTo(points[0].x, points[0].y);
+    for (let i = 1; i < points.length; i++) {
+      const point = points[i];
+      region.lineTo(point.x, point.y);
+    }
+
+    if (closePath) {
+      region.closePath();
+    }
+    this.ctx.stroke(region);
+  }
+
+  drawPoint(y, x, r) {
+    this.ctx.beginPath();
+    this.ctx.arc(x, y, r, 0, 2 * Math.PI);
+    this.ctx.fill();
+  }
+
+
+}
+
+async function createDetector() {
+  const hands = handPoseDetection.SupportedModels.MediaPipeHands;
+
+  return handPoseDetection.createDetector(hands, {
+    runtime: 'tfjs',
+    modelType: 'full', //or lite
+    maxHands: 1, // or 2~10
+  })
+
+}
+
+
+async function renderResult() {
+  if (camera.video.readyState < 2) {
+    await new Promise((resolve) => {
+      camera.video.onloadeddata = () => {
+        resolve(video);
+      };
+    });
+  }
+
+  let hands = null;
+
+  if (detector != null) {
+
+    try {
+      hands = await detector.estimateHands(
+        camera.video,
+        { flipHorizontal: false });
+    } catch (error) {
+      detector.dispose();
+      detector = null;
+      alert(error);
+    }
+  }
+
+  camera.drawCtx();
+
+  if (hands && hands.length > 0) {
+    camera.drawResults(hands);
+  }
+}
+
+async function renderPrediction() {
+  await renderResult();
+
+  rafId = requestAnimationFrame(renderPrediction);
+};
+
+async function app() {
+
+  camera = await Camera.setupCamera();
+  console.log(tf.getBackend());
+  detector = await createDetector();
+  console.log(tf.getBackend());
+  renderPrediction();
+};
+
+app();
+
+</script>

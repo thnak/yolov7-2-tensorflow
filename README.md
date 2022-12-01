@@ -23,5 +23,6 @@
   <li><a href="https://developer.mozilla.org/en-US/docs/Web/API/WebGL_API/By_example/Detect_WebGL">Detect WebGL</a></li>
   <li><a href="https://pureadmin.qub.ac.uk/ws/portalfiles/portal/258394935/Deep.pdf">Automated Individual Pig Localisation Tracking and Behaviour Metric Extraction Using Deep Learning</a></li>
   <li><a href='https://medium.com/augmented-startups/how-hyperparameters-of-yolov5-works-ec4d25f311a2'>How do Hyperparameters of YOLOv5 Work?❓</a></li>
+  <li><a href="https://da2so.tistory.com/">da2so</a></li>
 </ul>
 </details>
