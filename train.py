@@ -109,6 +109,7 @@ def train(hyp, opt, device, tb_writer=None, evo_num=[0, 0]):
     else:
         model = Model(opt.cfg, ch=3, nc=nc, anchors=hyp.get(
             'anchors')).to(device)  # create
+        
     with torch_distributed_zero_first(rank):
         check_dataset(data_dict)  # check
     train_path = data_dict['train']
@@ -211,19 +212,14 @@ def train(hyp, opt, device, tb_writer=None, evo_num=[0, 0]):
                 (len(pg2), len(pg1), len(pg0)))
     del pg0, pg1, pg2
 
-    # Scheduler https://arxiv.org/pdf/1812.01187.pdf
-    # https://pytorch.org/docs/stable/_modules/torch/optim/lr_scheduler.html#OneCycleLR
     if opt.linear_lr:
         def lf(x): return (1 - x / (epochs - 1)) * \
             (1.0 - hyp['lrf']) + hyp['lrf']  # linear
     else:
         lf = one_cycle(1, hyp['lrf'], epochs)  # cosine 1->hyp['lrf']
-    scheduler = lr_scheduler.LambdaLR(optimizer, lr_lambda=lf)
-    # plot_lr_scheduler(optimizer, scheduler, epochs)
+        
 
-    # EMA
     ema = ModelEMA(model) if rank in [-1, 0] else None
-
     # Resume
     start_epoch, best_fitness = 0, 0.0
     if pretrained:
@@ -252,7 +248,10 @@ def train(hyp, opt, device, tb_writer=None, evo_num=[0, 0]):
                         (weights, ckpt['epoch'], epochs))
             epochs += ckpt['epoch']  # finetune additional epochs
         del ckpt, state_dict
-
+        
+    scheduler = lr_scheduler.LambdaLR(optimizer, lr_lambda=lf)
+    
+    
     # Image sizes
     gs = max(int(model.stride.max()), 32)  # grid size (max stride)
     # number of detection layers (used for scaling hyp['obj'])
@@ -598,7 +597,7 @@ def train(hyp, opt, device, tb_writer=None, evo_num=[0, 0]):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--weights', type=str,
-                        default='yolo7.pt', help='initial weights path')
+                        default='', help='initial weights path')
     parser.add_argument('--cfg', type=str, default='', help='model.yaml path')
     parser.add_argument('--data', type=str,
                         default='data/coco.yaml', help='data.yaml path')
