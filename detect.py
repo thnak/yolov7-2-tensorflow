@@ -165,7 +165,7 @@ def detect(save_img=False):
 
             # Stream results
             if view_img :
-                if dataset.mode != 'image':
+                if dataset.mode == 'image':
                     im0 = cv2.cvtColor(im0,cv2.COLOR_BGR2RGB)
                     Image.fromarray(im0, mode='RGB').show()
                 else:
