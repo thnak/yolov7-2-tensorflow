@@ -451,7 +451,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         self.imgs = [None] * n  
                        
         if cache_images == 'ram' or cache_images == 'disk':
-            if cache_images == 'ram' and self.check_cache_ram(prefix=prefix):
+            if cache_images == 'ram' and not self.check_cache_ram(prefix=prefix):
                 cache_images = 'disk'
             if cache_images == 'disk':
                 self.im_cache_dir = Path(Path(self.img_files[0]).parent.as_posix() + '_npy')
@@ -474,17 +474,16 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
 
     
     def check_cache_ram(self, prefix='',safety_margin=1):
-        # Check image caching requirements vs available memory
-        b, gb = 0, 1 << 30  # bytes of cached images, bytes per gigabytes
+        b, gb = 0, 1 << 30
         for _ in range(self.n):
             im = cv2.imread(self.img_files[_])  # sample image
             ratio = self.img_size / max(im.shape[0], im.shape[1])  # max(h, w)  # ratio
             b += im.nbytes * ratio ** 2
         mem = psutil.virtual_memory()
         cache = b*1000 < mem.available*safety_margin  # to cache or not to cache, that is the question
-        print(f"{prefix}{b / gb:.1f}GB RAM required (estimated), "
-                        f"{mem.available / gb:.1f}/{mem.total / gb:.1f}GB available, "
-                        f"{'caching images ✅' if cache else 'not caching images ⚠️'}")
+        print(f"{prefix}{b / gb:.3f}GB RAM required (estimate), "
+                        f"{mem.available / gb:.3f}/{mem.total / gb:.3f}GB available, "
+                        f"{'caching images RAM💾' if cache else 'caching images DISK💽'}")
         return cache
     
     def cache_labels(self, path=Path('./labels.cache'), prefix=''):
