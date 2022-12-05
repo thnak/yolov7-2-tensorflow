@@ -371,8 +371,7 @@ def splitDataset(inputFolder='', outputFolder='', trainRatio=0.75):
             for im in range(len(itempathTrain[0])):
                 shutil.copyfile(yoloArrFiles[0][im], os.path.join(
                     trainFolder_[0], itempathTrain[0][im].replace(imagesInputFolder, '')[1:]))
-                shutil.copyfile(yoloArrFiles[1][im], os.path.join(
-                    trainFolder_[1], itempathTrain[1][im].replace(labelsInputFolder, '')[1:]))
+                shutil.copyfile(yoloArrFiles[1][im], os.path.join(trainFolder_[1], itempathTrain[1][im].replace(labelsInputFolder, '')[1:]))
             print(f'trainFolder: {len(itempathTrain[0])} files, finished')
 
 
@@ -419,7 +418,71 @@ def reduce_Quality_of_PNG_image(path='', outpath='',count=0, jpgQuality=50):
         savePath = os.path.join(outpath,f'background_{count}.jpg')
         cv2.imwrite(savePath,img,[cv2.IMWRITE_JPEG_QUALITY,jpgQuality])
         count+=1
-reduce_Quality_of_PNG_image("D:/Users/Downloads/New folder", "D:/Users/Downloads/New folder (3)")
+# reduce_Quality_of_PNG_image("D:/Users/Downloads/New folder", "D:/Users/Downloads/New folder (3)")
 
 
 # reWriteIndex(inputFolder="D:/Users/Downloads/Pig behavior.v1-walking.yolov7pytorch/train/labels", outputFolder="D:/Users/Downloads/Pig behavior.v1-walking.yolov7pytorch/train/newlabel")
+
+
+def splitTrain2Val(datasetFolder='', rate = 0.15):
+    trainFolder = os.path.join(datasetFolder,'train')
+    valFolder = os.path.join(datasetFolder,'val')
+    sub_trainFolder, sub_valFolder = [], []
+    sub_trainFolder.append(os.path.join(trainFolder,'images'))
+    sub_trainFolder.append(os.path.join(trainFolder,'labels'))
+    sub_valFolder.append(os.path.join(valFolder,'images'))
+    sub_valFolder.append(os.path.join(valFolder,'labels'))
+    
+    if valFolder == '':
+        print('Not empty val folder')
+        exit()
+    
+    data = [[],[]]
+    result = [[],[]]
+    for item in os.listdir(sub_trainFolder[0]):
+        data[0].append(item)
+    for item in os.listdir(sub_trainFolder[1]):
+        data[1].append(item)
+    from pathlib import Path
+    
+    if len(data[0]) > len(data[1]):
+        for i in data[1]:
+            strpath = Path(i)
+            iNamed = strpath.stem
+            for item in data[0]:
+                if iNamed in item:
+                    result[0].append(item)
+                    result[1].append(i)        
+    else:
+        print(f'total {len(data[0])} item')
+        for i in data[0]:
+            strpath = Path(i)
+            iNamed = strpath.stem
+            for item in data[1]:
+                if iNamed in item:
+                    result[0].append(item)
+                    result[1].append(i)  
+    print(f'total: {len(result[0])} items')
+    totalVal = int(round(len(result[0]) * rate,0))
+    totalVal = len(result[0]) - totalVal
+    import random
+    import shutil
+    for _ in range(totalVal):
+        inx = random.randint(0,len(result[0])-1)
+        result[0].remove(result[0][inx])
+        result[1].remove(result[1][inx])
+    print(f'len {len(result[0])}')
+    for _ in range(len(result[0])):
+        imgPath = result[0][_]
+        txtPath = result[1][_]
+        imgPathout = Path(os.path.join(sub_valFolder[0], imgPath))
+        txtPathout = Path(os.path.join(sub_valFolder[1], txtPath))     
+        txtPathin = Path(os.path.join(sub_trainFolder[1], txtPath))
+        imgPathin = Path(os.path.join(sub_trainFolder[0], imgPath))
+        print(f' in: {imgPathin}, out: {imgPathout}') 
+        os.makedirs(os.path.join(valFolder, sub_valFolder[0]), exist_ok=True)
+        os.makedirs(os.path.join(valFolder, sub_valFolder[1]), exist_ok=True)
+        shutil.copyfile(txtPathin, txtPathout, follow_symlinks=False)
+        shutil.copyfile(imgPathin,imgPathout,follow_symlinks=False)     
+        
+# splitTrain2Val("D:/Users/Downloads/dataset/train", "D:/Users/Downloads/dataset/val", 0.2)

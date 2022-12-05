@@ -60,7 +60,7 @@ def exif_size(img):
     return s
 
 
-def create_dataloader(path, imgsz, batch_size, stride, opt, hyp=None, augment=False, cache=False, pad=0.0, rect=False,
+def create_dataloader(path, imgsz, batch_size, stride, opt, hyp=None, augment=False, cache='', pad=0.0, rect=False,
                       rank=-1, world_size=1, workers=8, image_weights=False, quad=False, prefix=''):
     # Make sure only the first process in DDP process the dataset first, and the following others can use the cache
     with torch_distributed_zero_first(rank):
@@ -68,7 +68,7 @@ def create_dataloader(path, imgsz, batch_size, stride, opt, hyp=None, augment=Fa
                                       augment=augment,  # augment images
                                       hyp=hyp,  # augmentation hyperparameters
                                       rect=rect,  # rectangular training
-                                      cache_images=cache,
+                                      cache_images=cache.lower(),
                                       single_cls=opt.single_cls,
                                       stride=int(stride),
                                       pad=pad,
@@ -354,7 +354,7 @@ def img2label_paths(img_paths):
 
 class LoadImagesAndLabels(Dataset):  # for training/testing
     def __init__(self, path, img_size=640, batch_size=16, augment=False, hyp=None, rect=False, image_weights=False,
-                 cache_images=False, single_cls=False, stride=32, pad=0.0, prefix=''):
+                 cache_images='ram', single_cls=False, stride=32, pad=0.0, prefix=''):
         self.img_size = img_size
         self.augment = augment
         self.hyp = hyp
@@ -448,24 +448,11 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             self.batch_shapes = np.ceil(np.array(shapes) * img_size / stride + pad).astype(np.int) * stride
 
         # Cache images into memory for faster training (WARNING: large datasets may exceed system RAM)
-        self.imgs = [None] * n
-        sizeOfDataset = 0
-        totalRam = psutil.virtual_memory()[0]
-        freeSpace = psutil.disk_usage('/')[2]          
-        for file_i in self.img_files:
-            sizeOfDataset += os.path.getsize(file_i)
-        if sizeOfDataset > totalRam or sizeOfDataset*7 > totalRam:
-            print(colorstr(f'datasets:'),colored(f'The dataset is larger than Total RAM, the program may be interrupted unexpectedly','red'),colored(f'dataset size: {sizeOfDataset / 1E9:.3f}GB, total RAM size{totalRam / 1E9:.3f}GB','red'))
-            print(colorstr(f'datasets:'),colored(f'size: {sizeOfDataset / 1E9:.3f}GB. Estimated buffer size is {sizeOfDataset*7 / 1E9:.3f}GB','red'),colored(f'dataset size: {sizeOfDataset / 1E9:.3f}GB, total RAM size{totalRam / 1E9:.3f}GB','red'))
-            cache_images = 'disk'
-            if sizeOfDataset*7 > freeSpace:
-                cache_images = None
-                print(colorstr('datasets:'),'not using cache, not enough disk space')            
-        else:
-            print(colorstr(f'datasets:'),colored(f'{sizeOfDataset / 1E9:.3f}GB size, total RAM size {totalRam / 1E9:.3f}GB','green'))
-            cache_images = 'ram'     
+        self.imgs = [None] * n  
                        
-        if cache_images:
+        if cache_images == 'ram' or cache_images == 'disk':
+            if cache_images == 'ram' and self.check_cache_ram(prefix=prefix):
+                cache_images = 'disk'
             if cache_images == 'disk':
                 self.im_cache_dir = Path(Path(self.img_files[0]).parent.as_posix() + '_npy')
                 self.img_npy = [self.im_cache_dir / Path(f).with_suffix('.npy').name for f in self.img_files]
@@ -482,9 +469,24 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                 else:
                     self.imgs[i], self.img_hw0[i], self.img_hw[i] = x
                     gb += self.imgs[i].nbytes
-                pbar.desc = f'{prefix}Caching images ({gb / 1E9:.3f}GB '+'RAM)' if cache_images != 'disk' else 'Disk)'
+                pbar.desc = f'{prefix}Caching images ({gb / 1E9:.3f}GB {cache_images.upper()})'
             pbar.close()
 
+    
+    def check_cache_ram(self, prefix='',safety_margin=1):
+        # Check image caching requirements vs available memory
+        b, gb = 0, 1 << 30  # bytes of cached images, bytes per gigabytes
+        for _ in range(self.n):
+            im = cv2.imread(self.img_files[_])  # sample image
+            ratio = self.img_size / max(im.shape[0], im.shape[1])  # max(h, w)  # ratio
+            b += im.nbytes * ratio ** 2
+        mem = psutil.virtual_memory()
+        cache = b*1000 < mem.available*safety_margin  # to cache or not to cache, that is the question
+        print(f"{prefix}{b / gb:.1f}GB RAM required, "
+                        f"{mem.available / gb:.1f}/{mem.total / gb:.1f}GB available, "
+                        f"{'caching images ✅' if cache else 'not caching images ⚠️'}")
+        return cache
+    
     def cache_labels(self, path=Path('./labels.cache'), prefix=''):
         # Cache dataset labels, check images and read shapes
         x = {}  # dict

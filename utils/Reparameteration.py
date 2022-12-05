@@ -4,8 +4,8 @@ import torch
 from utils.torch_utils import select_device, is_parallel
 import yaml
 import torch
-
-
+import os
+from utils.general import colorstr
 def Re_parameterization(inputWeightPath='v7-tiny-training.pt', outputWeightPath = 'cfg/deploy/yolov7.pt', nc = 1, cfgPath='cfg/deploy/yolov7-tiny.yaml'):
     yolov7w_idx= [118,122]
     yolov7e6_idx = [140,144]
@@ -13,8 +13,9 @@ def Re_parameterization(inputWeightPath='v7-tiny-training.pt', outputWeightPath 
     yolovye6e_idx = [261,265]
     
     
-    if cfgPath in 'cfg/deploy/yolov7-tiny.yaml' or cfgPath in 'cfg/deploy/yolov7-tiny-silu.yaml' or cfgPath in 'cfg/deploy/yolov7.yaml' or cfgPath  in  'cfg/deploy/yolov7x.yaml' or cfgPath in 'yolov7-w6.yaml' or cfgPath in 'yolov7-e6e.yaml' or cfgPath in 'yolov7-e6.yaml' or cfgPath in 'yolov7-d6.yaml':
-        if cfgPath in 'cfg/deploy/yolov7-tiny.yaml' or cfgPath in 'cfg/deploy/yolov7-tiny-silu.yaml':
+    if os.path.exists(cfgPath):
+        print(colorstr('Re-parameteration: ')+f'(Weight: {inputWeightPath}, outputWeight: {outputWeightPath}, numClass: {nc}, cfg: {cfgPath})')
+        if 'tiny' in cfgPath:
             total_= '77'
             print('Re-parameterizing yolov7-tiny')
         elif cfgPath in 'cfg/deploy/yolov7.yaml':
