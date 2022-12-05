@@ -482,7 +482,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             b += im.nbytes * ratio ** 2
         mem = psutil.virtual_memory()
         cache = b*1000 < mem.available*safety_margin  # to cache or not to cache, that is the question
-        print(f"{prefix}{b / gb:.1f}GB RAM required, "
+        print(f"{prefix}{b / gb:.1f}GB RAM required (estimated), "
                         f"{mem.available / gb:.1f}/{mem.total / gb:.1f}GB available, "
                         f"{'caching images ✅' if cache else 'not caching images ⚠️'}")
         return cache
