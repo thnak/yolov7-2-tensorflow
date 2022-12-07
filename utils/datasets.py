@@ -480,10 +480,10 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             ratio = self.img_size / max(im.shape[0], im.shape[1])  # max(h, w)  # ratio
             b += im.nbytes * ratio ** 2
         mem = psutil.virtual_memory()
-        cache = b*1000 < mem.available*safety_margin  # to cache or not to cache, that is the question
+        cache = True if b < mem.available*safety_margin else False  # to cache or not to cache, that is the question
         print(f"{prefix}{b / gb:.3f}GB RAM required (estimate), "
                         f"{mem.available / gb:.3f}/{mem.total / gb:.3f}GB available, "
-                        f"{'caching images RAM💾' if cache else 'caching images DISK💽'}")
+                        f"{'caching images on RAM💾, reduce img-size to reduce the cache size' if cache else 'caching images DISK💽, reduce img-size to reduce the cache size'}")
         return cache
     
     def cache_labels(self, path=Path('./labels.cache'), prefix=''):
