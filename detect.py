@@ -181,7 +181,7 @@ def detect(save_img=False):
                     print(f"The image with the result is saved in: {save_path}")
                 else:  # 'video' or 'stream'
                     if opt.datacollection and saveImgCollect:
-                        mpx = 1250000
+                        mpx = 2000000
                         h,w = imOrigin.shape[:2]
                         scalePcnt = 100
                         if (h*w) > mpx:

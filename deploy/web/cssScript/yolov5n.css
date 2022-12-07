@@ -1,0 +1,10 @@
+*{
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+video,
+canvas {
+    max-width: 40vw;
+    max-height: 40vh;
+}

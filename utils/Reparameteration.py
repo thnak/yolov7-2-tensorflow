@@ -11,8 +11,6 @@ def Re_parameterization(inputWeightPath='v7-tiny-training.pt', outputWeightPath 
     yolov7e6_idx = [140,144]
     yolov7d6_idx = [162,166]
     yolovye6e_idx = [261,265]
-    
-    
     if os.path.exists(cfgPath):
         print(colorstr('Re-parameteration: ')+f'(Weight: {inputWeightPath}, outputWeight: {outputWeightPath}, numClass: {nc}, cfg: {cfgPath})')
         if 'tiny' in cfgPath:
@@ -56,7 +54,7 @@ def Re_parameterization(inputWeightPath='v7-tiny-training.pt', outputWeightPath 
         model.names = ckpt['model'].names
         model.nc = ckpt['model'].nc
         
-        if cfgPath in 'cfg/deploy/yolov7-tiny.yaml' or cfgPath in 'cfg/deploy/yolov7-tiny-silu.yaml' or cfgPath in 'cfg/deploy/yolov7.yaml' or cfgPath  in  'cfg/deploy/yolov7x.yaml':
+        if 'tiny' in cfgPath  or cfgPath in 'cfg/deploy/yolov7.yaml' or cfgPath  in 'cfg/deploy/yolov7x.yaml':
             for i in range((model.nc+5)*anchors):
                 model.state_dict()['model.'+total_+'.m.0.weight'].data[i, :, :, :] *= state_dict['model.'+total_+'.im.0.implicit'].data[:, i, : :].squeeze()
                 model.state_dict()['model.'+total_+'.m.1.weight'].data[i, :, :, :] *= state_dict['model.'+total_+'.im.1.implicit'].data[:, i, : :].squeeze()
@@ -109,6 +107,6 @@ def Re_parameterization(inputWeightPath='v7-tiny-training.pt', outputWeightPath 
         torch.save(ckpt, outputWeightPath)
         return True
     else:
-        print('the arguments is not compatible')
+        print(f'the arguments is not compatible cfg: {cfgPath}, weight: {inputWeightPath}')
         return False
     
