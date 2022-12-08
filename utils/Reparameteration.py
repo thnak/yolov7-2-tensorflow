@@ -15,31 +15,31 @@ def Re_parameterization(inputWeightPath='v7-tiny-training.pt', outputWeightPath 
         print(colorstr('Re-parameteration: ')+f'(Weight: {inputWeightPath}, outputWeight: {outputWeightPath}, numClass: {nc}, cfg: {cfgPath})')
         if 'tiny' in cfgPath:
             total_= '77'
-            print('Re-parameterizing yolov7-tiny')
+            print(colorstr('Re-parameterizing'),'yolov7-tiny')
         elif cfgPath in 'cfg/deploy/yolov7.yaml':
             total_ = '105'
-            print('Re-parameterizing yolov7')
+            print(colorstr('Re-parameterizing'),'yolov7')
         elif cfgPath  in  'cfg/deploy/yolov7x.yaml':
             total_ = '121'
-            print('Re-parameterizing yolov7x')
+            print(colorstr('Re-parameterizing'),'yolov7x')
         elif cfgPath in 'yolov7-w6.yaml':
             idx = yolov7w_idx[0]
             idx2 = yolov7w_idx[1]
-            print('Re-parameterizing yolov7-w6')
+            print(colorstr('Re-parameterizing'),'yolov7-w6')
         elif cfgPath in 'yolov7-e6e.yaml':
             idx = yolovye6e_idx[0]
             idx2 = yolovye6e_idx[1]
-            print('Re-parameterizing yolov7-e6e')
+            print(colorstr('Re-parameterizing'),'yolov7-e6e')
         elif cfgPath in 'yolov7-e6.yaml':
             idx = yolov7e6_idx[0]
             idx2 = yolov7e6_idx[1]  
-            print('Re-parameterizing yolov7-e6')          
+            print(colorstr('Re-parameterizing'),'yolov7-e6')          
         elif cfgPath in 'yolov7-d6.yaml':
             idx = yolov7d6_idx[0]
             idx2 = yolov7d6_idx[1]            
-            print('Re-parameterizing yolov7-d6')   
+            print(colorstr('Re-parameterizing'),'yolov7-d6')   
         
-        device = select_device('0'if torch.cuda.is_available() else 'cpu', batch_size=1)
+        device = select_device('0'if torch.cuda.is_available() else 'cpu', batch_size=8)
         ckpt = torch.load(inputWeightPath, map_location=device)
         model = Model(cfgPath, ch=3, nc=nc).to(device)
         with open(cfgPath) as f:
@@ -103,7 +103,7 @@ def Re_parameterization(inputWeightPath='v7-tiny-training.pt', outputWeightPath 
                 'training_results': None,
                 'epoch': -1}
 
-        print('save reparameterized model at:',outputWeightPath,'with deploy cfg:',cfgPath)
+        print(colorstr('Re-Parameter:'),f'saved model at:{outputWeightPath} deploy cfg:{cfgPath}')
         torch.save(ckpt, outputWeightPath)
         return True
     else:

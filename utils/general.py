@@ -21,7 +21,6 @@ import yaml
 from utils.google_utils import gsutil_getsize
 from utils.metrics import fitness
 from utils.torch_utils import init_torch_seeds
-
 # Settings
 torch.set_printoptions(linewidth=320, precision=5, profile='long')
 np.set_printoptions(linewidth=320, formatter={'float_kind': '{:11.5g}'.format})  # format short g, %precision=5
@@ -809,7 +808,7 @@ def strip_optimizer(f='best.pt', s=''):  # from utils.general import *;
         p.requires_grad = False
     torch.save(x, s or f)
     mb = os.path.getsize(s or f) / 1E6  # filesize
-    print(f"Optimizer stripped from {f},{(' saved as %s,' % s) if s else ''} {mb:.1f}MB")
+    print(colorstr('Optimizer:'),f"optimizer stripped from {f},{(' saved as %s,' % s) if s else ''} {mb:.3f}MB")
 
 
 def print_mutation(hyp, results, yaml_file='hyp_evolved.yaml', bucket=''):

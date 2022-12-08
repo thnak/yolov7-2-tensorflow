@@ -364,7 +364,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         self.mosaic_border = [-img_size // 2, -img_size // 2]
         self.stride = stride
         self.path = path        
-        self.albumentations = Albumentations() if augment else None
+        self.albumentations = Albumentations(hyp) if augment else None
 
         try:
             f = []  # image files
@@ -450,7 +450,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         # Cache images into memory for faster training (WARNING: large datasets may exceed system RAM)
         self.imgs = [None] * n  
                        
-        if cache_images == 'ram' or cache_images == 'disk':
+        if cache_images in ['ram','disk']:
             if cache_images == 'ram' and not self.check_cache_ram(prefix=prefix):
                 cache_images = 'disk'
             if cache_images == 'disk':
@@ -596,11 +596,10 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                                                  shear=hyp['shear'],
                                                  perspective=hyp['perspective'])
             
-            
             img, labels = self.albumentations(img, labels)
             nL = len(labels)
             # Augment colorspace
-            augment_hsv(img, hgain=hyp['hsv_h'], sgain=hyp['hsv_s'], vgain=hyp['hsv_v'])
+            # augment_hsv(img, hgain=hyp['hsv_h'], sgain=hyp['hsv_s'], vgain=hyp['hsv_v'])
 
             # Apply cutouts
             # if random.random() < 0.9:
@@ -624,18 +623,18 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             labels[:, [2, 4]] /= img.shape[0]  # normalized height 0-1
             labels[:, [1, 3]] /= img.shape[1]  # normalized width 0-1
 
-        if self.augment:
-            # flip up-down
-            if random.random() < hyp['flipud']:
-                img = np.flipud(img)
-                if nL:
-                    labels[:, 2] = 1 - labels[:, 2]
+        # if self.augment:
+        #     # flip up-down
+        #     if random.random() < hyp['flipud']:
+        #         img = np.flipud(img)
+        #         if nL:
+        #             labels[:, 2] = 1 - labels[:, 2]
 
-            # flip left-right
-            if random.random() < hyp['fliplr']:
-                img = np.fliplr(img)
-                if nL:
-                    labels[:, 1] = 1 - labels[:, 1]
+        #     # flip left-right
+        #     if random.random() < hyp['fliplr']:
+        #         img = np.fliplr(img)
+        #         if nL:
+        #             labels[:, 1] = 1 - labels[:, 1]
 
         labels_out = torch.zeros((nL, 6))
         if nL:
@@ -1235,23 +1234,28 @@ def pastein(image, labels, sample_labels, sample_images, sample_masks):
     return labels
 
 class Albumentations:
-    def __init__(self):
+    def __init__(self, hyp=None):
         self.transform = None
         
         import albumentations as A
         self.transform = A.Compose([
-            A.CLAHE(p=0.1),
-            A.RandomBrightnessContrast(brightness_limit=0.2, contrast_limit=0.2, p=0.1),
-            A.Blur(p=0.01),
-            A.MedianBlur(p=0.01),
-            A.ToGray(p=0.01),
-            A.ImageCompression(quality_lower=75, p=0.01),
-            A.ISONoise(p=0.01),],
+            A.CLAHE(p=hyp['CLAHE'], clip_limit=hyp['CLAHE_clip_limit'], tile_grid_size=(32,32)),
+            A.RandomBrightnessContrast(brightness_limit=hyp['brightness_limit'], contrast_limit=hyp['contrast_limit'], p=hyp['RandomBrightnessContrast']),
+            A.MedianBlur(p=hyp['MedianBlur'], blur_limit=hyp['MedianBlur_blur_limit']),
+            A.ToGray(p=hyp['toGray']),
+            A.ImageCompression(quality_lower=hyp['ImageCompression_quality_lower'], quality_upper=100, p=hyp['ImageCompression']),
+            A.ISONoise(p=hyp['ISONoise']),
+            A.RandomRotate90(p=hyp['RandomRotate90']),
+            A.HueSaturationValue(hue_shift_limit=hyp['HueSaturationValue_hue_shift_limit'], sat_shift_limit=hyp['HueSaturationValue_sat_shift_limit'], val_shift_limit=hyp['HueSaturationValue_val_shift_limit'], p=hyp['HueSaturationValue']),
+            A.HorizontalFlip(p=hyp['HorizontalFlip']),
+            A.VerticalFlip(p=hyp['VerticalFlip'])
+            ],
+            
             bbox_params=A.BboxParams(format='pascal_voc', label_fields=['class_labels']))
         logging.info(colorstr('albumentations: ') + ', '.join(f'{x}' for x in self.transform.transforms if x.p))
 
-    def __call__(self, im, labels, p=1.0):
-        if self.transform and random.random() < p:
+    def __call__(self, im, labels):
+        if self.transform:
             new = self.transform(image=im, bboxes=labels[:, 1:], class_labels=labels[:, 0])  # transformed
             im, labels = new['image'], np.array([[c, *b] for c, b in zip(new['class_labels'], new['bboxes'])])
         return im, labels

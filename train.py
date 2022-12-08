@@ -599,7 +599,7 @@ if __name__ == '__main__':
     parser.add_argument('--weights', type=str, default='', help='initial weights path')
     parser.add_argument('--cfg', type=str, default='', help='model.yaml path')
     parser.add_argument('--data', type=str, default='mydataset.yaml', help='data.yaml path')
-    parser.add_argument('--hyp', type=str, default='data/hyp.scratch.p5.yaml', help='hyperparameters path')
+    parser.add_argument('--hyp', type=str, default='data/hyp.scratch.custom.yaml', help='hyperparameters path')
     parser.add_argument('--epochs', type=int, default=300)
     parser.add_argument('--batch-size', type=int, default=16, help='total batch size for all GPUs')
     parser.add_argument('--img-size', nargs='+', type=int, default=[640, 640], help='[train, test] image sizes')
@@ -718,7 +718,7 @@ if __name__ == '__main__':
                 'hsv_h': (1, 0.0, 0.9),
                 'hsv_s': (1, 0.0, 0.9),
                 'hsv_v': (1, 0.0, 0.9),
-                'degrees': (1, 0.0, 45.0),  # image rotation (+/- deg)
+                'degrees': (1, 0.0, 90.0),  # image rotation (+/- deg)
                 'translate': (1, 0.0, 0.9),  # image translation (+/- fraction)
                 'scale': (1, 0.0, 0.9),  # image scale (+/- gain)
                 'shear': (1, 0.0, 10.0),  # image shear (+/- deg)

@@ -14,18 +14,38 @@ iou_t: 0.20  # IoU training threshold
 anchor_t: 4.0  # anchor-multiple threshold
 # anchors: 3  # anchors per output layer (0 to ignore)
 fl_gamma: 0.1  # focal loss gamma (efficientDet default gamma=1.5)
-hsv_h: 0.015  # image HSV-Hue augmentation (fraction)
-hsv_s: 0.7  # image HSV-Saturation augmentation (fraction)
-hsv_v: 0.4  # image HSV-Value augmentation (fraction)
+# hsv_h: 0.015  # image HSV-Hue augmentation (fraction)
+# hsv_s: 0.7  # image HSV-Saturation augmentation (fraction)
+# hsv_v: 0.4  # image HSV-Value augmentation (fraction)
 degrees: 0.0  # image rotation (+/- deg)
 translate: 0.2  # image translation (+/- fraction)
 scale: 0.1  # image scale (+/- gain)
 shear: 0.0  # image shear (+/- deg)
 perspective: 0.001  # image perspective (+/- fraction), range 0-0.001
-flipud: 0.5  # image flip up-down (probability)
-fliplr: 0.5  # image flip left-right (probability)
+# flipud: 0.5  # image flip up-down (probability)
+# fliplr: 0.5  # image flip left-right (probability)
 mosaic: 0.5  # image mosaic (probability)
 mixup: 0.5  # image mixup (probability)
 copy_paste: 0.5  # image copy paste (probability)
 paste_in: 0.5  # image copy paste (probability), use 0 for faster training
 loss_ota: 1 # use ComputeLossOTA, use 0 for faster training
+
+# Albumentation custom
+toGray: 0.01
+CLAHE: 0.01
+CLAHE_clip_limit: 4
+RandomBrightnessContrast: 0.01
+brightness_limit: 0.2
+contrast_limit: 0.2
+MedianBlur: 0.01
+MedianBlur_blur_limit: 7
+ISONoise: 0.01
+ImageCompression: 0.01
+ImageCompression_quality_lower: 75
+RandomRotate90: 0.01
+HueSaturationValue: 0.01
+HueSaturationValue_hue_shift_limit: 20
+HueSaturationValue_sat_shift_limit: 20
+HueSaturationValue_val_shift_limit: 20
+HorizontalFlip: 0.5
+VerticalFlip: 0.5
