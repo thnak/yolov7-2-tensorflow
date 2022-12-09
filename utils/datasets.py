@@ -544,17 +544,11 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
     def __len__(self):
         return len(self.img_files)
 
-    # def __iter__(self):
-    #     self.count = -1
-    #     print('ran dataset iter')
-    #     #self.shuffled_vector = np.random.permutation(self.nF) if self.augment else np.arange(self.nF)
-    #     return self
-
     def __getitem__(self, index):
         index = self.indices[index]  # linear, shuffled, or image_weights
 
         hyp = self.hyp
-        mosaic = self.mosaic and random.random() < hyp['mosaic']
+        mosaic = True if self.mosaic and random.random() < hyp['mosaic'] else False
         if mosaic:
             # Load mosaic
             if random.random() < 0.8:
@@ -598,12 +592,6 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             
             img, labels = self.albumentations(img, labels)
             nL = len(labels)
-            # Augment colorspace
-            # augment_hsv(img, hgain=hyp['hsv_h'], sgain=hyp['hsv_s'], vgain=hyp['hsv_v'])
-
-            # Apply cutouts
-            # if random.random() < 0.9:
-            #     labels = cutout(img, labels)
             
             if random.random() < hyp['paste_in']:
                 sample_labels, sample_images, sample_masks = [], [], [] 
@@ -622,19 +610,6 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             labels[:, 1:5] = xyxy2xywh(labels[:, 1:5])  # convert xyxy to xywh
             labels[:, [2, 4]] /= img.shape[0]  # normalized height 0-1
             labels[:, [1, 3]] /= img.shape[1]  # normalized width 0-1
-
-        # if self.augment:
-        #     # flip up-down
-        #     if random.random() < hyp['flipud']:
-        #         img = np.flipud(img)
-        #         if nL:
-        #             labels[:, 2] = 1 - labels[:, 2]
-
-        #     # flip left-right
-        #     if random.random() < hyp['fliplr']:
-        #         img = np.fliplr(img)
-        #         if nL:
-        #             labels[:, 1] = 1 - labels[:, 1]
 
         labels_out = torch.zeros((nL, 6))
         if nL:
