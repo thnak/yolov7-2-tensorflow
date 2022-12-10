@@ -363,7 +363,9 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         self.mosaic = self.augment and not self.rect  # load 4 images at a time into a mosaic (only during training)
         self.mosaic_border = [-img_size // 2, -img_size // 2]
         self.stride = stride
-        self.path = path        
+        self.path = path   
+        self.cache_images = cache_images
+        self.img_npy = []
         self.albumentations = Albumentations(hyp) if augment else None
 
         try:
@@ -450,10 +452,10 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         # Cache images into memory for faster training (WARNING: large datasets may exceed system RAM)
         self.imgs = [None] * n  
                        
-        if cache_images in ['ram','disk']:
-            if cache_images == 'ram' and not self.check_cache_ram(prefix=prefix):
-                cache_images = 'disk'
-            if cache_images == 'disk':
+        if self.cache_images in ['ram','disk']:
+            if self.cache_images == 'ram' and not self.check_cache_ram(prefix=prefix):
+                self.cache_images = 'disk'
+            if self.cache_images == 'disk':
                 self.im_cache_dir = Path(Path(self.img_files[0]).parent.as_posix() + '_npy')
                 self.img_npy = [self.im_cache_dir / Path(f).with_suffix('.npy').name for f in self.img_files]
                 self.im_cache_dir.mkdir(parents=True, exist_ok=True)
@@ -462,14 +464,14 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             results = ThreadPool(8).imap(lambda x: load_image(*x), zip(repeat(self), range(n)))
             pbar = tqdm(enumerate(results), total=n)
             for i, x in pbar:
-                if cache_images == 'disk':
+                if self.cache_images == 'disk':
                     if not self.img_npy[i].exists():
                         np.save(self.img_npy[i].as_posix(), x[0])
                     gb += self.img_npy[i].stat().st_size
                 else:
                     self.imgs[i], self.img_hw0[i], self.img_hw[i] = x
                     gb += self.imgs[i].nbytes
-                pbar.desc = f'{prefix}Caching images ({gb / 1E9:.3f}GB {cache_images.upper()})'
+                pbar.desc = f'{prefix}Caching images ({gb / 1E9:.3f}GB {self.cache_images.upper()})'
             pbar.close()
 
     
@@ -659,7 +661,8 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
 def load_image(self, index):
     # loads 1 image from dataset, returns img, original hw, resized hw
     img = self.imgs[index]
-    if img is None:  # not cached
+    imgnpy = self.img_npy[index]
+    if not img and not os.path.exists(imgnpy):  # not cached
         path = self.img_files[index]
         img = cv2.imread(path)  # BGR
         assert img is not None, 'Image Not Found ' + path
@@ -669,24 +672,14 @@ def load_image(self, index):
             interp = cv2.INTER_AREA if r < 1 and not self.augment else cv2.INTER_LINEAR
             img = cv2.resize(img, (int(w0 * r), int(h0 * r)), interpolation=interp)
         return img, (h0, w0), img.shape[:2]  # img, hw_original, hw_resized
-    else:
+    elif img:
         return self.imgs[index], self.img_hw0[index], self.img_hw[index]  # img, hw_original, hw_resized
+    elif os.path.exists(imgnpy):
+        imgg = Image.fromarray(np.load(imgnpy,mmap_mode='r'), mode='RGB')
+        imgg = cv2.cvtColor(np.array(imgg), cv2.COLOR_RGB2BGR)
+        return imgg, imgg.shape[:2], imgg.shape[:2]
 
-
-def augment_hsv(img, hgain=0.5, sgain=0.5, vgain=0.5):
-    r = np.random.uniform(-1, 1, 3) * [hgain, sgain, vgain] + 1  # random gains
-    hue, sat, val = cv2.split(cv2.cvtColor(img, cv2.COLOR_BGR2HSV))
-    dtype = img.dtype  # uint8
-
-    x = np.arange(0, 256, dtype=np.int16)
-    lut_hue = ((x * r[0]) % 180).astype(dtype)
-    lut_sat = np.clip(x * r[1], 0, 255).astype(dtype)
-    lut_val = np.clip(x * r[2], 0, 255).astype(dtype)
-
-    img_hsv = cv2.merge((cv2.LUT(hue, lut_hue), cv2.LUT(sat, lut_sat), cv2.LUT(val, lut_val))).astype(dtype)
-    cv2.cvtColor(img_hsv, cv2.COLOR_HSV2BGR, dst=img)  # no return needed
-
-
+    
 def hist_equalize(img, clahe=True, bgr=False):
     # Equalize histogram on BGR image 'img' with img.shape(n,m,3) and range 0-255
     yuv = cv2.cvtColor(img, cv2.COLOR_BGR2YUV if bgr else cv2.COLOR_RGB2YUV)
