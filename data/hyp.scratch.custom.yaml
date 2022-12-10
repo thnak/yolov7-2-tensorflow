@@ -17,7 +17,7 @@ fl_gamma: 0.0
 degrees: 0.0
 translate: 0.2
 scale: 0.1
-shear: 0.0
+shear: 0.01
 perspective: 0.0005
 mosaic: 1
 mixup: 0.15
@@ -39,6 +39,6 @@ RandomRotate90: 0.09
 HueSaturationValue: 0.5
 HueSaturationValue_hue_shift_limit: 1
 HueSaturationValue_sat_shift_limit: 70
-HueSaturationValue_val_shift_limit: 40
+HueSaturationValue_val_shift_limit: 30
 HorizontalFlip: 0.5
-VerticalFlip: 0
+VerticalFlip: 0.5
