@@ -675,8 +675,7 @@ def load_image(self, index):
     elif img:
         return self.imgs[index], self.img_hw0[index], self.img_hw[index]  # img, hw_original, hw_resized
     elif os.path.exists(imgnpy):
-        imgg = Image.fromarray(np.load(imgnpy,mmap_mode='r'), mode='RGB')
-        imgg = cv2.cvtColor(np.array(imgg), cv2.COLOR_RGB2BGR)
+        imgg = np.load(imgnpy,mmap_mode='r')
         return imgg, imgg.shape[:2], imgg.shape[:2]
 
     
