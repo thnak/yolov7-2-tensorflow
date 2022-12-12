@@ -18,8 +18,8 @@ if __name__ == '__main__':
     parser.add_argument("-i", "--image", help="image path")
     parser.add_argument("-o", "--output",default='./', help="image output path")
     parser.add_argument("-v", "--video",  help="video path or camera index ")
-    parser.add_argument("--end2end", default=False, action="store_true",
-                        help="use end2end engine")
+    parser.add_argument("--end2end", action="store_true", help="use end2end engine")
+    parser.add_argument("--nosave", action="store_true", help="use end2end engine")
 
     args = parser.parse_args()
     print(args)
@@ -32,4 +32,4 @@ if __name__ == '__main__':
       origin_img = pred.inference(img_path, conf=0.1, end2end=args.end2end)
       cv2.imwrite("%s" %args.output , origin_img)
     if video:
-      pred.detect_video(video, conf=0.1, end2end=args.end2end, video_outputPath=args.output) # set 0 use a webcam
+      pred.detect_video(video, conf=0.1, end2end=args.end2end, video_outputPath=args.output,noSave=args.nosave) # set 0 use a webcam

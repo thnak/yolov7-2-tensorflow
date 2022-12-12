@@ -69,6 +69,7 @@ class BaseEngine(object):
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         if not noSave:
+            print(f'Save video at: {video_outputPath}')
             out = cv2.VideoWriter(video_outputPath,fourcc,fps,(width,height))
         fps = 0
         avg = []
@@ -324,23 +325,16 @@ def vis(img, boxes, scores, cls_ids, conf=0.5, class_names=None):
         y0 = int(box[1])
         x1 = int(box[2])
         y1 = int(box[3])
-
-        color = (_COLORS[cls_id] * 255).astype(np.uint8).tolist()
         text = '{}:{:.2f}'.format(class_names[cls_id], score)
         txt_bk_color = (_COLORS[cls_id] * 255 * 0.7).astype(np.uint8).tolist()
         txt_color = (0, 0, 0) if np.mean(_COLORS[cls_id]) > 0.5 else (255, 255, 255)
         
         txt_size = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.4, 1)[0]
-        cv2.rectangle(img, (x0, y0), (x1, y1), color, 2)
-        
+        cv2.rectangle(img, (x0, y0), (x1, y1), txt_bk_color, 2)
         c1, c2 = (x0, y0), (x1, y1)
         c2 = c1[0] + txt_size[0], c1[1] - txt_size[1] - 3
-        cv2.drawContours(img, [np.array([(c1[0] + txt_size[0], c1[1] - txt_size[1] - 3), (c1[0] + txt_size[0], c1[1] ), (c1[0] + txt_size[0] + txt_size[1] + 3, c1[1])])], 0, color, -1, 16)
-        
+        cv2.drawContours(img, [np.array([(c1[0] + txt_size[0], c1[1] - txt_size[1] - 3), (c1[0] + txt_size[0], c1[1] ), (c1[0] + txt_size[0] + txt_size[1] + 3, c1[1])])], 0, txt_bk_color, -1, 16)
         cv2.rectangle(img, c1, c2, txt_bk_color, -1, cv2.LINE_AA)  # filled
-        
-        # cv2.rectangle(img,(x0, y0 + 1),(x0 + txt_size[0] + 1, y0 + int(1.5 * txt_size[1])),txt_bk_color,-1)
         cv2.putText(img, text, (c1[0], c1[1] - 2), 0, 0.4, txt_color, thickness=1, lineType=cv2.LINE_AA)
-        # cv2.putText(img, text, (x0, y0 + txt_size[1]), cv2.FONT_HERSHEY_SIMPLEX, 0.4, txt_color, thickness=1)
 
     return img
