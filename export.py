@@ -24,14 +24,14 @@ if __name__ == '__main__':
     parser.add_argument('--dynamic', action='store_true', help='dynamic ONNX axes')
     parser.add_argument('--dynamic-batch', action='store_true', help='dynamic batch onnx for tensorrt and onnx-runtime')
     parser.add_argument('--grid', action='store_true', help='export Detect() layer grid')
-    parser.add_argument('--end2end', action='store_true', help='export end2end onnx')
+    parser.add_argument('--end2end', action='store_true', help='export end2end onnx (/end2end/EfficientNMS_TRT)')
     parser.add_argument('--max-wh', type=int, default=None, help='None for tensorrt nms, int value for onnx-runtime nms')
     parser.add_argument('--topk-all', type=int, default=100, help='topk objects for every images')
     parser.add_argument('--iou-thres', type=float, default=0.45, help='iou threshold for NMS')
     parser.add_argument('--conf-thres', type=float, default=0.25, help='conf threshold for NMS')
     parser.add_argument('--device', default='cpu', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     parser.add_argument('--simplify', action='store_true', help='simplify onnx model')
-    parser.add_argument('--include-nms', action='store_true', help='export end2end onnx')
+    parser.add_argument('--include-nms', action='store_true', help='export end2end onnx(EfficientNMS_TRT)')
     parser.add_argument('--fp16', action='store_true', help='CoreML FP16 half-precision export')
     parser.add_argument('--int8', action='store_true', help='CoreML INT8 quantization')
     opt = parser.parse_args()
@@ -183,7 +183,7 @@ if __name__ == '__main__':
                 import onnxsim
 
                 print('\nStarting to simplify ONNX...')
-                onnx_model, check = onnxsim.simplify(onnx_model, dynamic_input_shape=opt.dynamic,input_shapes={'images': list(img.shape)} if opt.dynamic else None)
+                onnx_model, check = onnxsim.simplify(onnx_model)
                 assert check, 'assert check failed'
             except Exception as e:
                 print(f'Simplifier failure: {e}')
