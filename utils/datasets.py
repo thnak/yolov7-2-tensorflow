@@ -463,11 +463,20 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             self.img_hw0, self.img_hw = [None] * n, [None] * n
             results = ThreadPool(8).imap(lambda x: load_image(*x), zip(repeat(self), range(n)))
             pbar = tqdm(enumerate(results), total=n)
+            checkimgSizeStatus = False
             for i, x in pbar:
                 if self.cache_images == 'disk':
                     if not self.img_npy[i].exists():
                         np.save(self.img_npy[i].as_posix(), x[0])
-                    gb += self.img_npy[i].stat().st_size
+                    else:
+                        if not checkimgSizeStatus:
+                            testSize = np.load(self.img_npy[i])
+                            if self.img_size[0] in testSize.shape[:2]:
+                                checkimgSizeStatus = True
+                            else:
+                                print(colored(f'You need to recache dataset by remove folder {self.im_cache_dir}','red'))
+                                exit()                           
+                    gb += os.path.getsize(self.img_npy[i])
                 else:
                     self.imgs[i], self.img_hw0[i], self.img_hw[i] = x
                     gb += self.imgs[i].nbytes
