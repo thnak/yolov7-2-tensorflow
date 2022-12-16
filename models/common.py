@@ -909,7 +909,7 @@ class autoShape(nn.Module):
             s = im.shape[:2]  # HWC
             shape0.append(s)  # image shape
             g = (size / max(s))  # gain
-            shape1.append([y * g for y in s])
+            shape1.append([int(y * g) for y in s])
             imgs[i] = im  # update
         shape1 = [make_divisible(x, int(self.stride.max())) for x in np.stack(shape1, 0).max(0)]  # inference shape
         x = [letterbox(im, new_shape=shape1, auto=False)[0] for im in imgs]  # pad

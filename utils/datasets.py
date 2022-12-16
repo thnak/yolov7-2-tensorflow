@@ -471,10 +471,10 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                     else:
                         if not checkimgSizeStatus:
                             testSize = np.load(self.img_npy[i])
-                            if self.img_size[0] in testSize.shape[:2]:
+                            if self.img_size in testSize.shape[:2]:
                                 checkimgSizeStatus = True
                             else:
-                                print(colored(f'You need to recache dataset by remove folder {self.im_cache_dir}','red'))
+                                print(colored(f'You need to re-cache dataset by remove folder {self.im_cache_dir}','red'))
                                 exit()                           
                     gb += os.path.getsize(self.img_npy[i])
                 else:
