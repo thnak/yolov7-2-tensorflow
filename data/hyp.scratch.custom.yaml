@@ -43,3 +43,7 @@ HueSaturationValue_val_shift_limit: 30
 HorizontalFlip: 0.5
 VerticalFlip: 0.5
 ChannelDropout: 0.1
+Cutout: 0.1
+Cutout_max_h_w_size: 1
+Cutout_num_holes: 10
+PixelDropout: 0.1

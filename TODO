@@ -1,1 +1,4 @@
-model-tiny-640-:
+model-tiny-640-: False
+model-640: False
+model-tiny-1280: False
+model-1280: False
