@@ -42,3 +42,4 @@ HueSaturationValue_sat_shift_limit: 70
 HueSaturationValue_val_shift_limit: 30
 HorizontalFlip: 0.5
 VerticalFlip: 0.5
+ChannelDropout: 0.1

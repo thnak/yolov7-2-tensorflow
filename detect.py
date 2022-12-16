@@ -177,18 +177,11 @@ def detect(save_img=False):
             # Save results (image with detections)
             if save_img or opt.datacollection:
                 if dataset.mode == 'image' and not opt.datacollection:
-                    cv2.imwrite(save_path, imOrigin,[cv2.IMWRITE_JPEG_QUALITY,65])
+                    cv2.imwrite(save_path, imOrigin)
                     print(f"The image with the result is saved in: {save_path}")
                 else:  # 'video' or 'stream'
                     if opt.datacollection and saveImgCollect:
-                        mpx = 2000000
-                        h,w = imOrigin.shape[:2]
-                        scalePcnt = 100
-                        if (h*w) > mpx:
-                            scalePcnt = round(((h*w) / mpx)*100,0)
-                            scalePcnt = round((100*100) / scalePcnt,1)
-                        imOrigin = cv2.resize(imOrigin,(int(imOrigin.shape[1] * scalePcnt / 100),int(imOrigin.shape[0] * scalePcnt / 100)))
-                        cv2.imwrite(save_path, imOrigin,[cv2.IMWRITE_JPEG_QUALITY,65])
+                        cv2.imwrite(save_path, imOrigin)
                         print(f"Collected image with the result is saved in: {save_path}")
                     elif not opt.datacollection and dataset.mode != 'image':        
                         if vid_path != save_path:  # new video

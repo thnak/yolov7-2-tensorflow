@@ -1224,7 +1224,8 @@ class Albumentations:
             A.RandomRotate90(p=hyp['RandomRotate90']),
             A.HueSaturationValue(hue_shift_limit=hyp['HueSaturationValue_hue_shift_limit'], sat_shift_limit=hyp['HueSaturationValue_sat_shift_limit'], val_shift_limit=hyp['HueSaturationValue_val_shift_limit'], p=hyp['HueSaturationValue']),
             A.HorizontalFlip(p=hyp['HorizontalFlip']),
-            A.VerticalFlip(p=hyp['VerticalFlip'])
+            A.VerticalFlip(p=hyp['VerticalFlip']),
+            A.ChannelDropout(p=hyp['ChannelDropout'])
             ],
             
             bbox_params=A.BboxParams(format='pascal_voc', label_fields=['class_labels']))

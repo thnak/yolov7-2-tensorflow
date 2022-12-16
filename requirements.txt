@@ -17,7 +17,6 @@ pycuda
 nvidia-tensorrt
 nvidia-pyindex
 youtube_dl
-
 # Logging -------------------------------------
 tensorboard>=2.4.1
 wandb
@@ -41,7 +40,7 @@ openvino-dev  # OpenVINO export
 pyadl
 ipython  # interactive notebook
 psutil  # system utilization
-thop>=0.1.1  # FLOPs computation
-albumentations>=1.0.3
+thop # FLOPs computation
+albumentations
 # pycocotools>=2.0  # COCO mAP
 # roboflow
