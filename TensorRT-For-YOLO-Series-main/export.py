@@ -6,8 +6,6 @@ import argparse
 import numpy as np
 import tensorrt as trt
 import pycuda.driver as cuda
-import pycuda.autoinit
-
 from image_batch import ImageBatcher
 
 logging.basicConfig(level=logging.INFO)

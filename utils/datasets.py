@@ -1033,12 +1033,6 @@ def random_perspective(img, targets=(), segments=(), degrees=10, translate=.1, s
         else:  # affine
             img = cv2.warpAffine(img, M[:2], dsize=(width, height), borderValue=(114, 114, 114))
 
-    # Visualize
-    # import matplotlib.pyplot as plt
-    # ax = plt.subplots(1, 2, figsize=(12, 6))[1].ravel()
-    # ax[0].imshow(img[:, :, ::-1])  # base
-    # ax[1].imshow(img2[:, :, ::-1])  # warped
-
     # Transform label coordinates
     n = len(targets)
     if n:
