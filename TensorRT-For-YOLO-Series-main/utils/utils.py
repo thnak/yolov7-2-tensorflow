@@ -5,39 +5,46 @@ import time
 import yaml
 
 class TensorRT_Engine(object):
+    """_summary_
+
+    Args:
+        object (_type_): _description_
+        Using for TensorRT inference
+    """
     def __init__(self, engine_path, dataset='', imgsz=(640,640)):
         import tensorrt as trt
         import pycuda.driver as cuda
+        import pycuda.autoinit
         self.imgsz = imgsz
         self.mean = None
         self.std = None
         self.cuda = cuda
         self.trt = trt
         self.Colorselector = BackgroundForegroundColors()
-        if not os.path.exists(dataset):
-            print(f'not found class_names from file {dataset}')
-            exit()
-        with open(dataset,'r') as dataset_cls_name:
-            data_ = yaml.load(dataset_cls_name, Loader=yaml.SafeLoader)
-            dataset_cls_name.close()
-            self.n_classes = data_['nc']
-            self.class_names = data_['names']
+        try:
+            with open(dataset,'r') as dataset_cls_name:
+                data_ = yaml.load(dataset_cls_name, Loader=yaml.SafeLoader)
+                dataset_cls_name.close()
+                self.n_classes = data_['nc']
+                self.class_names = data_['names']
+        except:
+            print(f'Error {dataset} file not found')
         
-        logger = trt.Logger(trt.Logger.WARNING)
-        runtime = trt.Runtime(logger)
-        trt.init_libnvinfer_plugins(logger,'') # initialize TensorRT plugins
+        logger = self.trt.Logger(self.trt.Logger.WARNING)
+        runtime = self.trt.Runtime(logger)
+        self.trt.init_libnvinfer_plugins(logger,'') # initialize TensorRT plugins
         with open(engine_path, "rb") as f:
             serialized_engine = f.read()
             f.close()
         engine = runtime.deserialize_cuda_engine(serialized_engine)
         self.context = engine.create_execution_context()
         self.inputs, self.outputs, self.bindings = [], [], []
-        self.stream = cuda.Stream()
+        self.stream = self.cuda.Stream()
         for binding in engine:
-            size = trt.volume(engine.get_binding_shape(binding))
-            dtype = trt.nptype(engine.get_binding_dtype(binding))
-            host_mem = cuda.pagelocked_empty(size, dtype)
-            device_mem = cuda.mem_alloc(host_mem.nbytes)
+            size = self.trt.volume(engine.get_binding_shape(binding))
+            dtype = self.trt.nptype(engine.get_binding_dtype(binding))
+            host_mem = self.cuda.pagelocked_empty(size, dtype)
+            device_mem = self.cuda.mem_alloc(host_mem.nbytes)
             self.bindings.append(int(device_mem))
             if engine.binding_is_input(binding):
                 self.inputs.append({'host': host_mem, 'device': device_mem})
@@ -62,6 +69,7 @@ class TensorRT_Engine(object):
         return data
     
     def detect_video(self, video_path, video_outputPath='', conf=0.5, end2end=False, noSave=True):
+        """detect objection from video"""
         video_outputPath = os.path.join(video_outputPath,'results2.avi')
         if not os.path.exists(video_path):
             print('video not found, exiting')
@@ -108,6 +116,9 @@ class TensorRT_Engine(object):
         print(f'Finished! '+f'save at {video_outputPath} ' if not noSave else ''+f'total {round(time.time() - timeStart, 2)} second, avg FPS: {round(sum(avg)/len(avg),3)}')
 
     def inference(self, img_path, conf=0.5, end2end=False):
+        """ detect single image
+            Return: image
+        """
         origin_img = cv2.imread(img_path)
         img, ratio = self.preproc(origin_img, self.imgsz, self.mean, self.std)
         data = self.infer(img)
@@ -139,14 +150,16 @@ class TensorRT_Engine(object):
         return dets
     
     def get_fps(self):
-        # warmup
+        """Warming up and calculate fps"""
         img = np.ones((1,3,self.imgsz[0], self.imgsz[1]))
         img = np.ascontiguousarray(img, dtype=np.float32)
+        t1 = time.perf_counter()
+        avgT = []
         for _ in range(20):
             _ = self.infer(img)
-        t1 = time.perf_counter()
-        _ = self.infer(img)
-        print(1/(time.perf_counter() - t1), 'FPS')
+            t1 = time.perf_counter() - t1
+            avgT.append(t1)
+        print(f'Warming up with {(sum(avgT)/len(avgT)/10)}FPS (etc)')
 
 
     def nms(self,boxes, scores, nms_thr):
@@ -206,11 +219,7 @@ class TensorRT_Engine(object):
             padded_img = np.ones(input_size) * 114.0
         img = np.array(image)
         r = min(input_size[0] / img.shape[0], input_size[1] / img.shape[1])
-        resized_img = cv2.resize(
-            img,
-            (int(img.shape[1] * r), int(img.shape[0] * r)),
-            interpolation=cv2.INTER_LINEAR,
-        ).astype(np.float32)
+        resized_img = cv2.resize(img,(int(img.shape[1] * r), int(img.shape[0] * r)),interpolation=cv2.INTER_LINEAR,).astype(np.float32)
         padded_img[: int(img.shape[0] * r), : int(img.shape[1] * r)] = resized_img
         padded_img = padded_img[:, :, ::-1]
         padded_img /= 255.0
@@ -234,9 +243,7 @@ class TensorRT_Engine(object):
             x1 = int(box[2])
             y1 = int(box[3])
             text = '{}:{:.2f}'.format(class_names[cls_id], score)
-            # txt_bk_color = (_COLORS[cls_id] * 255 * 0.7).astype(np.uint8).tolist()
-            # txt_color = (0, 0, 0) if np.mean(_COLORS[cls_id]) > 0.5 else (255, 255, 255)
-            txt_color,txt_bk_color = self.Colorselector.__getattribute__(cls_id)
+            txt_color,txt_bk_color = self.Colorselector.getval(cls_id)
             txt_size = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.4, 1)[0]
             cv2.rectangle(img, (x0, y0), (x1, y1), txt_bk_color, 2)
             c1, c2 = (x0, y0), (x1, y1)
@@ -249,8 +256,8 @@ class TensorRT_Engine(object):
 class BackgroundForegroundColors():
     def __init__(self):
         self.COLOR = np.array(
-    [   0.000, 0.447, 0.741,
-        0.850, 0.325, 0.098,
+    [   0.850, 0.325, 0.098,
+        0.000, 1.000, 0.000,
         0.929, 0.694, 0.125,
         0.494, 0.184, 0.556,
         0.466, 0.674, 0.188,
@@ -331,9 +338,8 @@ class BackgroundForegroundColors():
         0.50, 0.5, 0]).astype(np.float32).reshape(-1, 3)
         self.textColor = None
         self.bkColor = None
-    def __getattribute__(self, index=0):
-        self.bkColor = (self.COLOR[index] * 255 * 0.7).astype(np.uint8).tolist()
+    def getval(self, index=0):
+        """get text color, bbox color from index"""
+        self.bkColor = (self.COLOR[index] * 255).astype(np.uint8).tolist()
         self.textColor = (0, 0, 0) if np.mean(self.COLOR[index]) > 0.5 else (255, 255, 255)
         return self.textColor, self.bkColor
-        
-

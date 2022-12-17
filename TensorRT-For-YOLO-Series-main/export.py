@@ -6,6 +6,7 @@ import argparse
 import numpy as np
 import tensorrt as trt
 import pycuda.driver as cuda
+import pycuda.autoinit
 from image_batch import ImageBatcher
 
 logging.basicConfig(level=logging.INFO)
@@ -105,7 +106,6 @@ class EngineBuilder:
         self.builder = trt.Builder(self.trt_logger)
         self.config = self.builder.create_builder_config()
         self.config.max_workspace_size = workspace * (2 ** 30)
-
         self.batch_size = None
         self.network = None
         self.parser = None
