@@ -1,5 +1,5 @@
 # Dataset utils and dataloaders
-
+import contextlib
 import glob
 import logging
 import math
@@ -21,11 +21,10 @@ from torch.utils.data import Dataset
 from tqdm import tqdm
 import psutil
 #from pycocotools import mask as maskUtils
-from torchvision.utils import save_image
-from torchvision.ops import roi_pool, roi_align, ps_roi_pool, ps_roi_align
+# from torchvision.utils import save_image
+# from torchvision.ops import roi_pool, roi_align, ps_roi_pool, ps_roi_align
 
-from utils.general import check_requirements, xyxy2xywh, xywh2xyxy, xywhn2xyxy, xyn2xy, segment2box, segments2boxes, \
-    resample_segments, clean_str, colorstr
+from utils.general import check_requirements, xyxy2xywh, xywh2xyxy, xywhn2xyxy, xyn2xy, segment2box, segments2boxes, resample_segments, clean_str, colorstr
 from utils.torch_utils import torch_distributed_zero_first
 from termcolor import colored
 # Parameters
@@ -48,15 +47,10 @@ def get_hash(files):
 def exif_size(img):
     # Returns exif-corrected PIL size
     s = img.size  # (width, height)
-    try:
+    with contextlib.suppress(Exception):
         rotation = dict(img._getexif().items())[orientation]
-        if rotation == 6:  # rotation 270
+        if rotation in [6, 8]:  # rotation 270 or 90
             s = (s[1], s[0])
-        elif rotation == 8:  # rotation 90
-            s = (s[1], s[0])
-    except:
-        pass
-
     return s
 
 
@@ -461,7 +455,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                 self.im_cache_dir.mkdir(parents=True, exist_ok=True)
             gb = 0  # Gigabytes of cached images
             self.img_hw0, self.img_hw = [None] * n, [None] * n
-            results = ThreadPool(8).imap(lambda x: load_image(*x), zip(repeat(self), range(n)))
+            results = ThreadPool().imap(lambda x: load_image(*x), zip(repeat(self), range(n)))
             pbar = tqdm(enumerate(results), total=n)
             checkimgSizeStatus = False
             for i, x in pbar:
@@ -668,40 +662,27 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
 
 # Ancillary functions --------------------------------------------------------------------------------------------------
 def load_image(self, index):
-    # loads 1 image from dataset, returns img, original hw, resized hw
     img = self.imgs[index]
     imgnpy = self.img_npy[index]
-    if not img and not os.path.exists(imgnpy):  # not cached
+    if not img and not os.path.exists(imgnpy):
         path = self.img_files[index]
-        img = cv2.imread(path)  # BGR
+        img = cv2.imread(path)
         assert img is not None, 'Image Not Found ' + path
-        h0, w0 = img.shape[:2]  # orig hw
-        r = self.img_size / max(h0, w0)  # resize image to img_size
-        if r != 1:  # always resize down, only resize up if training with augmentation
-            interp = cv2.INTER_AREA if r < 1 and not self.augment else cv2.INTER_LINEAR
+        h0, w0 = img.shape[:2]
+        r = self.img_size / max(h0, w0)
+        if r != 1:
+            interp = cv2.INTER_AREA if r < 1 else cv2.INTER_CUBIC
             img = cv2.resize(img, (int(w0 * r), int(h0 * r)), interpolation=interp)
-        return img, (h0, w0), img.shape[:2]  # img, hw_original, hw_resized
+        return img, (h0, w0), img.shape[:2]
     elif img:
-        return self.imgs[index], self.img_hw0[index], self.img_hw[index]  # img, hw_original, hw_resized
+        return self.imgs[index], self.img_hw0[index], self.img_hw[index]
     elif os.path.exists(imgnpy):
-        imgg = np.load(imgnpy,mmap_mode='r')
-        return imgg, imgg.shape[:2], imgg.shape[:2]
-
-    
-def hist_equalize(img, clahe=True, bgr=False):
-    # Equalize histogram on BGR image 'img' with img.shape(n,m,3) and range 0-255
-    yuv = cv2.cvtColor(img, cv2.COLOR_BGR2YUV if bgr else cv2.COLOR_RGB2YUV)
-    if clahe:
-        c = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-        yuv[:, :, 0] = c.apply(yuv[:, :, 0])
-    else:
-        yuv[:, :, 0] = cv2.equalizeHist(yuv[:, :, 0])  # equalize Y channel histogram
-    return cv2.cvtColor(yuv, cv2.COLOR_YUV2BGR if bgr else cv2.COLOR_YUV2RGB)  # convert YUV image to RGB
+        img = np.load(imgnpy,mmap_mode='r')
+        return img, img.shape[:2], img.shape[:2]
 
 
 def load_mosaic(self, index):
     # loads images in a 4-mosaic
-
     labels4, segments4 = [], []
     s = self.img_size
     yc, xc = [int(random.uniform(-x, 2 * s + x)) for x in self.mosaic_border]  # mosaic center x, y

@@ -377,43 +377,35 @@ def train(hyp, opt, device, tb_writer=None, evo_num=[0, 0]):
         for i, (imgs, targets, paths, _) in pbar:
             # number integrated batches (since train start)
             ni = i + nb * epoch
-            imgs = imgs.to(device, non_blocking=True).float() / \
-                255.0  # uint8 to float32, 0-255 to 0.0-1.0
+            imgs = imgs.to(device, non_blocking=True).float() / 255.0  # uint8 to float32, 0-255 to 0.0-1.0
 
             # Warmup
             if ni <= nw:
                 xi = [0, nw]  # x interp
-                # model.gr = np.interp(ni, xi, [0.0, 1.0])  # iou loss ratio (obj_loss = 1.0 or iou)
-                accumulate = max(1, np.interp(
-                    ni, xi, [1, nbs / total_batch_size]).round())
+                accumulate = max(1, np.interp(ni, xi, [1, nbs / total_batch_size]).round())
                 for j, x in enumerate(optimizer.param_groups):
                     # bias lr falls from 0.1 to lr0, all other lrs rise from 0.0 to lr0
-                    x['lr'] = np.interp(
-                        ni, xi, [hyp['warmup_bias_lr'] if j == 2 else 0.0, x['initial_lr'] * lf(epoch)])
+                    x['lr'] = np.interp(ni, xi, [hyp['warmup_bias_lr'] if j == 2 else 0.0, x['initial_lr'] * lf(epoch)])
                     if 'momentum' in x:
                         x['momentum'] = np.interp(
                             ni, xi, [hyp['warmup_momentum'], hyp['momentum']])
 
             # Multi-scale
             if opt.multi_scale:
-                sz = random.randrange(
-                    imgsz * 0.5, imgsz * 1.5 + gs) // gs * gs  # size
+                sz = random.randrange(imgsz * 0.5, imgsz * 1.5 + gs) // gs * gs  # size
                 sf = sz / max(imgs.shape[2:])  # scale factor
                 if sf != 1:
                     # new shape (stretched to gs-multiple)
                     ns = [math.ceil(x * sf / gs) * gs for x in imgs.shape[2:]]
-                    imgs = F.interpolate(
-                        imgs, size=ns, mode='bilinear', align_corners=False)
+                    imgs = F.interpolate(imgs, size=ns, mode='bilinear', align_corners=False, antialias=False)
 
             # Forward
             with amp.autocast(enabled=cuda):
                 pred = model(imgs)  # forward
                 if 'loss_ota' not in hyp or hyp['loss_ota'] == 1:
-                    loss, loss_items = compute_loss_ota(pred, targets.to(
-                        device), imgs)  # loss scaled by batch_size
+                    loss, loss_items = compute_loss_ota(pred, targets.to(device), imgs)  # loss scaled by batch_size
                 else:
-                    loss, loss_items = compute_loss(
-                        pred, targets.to(device))  # loss scaled by batch_size
+                    loss, loss_items = compute_loss(pred, targets.to(device))  # loss scaled by batch_size
                 if rank != -1:
                     loss *= opt.world_size  # gradient averaged between devices in DDP mode
                 if opt.quad:
@@ -432,12 +424,9 @@ def train(hyp, opt, device, tb_writer=None, evo_num=[0, 0]):
 
             # Print
             if rank in [-1, 0]:
-                mloss = (mloss * i + loss_items) / \
-                    (i + 1)  # update mean losses
-                mem = '%.3gG' % (torch.cuda.memory_reserved(
-                ) / 1E9 if torch.cuda.is_available() else 0)  # (GB)
-                s = ('%10s' * 2 + '%10.4g' * 6) % (
-                    '%g/%g' % (epoch, epochs - 1), mem, *mloss, targets.shape[0], imgs.shape[-1])
+                mloss = (mloss * i + loss_items) / (i + 1)  # update mean losses
+                mem = '%.3gG' % (torch.cuda.memory_reserved() / 1E9 if torch.cuda.is_available() else 0)  # (GB)
+                s = ('%10s' * 2 + '%10.4g' * 6) % ('%g/%g' % (epoch, epochs - 1), mem, *mloss, targets.shape[0], imgs.shape[-1])
                 pbar.set_description(s)
 
                 # Plot

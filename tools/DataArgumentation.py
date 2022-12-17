@@ -181,18 +181,19 @@ def process(imgPath='',
     p = 0
     transform = A.Compose(
         [
-            A.RandomBrightnessContrast(p=p),
-            A.RandomGamma(p=p),
-            A.HueSaturationValue(p=p, hue_shift_limit=50, sat_shift_limit=50,
-                                 val_shift_limit=50, always_apply=False),
-            A.ToGray(p=p),
-            A.HorizontalFlip(p=p),
-            A.VerticalFlip(p=p),
-            A.RandomRain(p=p),
-            A.ISONoise(p=p),
-            A.RandomResizedCrop(p=p, height=h*cropSizeRate[0], width=w*cropSizeRate[1]
-                                ) if w > 416 and h > 416 else A.RandomResizedCrop(p=0, height=416, width=416),
-            A.ChannelDropout(p=1)
+            # A.RandomBrightnessContrast(p=p),
+            # A.RandomGamma(p=p),
+            # A.HueSaturationValue(p=p, hue_shift_limit=50, sat_shift_limit=50,
+            #                      val_shift_limit=50, always_apply=False),
+            # A.ToGray(p=p),
+            # A.HorizontalFlip(p=p),
+            # A.VerticalFlip(p=p),
+            # A.RandomRain(p=p),
+            # A.ISONoise(p=p),
+            # A.RandomResizedCrop(p=p, height=h*cropSizeRate[0], width=w*cropSizeRate[1]
+            #                     ) if w > 416 and h > 416 else A.RandomResizedCrop(p=0, height=416, width=416),
+            # A.ChannelDropout(p=1)
+            A.Cutout(p=1,max_h_size=1,max_w_size=1,num_holes=100)
         ],
         bbox_params=A.BboxParams(format='yolo', label_fields=['category_ids']),
     )

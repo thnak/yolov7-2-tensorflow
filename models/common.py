@@ -1233,7 +1233,7 @@ class RepConv_OREPA(nn.Module):
         self.padding = padding
         self.dilation = dilation
         self.groups = groups
-
+        
         assert k == 3
         assert padding == 1
 
