@@ -118,6 +118,9 @@ class _RepeatSampler(object):
 
 
 class LoadImages:  # for inference
+    """_summary_
+    press q key to quite  
+    """
     def __init__(self, path, img_size=640, stride=32):
         p = str(Path(path).absolute())  # os-agnostic absolute path
         if '*' in p:
@@ -178,7 +181,6 @@ class LoadImages:  # for inference
             self.count += 1
             img0 = cv2.imread(path)  # BGR
             assert img0 is not None, 'Image Not Found ' + path
-            #print(f'image {self.count}/{self.nf} {path}: ', end='')
 
         # Padded resize
         img = letterbox(img0, self.img_size, stride=self.stride)[0]
@@ -199,16 +201,16 @@ class LoadImages:  # for inference
 
 
 class LoadWebcam:  # for inference
+
     def __init__(self, pipe='0', img_size=640, stride=32):
+        """ pipe = 'rtsp://192.168.1.64/1'  # IP camera
+            pipe = 'rtsp://username:password@192.168.1.64/1'  # IP camera with login
+            pipe = 'http://wmccpinetop.axiscam.net/mjpg/video.mjpg'  # IP golf camera
+        """        
         self.img_size = img_size
         self.stride = stride
-
         if pipe.isnumeric():
             pipe = eval(pipe)  # local camera
-        # pipe = 'rtsp://192.168.1.64/1'  # IP camera
-        # pipe = 'rtsp://username:password@192.168.1.64/1'  # IP camera with login
-        # pipe = 'http://wmccpinetop.axiscam.net/mjpg/video.mjpg'  # IP golf camera
-
         self.pipe = pipe
         self.cap = cv2.VideoCapture(pipe)  # video capture object
         self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 3)  # set buffer size
@@ -256,9 +258,12 @@ class LoadWebcam:  # for inference
         return 0
 
 
-class LoadStreams:  # multiple IP or RTSP cameras
+class LoadStreams:
+    """multiple IP streaming or RTSP cameras
+    press q key to quite  
+    """
     def __init__(self, sources='streams.txt', img_size=640, stride=32):
-        self.mode = 'stream'
+        self.mode = 'streaming'
         self.img_size = img_size
         self.stride = stride
 
@@ -332,8 +337,7 @@ class LoadStreams:  # multiple IP or RTSP cameras
 
         # Convert
         img = img[:, :, :, ::-1].transpose(0, 3, 1, 2)  # BGR to RGB, to bsx3x416x416
-        img = np.ascontiguousarray(img)
-
+        img = np.ascontiguousarray(img)            
         return self.sources, img, img0, None
 
     def __len__(self):

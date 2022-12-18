@@ -9,7 +9,7 @@ import torch
 from models.common import *
 from models.experimental import *
 from utils.autoanchor import check_anchor_order
-from utils.general import make_divisible, check_file, set_logging
+from utils.general import make_divisible, check_file, set_logging, colorstr
 from utils.torch_utils import time_synchronized, fuse_conv_and_bn, model_info, scale_img, initialize_weights, \
     select_device, copy_attr
 from utils.loss import SigmoidBin
@@ -736,7 +736,7 @@ class TensorRT_Engine(object):
     """Torch-TensorRT
         Using for TensorRT inference
     """
-    def __init__(self, engine_path, dataset='', imgsz=(640,640)):
+    def __init__(self, engine_path, names=None, imgsz=(640,640), confThres=0.5, iouThres = 0.45):
         import tensorrt as trt
         import pycuda.driver as cuda
         import pycuda.autoinit
@@ -752,25 +752,30 @@ class TensorRT_Engine(object):
         self.cv2 = cv2
         self.os = os
         self.time = time
-        
+        self.prefix = colorstr(f'TensorRT engine:')
         self.imgsz = imgsz
         self.mean = None
         self.std = None
-
+        self.confThres = confThres
+        self.iouThes = iouThres
         logger = self.trt.Logger(self.trt.Logger.WARNING)
         runtime = self.trt.Runtime(logger)
-        self.trt.init_libnvinfer_plugins(logger,'') # initialize TensorRT plugins        
+        self.trt.init_libnvinfer_plugins(logger,'') # initialize TensorRT plugins  
+        if names is None:
+            print(f'{self.prefix} class names is empty, finding from file...')
         try:
-            with open(dataset,'r') as dataset_cls_name:
-                data_ = self.yaml.load(dataset_cls_name, Loader=self.yaml.SafeLoader)
-                dataset_cls_name.close()
-                self.n_classes = data_['nc']
-                self.class_names = data_['names']
+            if names is not None:
+                with open('./mydataset.yaml','r') as dataset_cls_name:
+                    data_ = self.yaml.load(dataset_cls_name, Loader=self.yaml.SafeLoader)
+                    dataset_cls_name.close()
+                    self.n_classes = data_['nc']
+                    self.class_names = data_['names']
             with open(engine_path, "rb") as f:
                 serialized_engine = f.read()
                 f.close()                
         except IOError:
             print(f'Error: {IOError}, the item is required')
+            exit()
         engine = runtime.deserialize_cuda_engine(serialized_engine)
         self.context = engine.create_execution_context()
         self.inputs, self.outputs, self.bindings = [], [], []
@@ -787,6 +792,14 @@ class TensorRT_Engine(object):
                 self.outputs.append({'host': host_mem, 'device': device_mem})
                 
     def infer(self, img):
+        """inference an image
+
+        Args:
+            img (image): _description_
+
+        Returns:
+            num, final_boxes, final_scores, final_cls_inds
+        """
         self.inputs[0]['host'] = np.ravel(img)
         # transfer data to the gpu
         for inp in self.inputs:
@@ -801,22 +814,22 @@ class TensorRT_Engine(object):
         data = [out['host'] for out in self.outputs]
         return data
     
-    def detect_video(self, video_path, video_outputPath='', conf=0.5, end2end=False, noSave=True):
+    def detect_video(self, video_path, video_outputPath='', end2end=False, noSave=True):
         """detect objection from video"""
-        video_outputPath = self.os.path.join(video_outputPath,'results2.avi')
+        video_outputPath = self.os.path.join(video_outputPath,'results.mp4')
+        from utils.ffmpeg_ import FFMPEG_recorder
         if not self.os.path.exists(video_path):
-            print('video not found, exiting')
+            print(f'{self.prefix} video not found, exiting')
             exit()
         cap = self.cv2.VideoCapture(video_path)
-        fourcc = self.cv2.VideoWriter_fourcc(*'XVID')
         fps = int(round(cap.get(self.cv2.CAP_PROP_FPS)))
         width = int(cap.get(self.cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(self.cv2.CAP_PROP_FRAME_HEIGHT))
+        
         if not noSave:
-            print(f'Save video at: {video_outputPath}')
-            out = self.cv2.VideoWriter(video_outputPath,fourcc,fps,(width,height))
-        fps = 0
-        avg = []
+            print(f'{self.prefix} Save video at: {video_outputPath}')
+            ffmpeg = FFMPEG_recorder(video_outputPath,(width, height), fps)
+        fps, avg = 0, []
         timeStart = self.time.time()
         while True:
             ret, frame = cap.read()
@@ -827,8 +840,7 @@ class TensorRT_Engine(object):
             data = self.infer(blob)
             fps = (fps + (1. / (self.time.time() - t1))) / 2
             avg.append(fps)
-            frame = self.cv2.putText(frame, "FPS:%d " %fps, (0, 40), self.cv2.FONT_HERSHEY_SIMPLEX, 1,
-                                (0, 0, 255), 2)
+            frame = self.cv2.putText(frame, "FPS:%d " %fps, (0, 40), self.cv2.FONT_HERSHEY_SIMPLEX, 1,(0, 0, 255), 2)
             t2 = self.time.time()
             if end2end:
                 num, final_boxes, final_scores, final_cls_inds = data
@@ -837,22 +849,22 @@ class TensorRT_Engine(object):
             else:
                 predictions = np.reshape(data, (1, -1, int(5+self.n_classes)))[0]
                 dets = self.postprocess(predictions,ratio)
-            print(f'FPS: {round(fps,3)}, '+f'nms: {round(self.time.time() - t2,3)}' if end2end else 'postprocess:'+f' {round(self.time.time() - t2,3)}')
+            print(f'{self.prefix} FPS: {round(fps,3)}, '+f'nms: {round(self.time.time() - t2,3)}' if end2end else 'postprocess:'+f' {round(self.time.time() - t2,3)}')
             if dets is not None:
                 final_boxes, final_scores, final_cls_inds = dets[:,:4], dets[:, 4], dets[:, 5]
-                frame = self.vis(frame, final_boxes, final_scores, final_cls_inds,conf=conf, class_names=self.class_names)
+                frame = self.vis(frame, final_boxes, final_scores, final_cls_inds, class_names=self.class_names)
             if not noSave:
-                out.write(frame)
+                ffmpeg.writeFrame(frame)
         if not noSave:
-            out.release()
+            ffmpeg.stopRecorder()
         cap.release()
-        print(f'Finished! '+f'save at {video_outputPath} ' if not noSave else ''+f'total {round(self.time.time() - timeStart, 2)} second, avg FPS: {round(sum(avg)/len(avg),3)}')
+        
+        print(f'{self.prefix} Finished! '+f'save at {video_outputPath} ' if not noSave else ''+f'total {round(self.time.time() - timeStart, 2)} second, avg FPS: {round(sum(avg)/len(avg),3)}')
 
-    def inference(self, img_path, conf=0.5, end2end=False):
+    def inference(self, origin_img, end2end=False):
         """ detect single image
             Return: image
         """
-        origin_img = self.cv2.imread(img_path)
         img, ratio = self.preproc(origin_img, self.imgsz, self.mean, self.std)
         data = self.infer(img)
         if end2end:
@@ -865,7 +877,7 @@ class TensorRT_Engine(object):
 
         if dets is not None:
             final_boxes, final_scores, final_cls_inds = dets[:,:4], dets[:, 4], dets[:, 5]
-            origin_img = self.vis(origin_img, final_boxes, final_scores, final_cls_inds,conf=conf, class_names=self.class_names)
+            origin_img = self.vis(origin_img, final_boxes, final_scores, final_cls_inds, class_names=self.class_names)
         return origin_img
 
     @staticmethod
@@ -878,7 +890,7 @@ class TensorRT_Engine(object):
         boxes_xyxy[:, 2] = boxes[:, 0] + boxes[:, 2] / 2.
         boxes_xyxy[:, 3] = boxes[:, 1] + boxes[:, 3] / 2.
         boxes_xyxy /= ratio
-        dets = self.multiclass_nms(boxes_xyxy, scores, nms_thr=0.45, score_thr=0.1)
+        dets = self.multiclass_nms(boxes_xyxy, scores)
         return dets
     
     def get_fps(self):
@@ -891,10 +903,10 @@ class TensorRT_Engine(object):
             _ = self.infer(img)
             t1 = self.time.perf_counter() - t1
             avgT.append(t1)
-        print(f'Warming up with {(sum(avgT)/len(avgT)/10)}FPS (etc)')
+        print(f'{self.prefix} Warming up with {(sum(avgT)/len(avgT)/10)}FPS (etc)')
 
 
-    def nms(self,boxes, scores, nms_thr):
+    def nms(self,boxes, scores):
         """Single class NMS implemented in Numpy."""
         x1 = boxes[:, 0]
         y1 = boxes[:, 1]
@@ -915,24 +927,24 @@ class TensorRT_Engine(object):
             h = np.maximum(0.0, yy2 - yy1 + 1)
             inter = w * h
             ovr = inter / (areas[i] + areas[order[1:]] - inter)
-            inds = np.where(ovr <= nms_thr)[0]
+            inds = np.where(ovr <= self.iouThes)[0]
             order = order[inds + 1]
         return keep
 
 
-    def multiclass_nms(self,boxes, scores, nms_thr, score_thr):
+    def multiclass_nms(self,boxes, scores):
         """Multiclass NMS implemented in Numpy"""
         final_dets = []
         num_classes = scores.shape[1]
         for cls_ind in range(num_classes):
             cls_scores = scores[:, cls_ind]
-            valid_score_mask = cls_scores > score_thr
+            valid_score_mask = cls_scores > self.confThres
             if valid_score_mask.sum() == 0:
                 continue
             else:
                 valid_scores = cls_scores[valid_score_mask]
                 valid_boxes = boxes[valid_score_mask]
-                keep = self.nms(valid_boxes, valid_scores, nms_thr)
+                keep = self.nms(valid_boxes, valid_scores)
                 if len(keep) > 0:
                     cls_inds = np.ones((len(keep), 1)) * cls_ind
                     dets = np.concatenate([valid_boxes[keep], valid_scores[keep, None], cls_inds], 1)
@@ -961,12 +973,12 @@ class TensorRT_Engine(object):
         padded_img = np.ascontiguousarray(padded_img, dtype=np.float32)
         return padded_img, r
 
-    def vis(self, img, boxes, scores, cls_ids, conf=0.5, class_names=None):
+    def vis(self, img, boxes, scores, cls_ids, class_names=None):
         for i in range(len(boxes)):
             box = boxes[i]
             cls_id = int(cls_ids[i])
             score = scores[i]
-            if score < conf:
+            if score < self.confThres:
                 continue
             x0 = int(box[0])
             y0 = int(box[1])

@@ -673,8 +673,8 @@ def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45, classes=Non
         c = x[:, 5:6] * (0 if agnostic else max_wh)  # classes
         boxes, scores = x[:, :4] + c, x[:, 4]  # boxes (offset by class), scores
         i = torchvision.ops.nms(boxes, scores, iou_thres)  # NMS
-        if i.shape[0] > max_det:  # limit detections
-            i = i[:max_det]
+        # if i.shape[0] > max_det:  # limit detections
+        i = i[:max_det]
         if merge and (1 < n < 3E3):  # Merge NMS (boxes merged using weighted mean)
             # update boxes as boxes(i,4) = weights(i,n) * boxes(n,4)
             iou = box_iou(boxes[i], boxes) > iou_thres  # iou matrix
@@ -884,7 +884,7 @@ def increment_path(path, exist_ok=True, sep=''):
 
 class BackgroundForegroundColors():
     """Custom color for bbox and text"""
-    def __init__(self,hyp=None):
+    def __init__(self,hyp=None, names=None):
         """__init__
         args: mydataset.yaml path to get class names
         """
@@ -971,12 +971,16 @@ class BackgroundForegroundColors():
         0.50, 0.5, 0]).astype(np.float32).reshape(-1, 3)
         self.textColor = None
         self.bkColor = None
-        if hyp is None:
+        if hyp is None and names is None:
             hyp = './mydataset.yaml'
-        with open(hyp,'r') as dts:
-            data = yaml.load(dts,Loader=yaml.SafeLoader)
-            dts.close()
-        self.cls = data['names']
+        elif names:
+            self.cls = names
+        if hyp:
+            with open(hyp,'r') as dts:
+                data = yaml.load(dts,Loader=yaml.SafeLoader)
+                dts.close()
+                self.cls = data['names']
+        
     def getval(self, index=None, labels=''):
         """get text color, bbox color
         arg: index of class name, labels

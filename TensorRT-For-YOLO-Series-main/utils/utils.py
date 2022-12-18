@@ -12,18 +12,28 @@ class TensorRT_Engine(object):
         import tensorrt as trt
         import pycuda.driver as cuda
         import pycuda.autoinit
-        self.imgsz = imgsz
-        self.mean = None
-        self.std = None
+        import yaml
+        import cv2
+        import os
+        import time
         self.cuda = cuda
         self.trt = trt
         self.Colorselector = BackgroundForegroundColors()
+        self.yaml = yaml
+        self.cv2 = cv2
+        self.os = os
+        self.time = time
+        
+        self.imgsz = imgsz
+        self.mean = None
+        self.std = None
+
         logger = self.trt.Logger(self.trt.Logger.WARNING)
         runtime = self.trt.Runtime(logger)
         self.trt.init_libnvinfer_plugins(logger,'') # initialize TensorRT plugins        
         try:
             with open(dataset,'r') as dataset_cls_name:
-                data_ = yaml.load(dataset_cls_name, Loader=yaml.SafeLoader)
+                data_ = self.yaml.load(dataset_cls_name, Loader=self.yaml.SafeLoader)
                 dataset_cls_name.close()
                 self.n_classes = data_['nc']
                 self.class_names = data_['names']
@@ -47,7 +57,6 @@ class TensorRT_Engine(object):
             else:
                 self.outputs.append({'host': host_mem, 'device': device_mem})
                 
-
     def infer(self, img):
         self.inputs[0]['host'] = np.ravel(img)
         # transfer data to the gpu
@@ -65,33 +74,34 @@ class TensorRT_Engine(object):
     
     def detect_video(self, video_path, video_outputPath='', conf=0.5, end2end=False, noSave=True):
         """detect objection from video"""
-        video_outputPath = os.path.join(video_outputPath,'results2.avi')
-        if not os.path.exists(video_path):
+        video_outputPath = self.os.path.join(video_outputPath,'results2.avi')
+        
+        if not self.os.path.exists(video_path):
             print('video not found, exiting')
             exit()
-        cap = cv2.VideoCapture(video_path)
-        fourcc = cv2.VideoWriter_fourcc(*'XVID')
-        fps = int(round(cap.get(cv2.CAP_PROP_FPS)))
-        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        cap = self.cv2.VideoCapture(video_path)
+        fps = int(round(cap.get(self.cv2.CAP_PROP_FPS)))
+        width = int(cap.get(self.cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(self.cv2.CAP_PROP_FRAME_HEIGHT))
+        
         if not noSave:
             print(f'Save video at: {video_outputPath}')
-            out = cv2.VideoWriter(video_outputPath,fourcc,fps,(width,height))
+            ffmpeg = FFMPEG_recorder(video_outputPath.replace('.avi','.mp4'),(width, height), fps)
         fps = 0
         avg = []
-        timeStart = time.time()
+        timeStart = self.time.time()
         while True:
             ret, frame = cap.read()
             if not ret:
                 break
             blob, ratio = self.preproc(frame, self.imgsz, self.mean, self.std)
-            t1 = time.time()
+            t1 = self.time.time()
             data = self.infer(blob)
-            fps = (fps + (1. / (time.time() - t1))) / 2
+            fps = (fps + (1. / (self.time.time() - t1))) / 2
             avg.append(fps)
-            frame = cv2.putText(frame, "FPS:%d " %fps, (0, 40), cv2.FONT_HERSHEY_SIMPLEX, 1,
+            frame = self.cv2.putText(frame, "FPS:%d " %fps, (0, 40), self.cv2.FONT_HERSHEY_SIMPLEX, 1,
                                 (0, 0, 255), 2)
-            t2 = time.time()
+            t2 = self.time.time()
             if end2end:
                 num, final_boxes, final_scores, final_cls_inds = data
                 final_boxes = np.reshape(final_boxes/ratio, (-1, 4))
@@ -99,22 +109,23 @@ class TensorRT_Engine(object):
             else:
                 predictions = np.reshape(data, (1, -1, int(5+self.n_classes)))[0]
                 dets = self.postprocess(predictions,ratio)
-            print(f'FPS: {round(fps,3)}, '+f'nms: {round(time.time() - t2,3)}' if end2end else 'postprocess:'+f' {round(time.time() - t2,3)}')
+            print(f'FPS: {round(fps,3)}, '+f'nms: {round(self.time.time() - t2,3)}' if end2end else 'postprocess:'+f' {round(self.time.time() - t2,3)}')
             if dets is not None:
                 final_boxes, final_scores, final_cls_inds = dets[:,:4], dets[:, 4], dets[:, 5]
                 frame = self.vis(frame, final_boxes, final_scores, final_cls_inds,conf=conf, class_names=self.class_names)
             if not noSave:
-                out.write(frame)
+                ffmpeg.writeFrame(frame)
         if not noSave:
-            out.release()
+            ffmpeg.stopRecorder()
         cap.release()
-        print(f'Finished! '+f'save at {video_outputPath} ' if not noSave else ''+f'total {round(time.time() - timeStart, 2)} second, avg FPS: {round(sum(avg)/len(avg),3)}')
+        
+        print(f'Finished! '+f'save at {video_outputPath} ' if not noSave else ''+f'total {round(self.time.time() - timeStart, 2)} second, avg FPS: {round(sum(avg)/len(avg),3)}')
 
     def inference(self, img_path, conf=0.5, end2end=False):
         """ detect single image
             Return: image
         """
-        origin_img = cv2.imread(img_path)
+        origin_img = self.cv2.imread(img_path)
         img, ratio = self.preproc(origin_img, self.imgsz, self.mean, self.std)
         data = self.infer(img)
         if end2end:
@@ -147,11 +158,11 @@ class TensorRT_Engine(object):
         """Warming up and calculate fps"""
         img = np.ones((1,3,self.imgsz[0], self.imgsz[1]))
         img = np.ascontiguousarray(img, dtype=np.float32)
-        t1 = time.perf_counter()
+        t1 = self.time.perf_counter()
         avgT = []
         for _ in range(20):
             _ = self.infer(img)
-            t1 = time.perf_counter() - t1
+            t1 = self.time.perf_counter() - t1
             avgT.append(t1)
         print(f'Warming up with {(sum(avgT)/len(avgT)/10)}FPS (etc)')
 
@@ -211,7 +222,7 @@ class TensorRT_Engine(object):
             padded_img = np.ones(input_size) * 114.0
         img = np.array(image)
         r = min(input_size[0] / img.shape[0], input_size[1] / img.shape[1])
-        resized_img = cv2.resize(img,(int(img.shape[1] * r), int(img.shape[0] * r)),interpolation=cv2.INTER_LINEAR,).astype(np.float32)
+        resized_img = self.cv2.resize(img,(int(img.shape[1] * r), int(img.shape[0] * r)),interpolation=self.cv2.INTER_LINEAR,).astype(np.float32)
         padded_img[: int(img.shape[0] * r), : int(img.shape[1] * r)] = resized_img
         padded_img = padded_img[:, :, ::-1]
         padded_img /= 255.0
@@ -230,20 +241,21 @@ class TensorRT_Engine(object):
             score = scores[i]
             if score < conf:
                 continue
-            x0 = int(box[0])
-            y0 = int(box[1])
-            x1 = int(box[2])
-            y1 = int(box[3])
+            x0 = int(round(box[0],3))
+            y0 = int(round(box[1],3))
+            x1 = int(round(box[2],3))
+            y1 = int(round(box[3],3))
             text = '{}:{:.2f}'.format(class_names[cls_id], score)
             txt_color,txt_bk_color = self.Colorselector.getval(cls_id)
-            txt_size = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.4, 1)[0]
-            cv2.rectangle(img, (x0, y0), (x1, y1), txt_bk_color, 2)
+            txt_size = self.cv2.getTextSize(text, self.cv2.FONT_HERSHEY_SIMPLEX, 0.4, 1)[0]
+            self.cv2.rectangle(img, (x0, y0), (x1, y1), txt_bk_color, 2)
             c1, c2 = (x0, y0), (x1, y1)
             c2 = c1[0] + txt_size[0], c1[1] - txt_size[1] - 3
-            cv2.drawContours(img, [np.array([(c1[0] + txt_size[0], c1[1] - txt_size[1] - 3), (c1[0] + txt_size[0], c1[1] ), (c1[0] + txt_size[0] + txt_size[1] + 3, c1[1])])], 0, txt_bk_color, -1, 16)
-            cv2.rectangle(img, c1, c2, txt_bk_color, -1, cv2.LINE_AA)  # filled
-            cv2.putText(img, text, (c1[0], c1[1] - 2), 0, 0.4, txt_color, thickness=1, lineType=cv2.LINE_AA)
+            self.cv2.drawContours(img, [np.array([(c1[0] + txt_size[0], c1[1] - txt_size[1] - 3), (c1[0] + txt_size[0], c1[1] ), (c1[0] + txt_size[0] + txt_size[1] + 3, c1[1])])], 0, txt_bk_color, -1, 16)
+            self.cv2.rectangle(img, c1, c2, txt_bk_color, -1, self.cv2.LINE_AA)  # filled
+            self.cv2.putText(img, text, (c1[0], c1[1] - 2), 0, 0.4, txt_color, thickness=1, lineType=self.cv2.LINE_AA)
         return img
+
 
 class BackgroundForegroundColors():
     def __init__(self,hyp=None):
@@ -337,3 +349,71 @@ class BackgroundForegroundColors():
         return self.textColor, self.bkColor
     def len(self):
         return len(self.COLOR)
+
+
+import os
+import torch
+import platform
+import subprocess
+import shlex
+
+try:
+    from pyadl import *
+except:
+    pass
+
+
+def getGPUtype():
+    try:
+        adv = ADLManager.getInstance().getDevices()
+        ac = []
+        for a in adv:
+            ab = [str(a.adapterIndex), str(a.adapterName)]
+            ac.append(ab)
+    except:
+        ac = None
+    return ac
+
+
+class FFMPEG_recorder():
+    """Hardware Acceleration for video recording using FFMPEG"""
+
+    def __init__(self, savePath=None, videoDimensions=(1280, 720), fps=30):
+        """_FFMPEG recorder_
+        Args:
+            savePath (__str__, optional): _description_. Defaults to None.
+            codec (_str_, optional): _description_. Defaults to None.
+            videoDimensions (tuple, optional): _description_. Defaults to (720,1280).
+            fps (int, optional): _description_. Defaults to 30FPS.
+        """
+        self.savePath = savePath
+        self.codec = None
+        self.videoDementions = videoDimensions
+        self.fps = fps
+        mySys = platform.uname()
+        osType = mySys.system
+        if torch.cuda.is_available():
+            self.codec = 'hevc_nvenc'
+        elif osType == 'Windows' and 'AMD' in str(getGPUtype()):
+            self.codec = 'hevc_amf'
+        elif osType == 'Linux' and 'AMD' in str(getGPUtype()):
+            self.codec = 'hevc_vaapi'
+        else:
+            self.codec = 'libx264'
+        print(f'Using video codec: {self.codec}, os: {osType}')
+
+        self.process = subprocess.Popen(shlex.split(f'ffmpeg -y -s {self.videoDementions[0]}x{self.videoDementions[1]} -pixel_format bgr24 -f rawvideo -r {self.fps} -i pipe: -vcodec {self.codec} -pix_fmt yuv420p -crf 24')+[self.savePath], stdin=subprocess.PIPE)
+    def writeFrame(self, image=None):
+        """Write frame by frame to video
+
+        Args:
+            image (_image_, require): the image will write to video
+        """
+
+        self.process.stdin.write(image.tobytes())
+
+    def stopRecorder(self):
+        """Stop record video"""
+        self.process.stdin.close()
+        self.process.wait()
+        self.process.terminate()
