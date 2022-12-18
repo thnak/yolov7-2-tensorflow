@@ -74,8 +74,7 @@ class RegisterNMS(object):
         *,
         score_thresh: float = 0.25,
         nms_thresh: float = 0.45,
-        detections_per_img: int = 100,
-    ):
+        detections_per_img: int = 100,):
         """
         Register the ``EfficientNMS_TRT`` plugin node.
         NMS expects these shapes for its input tensors:
@@ -110,27 +109,10 @@ class RegisterNMS(object):
             raise NotImplementedError(f"Currently not supports precision: {self.precision}")
 
         # NMS Outputs
-        output_num_detections = gs.Variable(
-            name="num_dets",
-            dtype=np.int32,
-            shape=[self.batch_size, 1],
-        )  # A scalar indicating the number of valid detections per batch image.
-        output_boxes = gs.Variable(
-            name="det_boxes",
-            dtype=dtype_output,
-            shape=[self.batch_size, detections_per_img, 4],
-        )
-        output_scores = gs.Variable(
-            name="det_scores",
-            dtype=dtype_output,
-            shape=[self.batch_size, detections_per_img],
-        )
-        output_labels = gs.Variable(
-            name="det_classes",
-            dtype=np.int32,
-            shape=[self.batch_size, detections_per_img],
-        )
-
+        output_num_detections = gs.Variable(name="num_dets",dtype=np.int32,shape=[self.batch_size, 1],)  # A scalar indicating the number of valid detections per batch image.
+        output_boxes = gs.Variable(name="det_boxes",dtype=dtype_output,shape=[self.batch_size, detections_per_img, 4],)
+        output_scores = gs.Variable(name="det_scores",dtype=dtype_output,shape=[self.batch_size, detections_per_img],)
+        output_labels = gs.Variable(name="det_classes",dtype=np.int32,shape=[self.batch_size, detections_per_img],)
         op_outputs = [output_num_detections, output_boxes, output_scores, output_labels]
 
         # Create the NMS Plugin node with the selected inputs. The outputs of the node will also

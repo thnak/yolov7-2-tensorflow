@@ -1,16 +1,14 @@
 # Model validation metrics
 
 from pathlib import Path
-
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-
 from . import general
 
 
 def fitness(x):
-    # Model fitness as a weighted combination of metrics
+    """Model fitness as a weighted combination of metrics"""
     w = [0.0, 0.0, 0.1, 0.9]  # weights for [P, R, mAP@0.5, mAP@0.5:0.95]
     return (x[:, :4] * w).sum(1)
 
@@ -111,7 +109,7 @@ def compute_ap(recall, precision, v5_metric=False):
 
 
 class ConfusionMatrix:
-    # Updated version of https://github.com/kaanakan/object_detection_confusion_matrix
+    """Updated version of https://github.com/kaanakan/object_detection_confusion_matrix"""
     def __init__(self, nc, conf=0.25, iou_thres=0.45):
         self.matrix = np.zeros((nc + 1, nc + 1))
         self.nc = nc  # number of classes
@@ -188,7 +186,7 @@ class ConfusionMatrix:
 # Plots ----------------------------------------------------------------------------------------------------------------
 
 def plot_pr_curve(px, py, ap, save_dir='pr_curve.png', names=()):
-    # Precision-recall curve
+    """Precision-recall curve"""
     fig, ax = plt.subplots(1, 1, figsize=(9, 6), tight_layout=True)
     py = np.stack(py, axis=1)
 
@@ -208,7 +206,7 @@ def plot_pr_curve(px, py, ap, save_dir='pr_curve.png', names=()):
 
 
 def plot_mc_curve(px, py, save_dir='mc_curve.png', names=(), xlabel='Confidence', ylabel='Metric'):
-    # Metric-confidence curve
+    """Metric-confidence curve"""
     fig, ax = plt.subplots(1, 1, figsize=(9, 6), tight_layout=True)
 
     if 0 < len(names) < 21:  # display per-class legend if < 21 classes

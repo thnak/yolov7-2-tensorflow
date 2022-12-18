@@ -90,18 +90,18 @@ def select_device(device='', batch_size=None):
 
 
 def time_synchronized():
-    # pytorch-accurate time
+    """pytorch-accurate time"""
     if torch.cuda.is_available():
         torch.cuda.synchronize()
     return time.time()
 
 
 def profile(x, ops, n=100, device=None):
-    # profile a pytorch module or list of modules. Example usage:
-    #     x = torch.randn(16, 3, 640, 640)  # input
-    #     m1 = lambda x: x * torch.sigmoid(x)
-    #     m2 = nn.SiLU()
-    #     profile(x, [m1, m2], n=100)  # profile speed over 100 iterations
+    """profile a pytorch module or list of modules. Example usage:
+         x = torch.randn(16, 3, 640, 640)  # input
+         m1 = lambda x: x * torch.sigmoid(x)
+         m2 = nn.SiLU()
+         profile(x, [m1, m2], n=100)  # profile speed over 100 iterations"""
 
     device = device or torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     x = x.to(device)
@@ -140,7 +140,7 @@ def is_parallel(model):
 
 
 def intersect_dicts(da, db, exclude=()):
-    # Dictionary intersection of matching keys and shapes, omitting 'exclude' keys, using da values
+    """Dictionary intersection of matching keys and shapes, omitting 'exclude' keys, using da values"""
     return {k: v for k, v in da.items() if k in db and not any(x in k for x in exclude) and v.shape == db[k].shape}
 
 
@@ -157,12 +157,12 @@ def initialize_weights(model):
 
 
 def find_modules(model, mclass=nn.Conv2d):
-    # Finds layer indices matching module class 'mclass'
+    """Finds layer indices matching module class 'mclass'"""
     return [i for i, m in enumerate(model.module_list) if isinstance(m, mclass)]
 
 
 def sparsity(model):
-    # Return global model sparsity
+    """Return global model sparsity"""
     a, b = 0., 0.
     for p in model.parameters():
         a += p.numel()
@@ -171,7 +171,7 @@ def sparsity(model):
 
 
 def prune(model, amount=0.3):
-    # Prune model to requested global sparsity
+    """Prune model to requested global sparsity"""
     import torch.nn.utils.prune as prune
     print('Pruning model... ', end='')
     for name, m in model.named_modules():
@@ -182,7 +182,7 @@ def prune(model, amount=0.3):
 
 
 def fuse_conv_and_bn(conv, bn):
-    # Fuse convolution and batchnorm layers https://tehnokv.com/posts/fusing-batchnorm-and-conv/
+    """Fuse convolution and batchnorm layers https://tehnokv.com/posts/fusing-batchnorm-and-conv/"""
     fusedconv = nn.Conv2d(conv.in_channels,
                           conv.out_channels,
                           kernel_size=conv.kernel_size,
@@ -205,7 +205,7 @@ def fuse_conv_and_bn(conv, bn):
 
 
 def model_info(model, verbose=False, img_size=640):
-    # Model information. img_size may be int or list, i.e. img_size=640 or img_size=[640, 320]
+    """Model information. img_size may be int or list, i.e. img_size=640 or img_size=[640, 320]"""
     n_p = sum(x.numel() for x in model.parameters())  # number parameters
     n_g = sum(x.numel() for x in model.parameters() if x.requires_grad)  # number gradients
     if verbose:
@@ -230,7 +230,7 @@ def model_info(model, verbose=False, img_size=640):
 
 
 def load_classifier(name='resnet101', n=2):
-    # Loads a pretrained model reshaped to n-class output
+    """Loads a pretrained model reshaped to n-class output"""
     model = torchvision.models.__dict__[name](pretrained=True)
 
     # ResNet model properties
@@ -249,7 +249,7 @@ def load_classifier(name='resnet101', n=2):
 
 
 def scale_img(img, ratio=1.0, same_shape=False, gs=32):  # img(16,3,256,416)
-    # scales img(bs,3,y,x) by ratio constrained to gs-multiple
+    """scales img(bs,3,y,x) by ratio constrained to gs-multiple"""
     if ratio == 1.0:
         return img
     else:
@@ -262,7 +262,7 @@ def scale_img(img, ratio=1.0, same_shape=False, gs=32):  # img(16,3,256,416)
 
 
 def copy_attr(a, b, include=(), exclude=()):
-    # Copy attributes from b to a, options to only include [...] and to exclude [...]
+    """Copy attributes from b to a, options to only include [...] and to exclude [...]"""
     for k, v in b.__dict__.items():
         if (len(include) and k not in include) or k.startswith('_') or k in exclude:
             continue
@@ -309,19 +309,19 @@ class ModelEMA:
 
 class BatchNormXd(torch.nn.modules.batchnorm._BatchNorm):
     def _check_input_dim(self, input):
-        # The only difference between BatchNorm1d, BatchNorm2d, BatchNorm3d, etc
-        # is this method that is overwritten by the sub-class
-        # This original goal of this method was for tensor sanity checks
-        # If you're ok bypassing those sanity checks (eg. if you trust your inference
-        # to provide the right dimensional inputs), then you can just use this method
-        # for easy conversion from SyncBatchNorm
-        # (unfortunately, SyncBatchNorm does not store the original class - if it did
-        #  we could return the one that was originally created)
+        """ The only difference between BatchNorm1d, BatchNorm2d, BatchNorm3d, etc
+        is this method that is overwritten by the sub-class
+        This original goal of this method was for tensor sanity checks
+        If you're ok bypassing those sanity checks (eg. if you trust your inference
+        to provide the right dimensional inputs), then you can just use this method
+        for easy conversion from SyncBatchNorm
+        (unfortunately, SyncBatchNorm does not store the original class - if it did
+        we could return the one that was originally created)"""
         return
 
 def revert_sync_batchnorm(module):
-    # this is very similar to the function that it is trying to revert:
-    # https://github.com/pytorch/pytorch/blob/c8b3686a3e4ba63dc59e5dcfe5db3430df256833/torch/nn/modules/batchnorm.py#L679
+    """this is very similar to the function that it is trying to revert:
+        https://github.com/pytorch/pytorch/blob/c8b3686a3e4ba63dc59e5dcfe5db3430df256833/torch/nn/modules/batchnorm.py#L679"""
     module_output = module
     if isinstance(module, torch.nn.modules.batchnorm.SyncBatchNorm):
         new_cls = BatchNormXd
@@ -345,7 +345,7 @@ def revert_sync_batchnorm(module):
 
 
 class TracedModel(nn.Module):
-
+    """Traced for faster inference"""
     def __init__(self, model=None, device=None, img_size=(640,640),saveTrace=False): 
         super(TracedModel, self).__init__()
         

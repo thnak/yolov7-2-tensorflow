@@ -8,9 +8,10 @@ import torch.backends.cudnn as cudnn
 from numpy import random
 from termcolor import colored
 from models.experimental import attempt_load
+from models.yolo import TensorRT_Engine
 from utils.datasets import LoadStreams, LoadImages
 from utils.general import check_img_size, check_requirements, check_imshow, non_max_suppression, apply_classifier, \
-    scale_coords, xyxy2xywh, strip_optimizer, set_logging, increment_path
+    scale_coords, xyxy2xywh, strip_optimizer, set_logging, increment_path, check_git_status
 from utils.plots import plot_one_box_with_return
 from utils.torch_utils import select_device, load_classifier, time_synchronized, TracedModel
 import subprocess
@@ -18,7 +19,7 @@ import shlex
 import platform
 import os
 
-def detect(save_img=False):
+def detect(opt = None):
     source, weights, view_img, save_txt, imgsz, trace = opt.source, opt.weights, opt.view_img, opt.save_txt, opt.img_size, not opt.no_trace
     save_img = not opt.nosave and not source.endswith('.txt')  # save inference images
     webcam = source.isnumeric() or source.endswith('.txt') or source.lower().startswith(
@@ -232,10 +233,20 @@ if __name__ == '__main__':
     parser.add_argument('--exist-ok', action='store_true', help='existing project/name ok, do not increment')
     parser.add_argument('--no-trace', action='store_true', help='don`t trace model')
     opt = parser.parse_args()
-    with torch.no_grad():
-        if opt.update:  # update all models (to fix SourceChangeWarning)
-            for _ in opt.weights:
-                detect()
-                strip_optimizer(_)
+    check_requirements()
+    check_git_status()
+    for _ in opt.weights:
+        file_extention = os.path.splitext(_)[1]
+        if file_extention not in ['.trt', '.engine']:
+            with torch.no_grad():
+                if opt.update:  # update all models (to fix SourceChangeWarning)
+                    detect(opt=opt)
+                    strip_optimizer(_)
+                else:
+                    detect(opt)
         else:
-            detect()
+            try:
+                pred = TensorRT_Engine(engine_path=_,dataset=None, imgsz=opt.img_size)
+            except:
+                pass
+            

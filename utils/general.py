@@ -26,7 +26,7 @@ torch.set_printoptions(linewidth=320, precision=5, profile='long')
 np.set_printoptions(linewidth=320, formatter={'float_kind': '{:11.5g}'.format})  # format short g, %precision=5
 pd.options.display.max_columns = 10
 cv2.setNumThreads(0)  # prevent OpenCV from multithreading (incompatible with PyTorch DataLoader)
-os.environ['NUMEXPR_MAX_THREADS'] = str(min(os.cpu_count(), 8))  # NumExpr max threads
+os.environ['NUMEXPR_MAX_THREADS'] = str(os.cpu_count())  # NumExpr max threads
 
 
 def set_logging(rank=-1):
@@ -36,30 +36,30 @@ def set_logging(rank=-1):
 
 
 def init_seeds(seed=0):
-    # Initialize random number generator (RNG) seeds
+    """Initialize random number generator (RNG) seeds"""
     random.seed(seed)
     np.random.seed(seed)
     init_torch_seeds(seed)
 
 
 def get_latest_run(search_dir='.'):
-    # Return path to most recent 'last.pt' in /runs (i.e. to --resume from)
+    """Return path to most recent 'last.pt' in /runs (i.e. to --resume from)"""
     last_list = glob.glob(f'{search_dir}/**/last*.pt', recursive=True)
     return max(last_list, key=os.path.getctime) if last_list else ''
 
 
 def isdocker():
-    # Is environment a Docker container
+    """Is environment a Docker container"""
     return Path('/workspace').exists()  # or Path('/.dockerenv').exists()
 
 
 def emojis(str=''):
-    # Return platform-dependent emoji-safe version of string
+    """Return platform-dependent emoji-safe version of string"""
     return str.encode().decode('ascii', 'ignore') if platform.system() == 'Windows' else str
 
 
 def check_online():
-    # Check internet connectivity
+    """Check internet connectivity"""
     import socket
     try:
         socket.create_connection(("1.1.1.1", 443), 5)  # check host accesability
@@ -69,7 +69,7 @@ def check_online():
 
 
 def check_git_status():
-    # Recommend 'git pull' if code is out of date
+    """Recommend 'git pull' if code is out of date"""
     print(colorstr('github: '), end='')
     try:
         assert Path('.git').exists(), 'skipping check (not a git repository)'
@@ -91,7 +91,7 @@ def check_git_status():
 
 
 def check_requirements(requirements='requirements.txt', exclude=()):
-    # Check installed dependencies meet requirements (pass *.txt file or list of packages)
+    """Check installed dependencies meet requirements (pass *.txt file or list of packages)"""
     import pkg_resources as pkg
     prefix = colorstr('red', 'bold', 'requirements:')
     if isinstance(requirements, (str, Path)):  # requirements.txt file
@@ -120,7 +120,7 @@ def check_requirements(requirements='requirements.txt', exclude=()):
 
 
 def check_img_size(img_size, s=32):
-    # Verify img_size is a multiple of stride s
+    """Verify img_size is a multiple of stride s"""
     new_size = make_divisible(img_size, int(s))  # ceil gs-multiple
     if new_size != img_size:
         print('WARNING: --img-size %g must be multiple of max stride %g, updating to %g' % (img_size, s, new_size))
@@ -128,7 +128,7 @@ def check_img_size(img_size, s=32):
 
 
 def check_imshow():
-    # Check if environment supports image displays
+    """Check if environment supports image displays"""
     try:
         assert not isdocker(), 'cv2.imshow() is disabled in Docker environments'
         cv2.imshow('test', np.zeros((1, 1, 3)))
@@ -141,7 +141,9 @@ def check_imshow():
 
 
 def check_file(file):
-    # Search for file if not found
+    """Search for file if not found
+        return file
+    """
     if Path(file).is_file() or file == '':
         return file
     else:
@@ -152,7 +154,7 @@ def check_file(file):
 
 
 def check_dataset(dict):
-    # Download dataset if not found locally
+    """Download dataset if not found locally"""
     val, s = dict.get('val'), dict.get('download')
     if val and len(val):
         val = [Path(x).resolve() for x in (val if isinstance(val, list) else [val])]  # val path
@@ -172,22 +174,22 @@ def check_dataset(dict):
 
 
 def make_divisible(x, divisor):
-    # Returns x evenly divisible by divisor
+    """Returns x evenly divisible by divisor"""
     return math.ceil(x / divisor) * divisor
 
 
 def clean_str(s):
-    # Cleans a string by replacing special characters with underscore _
+    """Cleans a string by replacing special characters with underscore"""
     return re.sub(pattern="[|@#!¡·$€%&()=?¿^*;:,¨´><+]", repl="_", string=s)
 
 
 def one_cycle(y1=0.0, y2=1.0, steps=100):
-    # lambda function for sinusoidal ramp from y1 to y2
+    """lambda function for sinusoidal ramp from y1 to y2"""
     return lambda x: ((1 - math.cos(x * math.pi / steps)) / 2) * (y2 - y1) + y1
 
 
 def colorstr(*input):
-    # Colors a string https://en.wikipedia.org/wiki/ANSI_escape_code, i.e.  colorstr('blue', 'hello world')
+    """Colors a string https://en.wikipedia.org/wiki/ANSI_escape_code, i.e.  colorstr('blue', 'hello world')"""
     *args, string = input if len(input) > 1 else ('blue', 'bold', input[0])  # color arguments, string
     colors = {'black': '\033[30m',  # basic colors
               'red': '\033[31m',
@@ -212,18 +214,13 @@ def colorstr(*input):
 
 
 def labels_to_class_weights(labels, nc=80):
-    # Get class weights (inverse frequency) from training labels
+    """Get class weights (inverse frequency) from training labels"""
     if labels[0] is None:  # no labels loaded
         return torch.Tensor()
 
     labels = np.concatenate(labels, 0)  # labels.shape = (866643, 5) for COCO
     classes = labels[:, 0].astype(np.int)  # labels = [class xywh]
     weights = np.bincount(classes, minlength=nc)  # occurrences per class
-
-    # Prepend gridpoint count (for uCE training)
-    # gpi = ((320 / 32 * np.array([1, 2, 4])) ** 2 * 3).sum()  # gridpoints per image
-    # weights = np.hstack([gpi * len(labels)  - weights.sum() * 9, weights * 9]) ** 0.5  # prepend gridpoints to start
-
     weights[weights == 0] = 1  # replace empty bins with 1
     weights = 1 / weights  # number of targets per class
     weights /= weights.sum()  # normalize
@@ -231,7 +228,7 @@ def labels_to_class_weights(labels, nc=80):
 
 
 def labels_to_image_weights(labels, nc=80, class_weights=np.ones(80)):
-    # Produces image weights based on class_weights and image contents
+    """Produces image weights based on class_weights and image contents"""
     class_counts = np.array([np.bincount(x[:, 0].astype(np.int), minlength=nc) for x in labels])
     image_weights = (class_weights.reshape(1, nc) * class_counts).sum(1)
     # index = random.choices(range(n), weights=image_weights, k=1)  # weight image sample
@@ -239,11 +236,7 @@ def labels_to_image_weights(labels, nc=80, class_weights=np.ones(80)):
 
 
 def coco80_to_coco91_class():  # converts 80-index (val2014) to 91-index (paper)
-    # https://tech.amikelive.com/node-718/what-object-categories-labels-are-in-coco-dataset/
-    # a = np.loadtxt('data/coco.names', dtype='str', delimiter='\n')
-    # b = np.loadtxt('data/coco_paper.names', dtype='str', delimiter='\n')
-    # x1 = [list(a[i] == b).index(True) + 1 for i in range(80)]  # darknet to coco
-    # x2 = [list(b[i] == a).index(True) if any(b[i] == a) else None for i in range(91)]  # coco to darknet
+    """https://tech.amikelive.com/node-718/what-object-categories-labels-are-in-coco-dataset/"""
     x = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 27, 28, 31, 32, 33, 34,
          35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63,
          64, 65, 67, 70, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 84, 85, 86, 87, 88, 89, 90]
@@ -251,7 +244,7 @@ def coco80_to_coco91_class():  # converts 80-index (val2014) to 91-index (paper)
 
 
 def xyxy2xywh(x):
-    # Convert nx4 boxes from [x1, y1, x2, y2] to [x, y, w, h] where xy1=top-left, xy2=bottom-right
+    """Convert nx4 boxes from [x1, y1, x2, y2] to [x, y, w, h] where xy1=top-left, xy2=bottom-right"""
     y = x.clone() if isinstance(x, torch.Tensor) else np.copy(x)
     y[:, 0] = (x[:, 0] + x[:, 2]) / 2  # x center
     y[:, 1] = (x[:, 1] + x[:, 3]) / 2  # y center
@@ -261,7 +254,7 @@ def xyxy2xywh(x):
 
 
 def xywh2xyxy(x):
-    # Convert nx4 boxes from [x, y, w, h] to [x1, y1, x2, y2] where xy1=top-left, xy2=bottom-right
+    """Convert nx4 boxes from [x, y, w, h] to [x1, y1, x2, y2] where xy1=top-left, xy2=bottom-right"""
     y = x.clone() if isinstance(x, torch.Tensor) else np.copy(x)
     y[:, 0] = x[:, 0] - x[:, 2] / 2  # top left x
     y[:, 1] = x[:, 1] - x[:, 3] / 2  # top left y
@@ -271,7 +264,7 @@ def xywh2xyxy(x):
 
 
 def xywhn2xyxy(x, w=640, h=640, padw=0, padh=0):
-    # Convert nx4 boxes from [x, y, w, h] normalized to [x1, y1, x2, y2] where xy1=top-left, xy2=bottom-right
+    """Convert nx4 boxes from [x, y, w, h] normalized to [x1, y1, x2, y2] where xy1=top-left, xy2=bottom-right"""
     y = x.clone() if isinstance(x, torch.Tensor) else np.copy(x)
     y[:, 0] = w * (x[:, 0] - x[:, 2] / 2) + padw  # top left x
     y[:, 1] = h * (x[:, 1] - x[:, 3] / 2) + padh  # top left y
@@ -281,7 +274,7 @@ def xywhn2xyxy(x, w=640, h=640, padw=0, padh=0):
 
 
 def xyn2xy(x, w=640, h=640, padw=0, padh=0):
-    # Convert normalized segments into pixel segments, shape (n,2)
+    """Convert normalized segments into pixel segments, shape (n,2)"""
     y = x.clone() if isinstance(x, torch.Tensor) else np.copy(x)
     y[:, 0] = w * x[:, 0] + padw  # top left x
     y[:, 1] = h * x[:, 1] + padh  # top left y
@@ -289,7 +282,7 @@ def xyn2xy(x, w=640, h=640, padw=0, padh=0):
 
 
 def segment2box(segment, width=640, height=640):
-    # Convert 1 segment label to 1 box label, applying inside-image constraint, i.e. (xy1, xy2, ...) to (xyxy)
+    """Convert 1 segment label to 1 box label, applying inside-image constraint, i.e. (xy1, xy2, ...) to (xyxy)"""
     x, y = segment.T  # segment xy
     inside = (x >= 0) & (y >= 0) & (x <= width) & (y <= height)
     x, y, = x[inside], y[inside]
@@ -297,7 +290,7 @@ def segment2box(segment, width=640, height=640):
 
 
 def segments2boxes(segments):
-    # Convert segment labels to box labels, i.e. (cls, xy1, xy2, ...) to (cls, xywh)
+    """Convert segment labels to box labels, i.e. (cls, xy1, xy2, ...) to (cls, xywh)"""
     boxes = []
     for s in segments:
         x, y = s.T  # segment xy
@@ -306,7 +299,7 @@ def segments2boxes(segments):
 
 
 def resample_segments(segments, n=1000):
-    # Up-sample an (n,2) segment
+    """Up-sample an (n,2) segment"""
     for i, s in enumerate(segments):
         s = np.concatenate((s, s[0:1, :]), axis=0)
         x = np.linspace(0, len(s) - 1, n)
@@ -316,7 +309,7 @@ def resample_segments(segments, n=1000):
 
 
 def scale_coords(img1_shape, coords, img0_shape, ratio_pad=None):
-    # Rescale coords (xyxy) from img1_shape to img0_shape
+    """Rescale coords (xyxy) from img1_shape to img0_shape"""
     if ratio_pad is None:  # calculate from img0_shape
         gain = min(img1_shape[0] / img0_shape[0], img1_shape[1] / img0_shape[1])  # gain  = old / new
         pad = (img1_shape[1] - img0_shape[1] * gain) / 2, (img1_shape[0] - img0_shape[0] * gain) / 2  # wh padding
@@ -332,7 +325,7 @@ def scale_coords(img1_shape, coords, img0_shape, ratio_pad=None):
 
 
 def clip_coords(boxes, img_shape):
-    # Clip bounding xyxy bounding boxes to image shape (height, width)
+    """Clip bounding xyxy bounding boxes to image shape (height, width)"""
     boxes[:, 0].clamp_(0, img_shape[1])  # x1
     boxes[:, 1].clamp_(0, img_shape[0])  # y1
     boxes[:, 2].clamp_(0, img_shape[1])  # x2
@@ -340,7 +333,7 @@ def clip_coords(boxes, img_shape):
 
 
 def bbox_iou(box1, box2, x1y1x2y2=True, GIoU=False, DIoU=False, CIoU=False, eps=1e-7):
-    # Returns the IoU of box1 to box2. box1 is 4, box2 is nx4
+    """Returns the IoU of box1 to box2. box1 is 4, box2 is nx4"""
     box2 = box2.T
 
     # Get the coordinates of bounding boxes
@@ -388,7 +381,7 @@ def bbox_iou(box1, box2, x1y1x2y2=True, GIoU=False, DIoU=False, CIoU=False, eps=
 
 
 def bbox_alpha_iou(box1, box2, x1y1x2y2=False, GIoU=False, DIoU=False, CIoU=False, alpha=2, eps=1e-9):
-    # Returns tsqrt_he IoU of box1 to box2. box1 is 4, box2 is nx4
+    """Returns tsqrt_he IoU of box1 to box2. box1 is 4, box2 is nx4"""
     box2 = box2.T
 
     # Get the coordinates of bounding boxes
@@ -440,8 +433,8 @@ def bbox_alpha_iou(box1, box2, x1y1x2y2=False, GIoU=False, DIoU=False, CIoU=Fals
 
 
 def box_iou(box1, box2):
-    # https://github.com/pytorch/vision/blob/master/torchvision/ops/boxes.py
     """
+    https://github.com/pytorch/vision/blob/master/torchvision/ops/boxes.py
     Return intersection-over-union (Jaccard index) of boxes.
     Both sets of boxes are expected to be in (x1, y1, x2, y2) format.
     Arguments:
@@ -796,7 +789,7 @@ def non_max_suppression_kpt(prediction, conf_thres=0.25, iou_thres=0.45, classes
 
 
 def strip_optimizer(f='best.pt', s=''):  # from utils.general import *; 
-    # Strip optimizer from 'f' to finalize training, optionally save as 's'
+    """Strip optimizer from 'f' to finalize training, optionally save as 's'"""
     x = torch.load(f, map_location=torch.device('cpu'))
     if x.get('ema'):
         x['model'] = x['ema']  # replace model with ema
@@ -812,7 +805,7 @@ def strip_optimizer(f='best.pt', s=''):  # from utils.general import *;
 
 
 def print_mutation(hyp, results, yaml_file='hyp_evolved.yaml', bucket=''):
-    # Print mutation results to evolve.txt (for use with train.py --evolve)
+    """Print mutation results to evolve.txt (for use with train.py --evolve)"""
     a = '%10s' * len(hyp) % tuple(hyp.keys())  # hyperparam keys
     b = '%10.3g' * len(hyp) % tuple(hyp.values())  # hyperparam values
     c = '%10.4g' * len(results) % results  # results (P, R, mAP@0.5, mAP@0.5:0.95, val_losses x 3)
@@ -843,7 +836,7 @@ def print_mutation(hyp, results, yaml_file='hyp_evolved.yaml', bucket=''):
 
 
 def apply_classifier(x, model, img, im0):
-    # applies a second stage classifier to yolo outputs
+    """applies a second stage classifier to yolo outputs"""
     im0 = [im0] if isinstance(im0, np.ndarray) else im0
     for i, d in enumerate(x):  # per image
         if d is not None and len(d):
@@ -878,7 +871,7 @@ def apply_classifier(x, model, img, im0):
 
 
 def increment_path(path, exist_ok=True, sep=''):
-    # Increment path, i.e. runs/exp --> runs/exp{sep}0, runs/exp{sep}1 etc.
+    """Increment path, i.e. runs/exp --> runs/exp{sep}0, runs/exp{sep}1 etc."""
     path = Path(path)  # os-agnostic
     if (path.exists() and exist_ok) or (not path.exists()):
         return str(path)
@@ -888,3 +881,100 @@ def increment_path(path, exist_ok=True, sep=''):
         i = [int(m.groups()[0]) for m in matches if m]  # indices
         n = max(i) + 1 if i else 2  # increment number
         return f"{path}{sep}{n}"  # update path
+
+class BackgroundForegroundColors():
+    """Custom color for bbox and text"""
+    def __init__(self,hyp=None):
+        self.COLOR = np.array(
+    [   0.850, 0.325, 0.098,
+        0.000, 1.000, 0.000,
+        0.929, 0.694, 0.125,
+        0.494, 0.184, 0.556,
+        0.466, 0.674, 0.188,
+        0.301, 0.745, 0.933,
+        0.635, 0.078, 0.184,
+        0.300, 0.300, 0.300,
+        0.600, 0.600, 0.600,
+        1.000, 0.000, 0.000,
+        1.000, 0.500, 0.000,
+        0.749, 0.749, 0.000,
+        0.000, 1.000, 0.000,
+        0.000, 0.000, 1.000,
+        0.667, 0.000, 1.000,
+        0.333, 0.333, 0.000,
+        0.333, 0.667, 0.000,
+        0.333, 1.000, 0.000,
+        0.667, 0.333, 0.000,
+        0.667, 0.667, 0.000,
+        0.667, 1.000, 0.000,
+        1.000, 0.333, 0.000,
+        1.000, 0.667, 0.000,
+        1.000, 1.000, 0.000,
+        0.000, 0.333, 0.500,
+        0.000, 0.667, 0.500,
+        0.000, 1.000, 0.500,
+        0.333, 0.000, 0.500,
+        0.333, 0.333, 0.500,
+        0.333, 0.667, 0.500,
+        0.333, 1.000, 0.500,
+        0.667, 0.000, 0.500,
+        0.667, 0.333, 0.500,
+        0.667, 0.667, 0.500,
+        0.667, 1.000, 0.500,
+        1.000, 0.000, 0.500,
+        1.000, 0.333, 0.500,
+        1.000, 0.667, 0.500,
+        1.000, 1.000, 0.500,
+        0.000, 0.333, 1.000,
+        0.000, 0.667, 1.000,
+        0.000, 1.000, 1.000,
+        0.333, 0.000, 1.000,
+        0.333, 0.333, 1.000,
+        0.333, 0.667, 1.000,
+        0.333, 1.000, 1.000,
+        0.667, 0.000, 1.000,
+        0.667, 0.333, 1.000,
+        0.667, 0.667, 1.000,
+        0.667, 1.000, 1.000,
+        1.000, 0.000, 1.000,
+        1.000, 0.333, 1.000,
+        1.000, 0.667, 1.000,
+        0.333, 0.000, 0.000,
+        0.500, 0.000, 0.000,
+        0.667, 0.000, 0.000,
+        0.833, 0.000, 0.000,
+        1.000, 0.000, 0.000,
+        0.000, 0.167, 0.000,
+        0.000, 0.333, 0.000,
+        0.000, 0.500, 0.000,
+        0.000, 0.667, 0.000,
+        0.000, 0.833, 0.000,
+        0.000, 1.000, 0.000,
+        0.000, 0.000, 0.167,
+        0.000, 0.000, 0.333,
+        0.000, 0.000, 0.500,
+        0.000, 0.000, 0.667,
+        0.000, 0.000, 0.833,
+        0.000, 0.000, 1.000,
+        0.000, 0.000, 0.000,
+        0.143, 0.143, 0.143,
+        0.286, 0.286, 0.286,
+        0.429, 0.429, 0.429,
+        0.571, 0.571, 0.571,
+        0.714, 0.714, 0.714,
+        0.857, 0.857, 0.857,
+        0.000, 0.447, 0.741,
+        0.314, 0.717, 0.741,
+        0.50, 0.5, 0]).astype(np.float32).reshape(-1, 3)
+        self.textColor = None
+        self.bkColor = None
+    def getval(self, index=0):
+        """get text color, bbox color
+        arg: index of class name
+        return: textColor, bboxColor
+        """
+        self.bkColor = (self.COLOR[index] * 255).astype(np.uint8).tolist()
+        self.textColor = (0, 0, 0) if np.mean(self.COLOR[index]) > 0.5 else (255, 255, 255)
+        return self.textColor, self.bkColor
+    def len(self):
+        return len(self.COLOR)

@@ -1185,6 +1185,7 @@ def pastein(image, labels, sample_labels, sample_images, sample_masks):
     return labels
 
 class Albumentations:
+    """Data augmentation with Albumentations library"""
     def __init__(self, hyp=None):
         self.transform = None
         import albumentations as A
@@ -1208,6 +1209,14 @@ class Albumentations:
         logging.info(colorstr('albumentations: ') + ', '.join(f'{x}' for x in self.transform.transforms if x.p))
 
     def __call__(self, im, labels):
+        """
+        Args:
+            im (Image): opencv image
+            labels (labels): passcal_voc
+
+        Returns:
+            image, labels
+        """
         if self.transform:
             new = self.transform(image=im, bboxes=labels[:, 1:], class_labels=labels[:, 0])  # transformed
             im, labels = new['image'], np.array([[c, *b] for c, b in zip(new['class_labels'], new['bboxes'])])
@@ -1215,22 +1224,22 @@ class Albumentations:
 
 
 def create_folder(path='./new'):
-    # Create folder
+    """Create folder"""
     if os.path.exists(path):
         shutil.rmtree(path)  # delete output folder
     os.makedirs(path)  # make new output folder
 
 
 def flatten_recursive(path='../coco'):
-    # Flatten a recursive directory by bringing all files to top level
+    """Flatten a recursive directory by bringing all files to top level"""
     new_path = Path(path + '_flat')
     create_folder(new_path)
     for file in tqdm(glob.glob(str(Path(path)) + '/**/*.*', recursive=True)):
         shutil.copyfile(file, new_path / Path(file).name)
 
 
-def extract_boxes(path='../coco/'):  # from utils.datasets import *; extract_boxes('../coco128')
-    # Convert detection dataset into classification dataset, with one directory per class
+def extract_boxes(path='../coco/'):
+    """Convert detection dataset into classification dataset, with one directory per class"""
 
     path = Path(path)  # images dir
     shutil.rmtree(path / 'classifier') if (path / 'classifier').is_dir() else None  # remove existing
@@ -1289,6 +1298,4 @@ def autosplit(path='../coco', weights=(0.9, 0.1, 0.0), annotated_only=False):
     
 def load_segmentations(self, index):
     key = '/work/handsomejw66/coco17/' + self.img_files[index]
-    #print(key)
-    # /work/handsomejw66/coco17/
     return self.segs[key]

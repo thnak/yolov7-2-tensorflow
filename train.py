@@ -629,36 +629,30 @@ if __name__ == '__main__':
     opt.world_size = int(os.environ['WORLD_SIZE']) if 'WORLD_SIZE' in os.environ else 1
     opt.global_rank = int(os.environ['RANK']) if 'RANK' in os.environ else -1
     set_logging(opt.global_rank)
-    # if opt.global_rank in [-1, 0]:
-    #     check_git_status()
-    #     check_requirements()
-    #     pass
+    if opt.global_rank in [-1, 0]:
+        check_git_status()
+        check_requirements()
 
     # Resume
     wandb_run = check_wandb_resume(opt)
     if opt.resume and not wandb_run:  # resume an interrupted run
         # specified or most recent path
         ckpt = opt.resume if isinstance(opt.resume, str) else get_latest_run()
-        assert os.path.isfile(
-            ckpt), 'ERROR: --resume checkpoint does not exist'
+        assert os.path.isfile(ckpt), 'ERROR: --resume checkpoint does not exist'
         apriori = opt.global_rank, opt.local_rank
         with open(Path(ckpt).parent.parent / 'opt.yaml') as f:
-            opt = argparse.Namespace(
-                **yaml.load(f, Loader=yaml.SafeLoader))  # replace
+            opt = argparse.Namespace(**yaml.load(f, Loader=yaml.SafeLoader))  # replace
             f.close()
         opt.cfg, opt.weights, opt.resume, opt.batch_size, opt.global_rank, opt.local_rank = '', ckpt, True, opt.total_batch_size, *apriori  # reinstate
         logger.info('Resuming training from %s' % ckpt)
     else:
         # opt.hyp = opt.hyp or ('hyp.finetune.yaml' if opt.weights else 'hyp.scratch.yaml')
-        opt.data, opt.cfg, opt.hyp = check_file(opt.data), check_file(
-            opt.cfg), check_file(opt.hyp)  # check files
-        assert len(opt.cfg) or len(
-            opt.weights), 'either --cfg or --weights must be specified'
+        opt.data, opt.cfg, opt.hyp = check_file(opt.data), check_file(opt.cfg), check_file(opt.hyp)  # check files
+        assert len(opt.cfg) or len(opt.weights), 'either --cfg or --weights must be specified'
         # extend to 2 sizes (train, test)
         opt.img_size.extend([opt.img_size[-1]] * (2 - len(opt.img_size)))
         opt.name = 'evolve' if opt.evolve else opt.name
-        opt.save_dir = increment_path(Path(
-            opt.project) / opt.name, exist_ok=opt.exist_ok | opt.evolve)  # increment run
+        opt.save_dir = increment_path(Path(opt.project) / opt.name, exist_ok=opt.exist_ok | opt.evolve)  # increment run
 
     # DDP mode
     opt.total_batch_size = opt.batch_size
@@ -809,11 +803,9 @@ if __name__ == '__main__':
                     x = x[np.argsort(-fitness(x))][:n]  # top n mutations
                     w = fitness(x) - fitness(x).min()  # weights
                     if parent == 'single' or len(x) == 1:
-                        x = x[random.choices(range(n), weights=w)[
-                            0]]  # weighted selection
+                        x = x[random.choices(range(n), weights=w)[0]]  # weighted selection
                     elif parent == 'weighted':
-                        x = (x * w.reshape(n, 1)).sum(0) / \
-                            w.sum()  # weighted combination
+                        x = (x * w.reshape(n, 1)).sum(0) / w.sum()  # weighted combination
 
                     # Mutate
                     mp, s = 0.8, 0.2  # mutation probability, sigma
@@ -823,8 +815,7 @@ if __name__ == '__main__':
                     ng = len(meta)
                     v = np.ones(ng)
                     while all(v == 1):  # mutate until a change occurs (prevent duplicates)
-                        v = (g * (npr.random(ng) < mp) * npr.randn(ng)
-                             * npr.random() * s + 1).clip(0.3, 3.0)
+                        v = (g * (npr.random(ng) < mp) * npr.randn(ng)* npr.random() * s + 1).clip(0.3, 3.0)
                     for i, k in enumerate(meta):  # plt.hist(v.ravel(), 300)
                             hyp[k] = float(x[i + 7] * v[i])  # mutate
 
@@ -835,13 +826,11 @@ if __name__ == '__main__':
                     hyp[k] = round(hyp[k], 5)  # significant digits
 
                 # Train mutation
-                results = train(hyp.copy(), opt, device, evo_num=[
-                                count, end_evo - start_evo])
+                results = train(hyp.copy(), opt, device, evo_num=[count, end_evo - start_evo])
 
                 # Write mutation results
                 print_mutation(hyp.copy(), results, yaml_file, opt.bucket)
-                logger.info('Gen '+str(_)+'th evo in: ' +
-                            str(round((time.time() - time0)/3600,3))+"hours")
+                logger.info(f'Gen {str(_)}th evo in: {str(round((time.time() - time0)/3600,3))}hours')
                 count += 1
                 file_ = open('./runs/train/evolve/evolve_config.txt', 'w')
                 string_evo_cfg[0][0] = str(count)
@@ -849,11 +838,9 @@ if __name__ == '__main__':
                 file_.close()
 
         elif start_evo > end_evo:
-            logger.error(
-                'Bad values, the start value to evolution is larger than the end value.')
+            logger.error('Bad values, the start value to evolution is larger than the end value.')
         else:
-            logger.warning(
-                'The evolution is finished, Total generation: '+str(end_evo-1))
+            logger.warning('The evolution is finished, Total generation: '+str(end_evo-1))
         plot_evolution(yaml_file)
         print(f'Hyperparameter evolution complete. Best results saved as: {yaml_file}\n'
               f'Command to train a new model with these hyperparameters: $ python train.py --hyp {yaml_file}')

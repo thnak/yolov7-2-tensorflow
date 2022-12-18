@@ -11,13 +11,13 @@ import torch
 
 
 def gsutil_getsize(url=''):
-    # gs://bucket/file size https://cloud.google.com/storage/docs/gsutil/commands/du
+    """gs://bucket/file size https://cloud.google.com/storage/docs/gsutil/commands/du"""
     s = subprocess.check_output(f'gsutil du {url}', shell=True).decode('utf-8')
     return eval(s.split(' ')[0]) if len(s) else 0  # bytes
 
 
 def attempt_download(file, repo='WongKinYiu/yolov7'):
-    # Attempt file download if does not exist
+    """Attempt file download if does not exist"""
     file = Path(str(file).strip().replace("'", '').lower())
 
     if not file.exists():
@@ -57,7 +57,7 @@ def attempt_download(file, repo='WongKinYiu/yolov7'):
 
 
 def gdrive_download(id='', file='tmp.zip'):
-    # Downloads a file from Google Drive. from yolov7.utils.google_utils import *; gdrive_download()
+    """Downloads a file from Google Drive. from yolov7.utils.google_utils import *; gdrive_download()"""
     t = time.time()
     file = Path(file)
     cookie = Path('cookie')  # gdrive cookie

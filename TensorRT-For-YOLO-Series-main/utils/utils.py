@@ -5,10 +5,7 @@ import time
 import yaml
 
 class TensorRT_Engine(object):
-    """_summary_
-
-    Args:
-        object (_type_): _description_
+    """Torch-TensorRT
         Using for TensorRT inference
     """
     def __init__(self, engine_path, dataset='', imgsz=(640,640)):
@@ -21,21 +18,20 @@ class TensorRT_Engine(object):
         self.cuda = cuda
         self.trt = trt
         self.Colorselector = BackgroundForegroundColors()
+        logger = self.trt.Logger(self.trt.Logger.WARNING)
+        runtime = self.trt.Runtime(logger)
+        self.trt.init_libnvinfer_plugins(logger,'') # initialize TensorRT plugins        
         try:
             with open(dataset,'r') as dataset_cls_name:
                 data_ = yaml.load(dataset_cls_name, Loader=yaml.SafeLoader)
                 dataset_cls_name.close()
                 self.n_classes = data_['nc']
                 self.class_names = data_['names']
-        except:
-            print(f'Error {dataset} file not found')
-        
-        logger = self.trt.Logger(self.trt.Logger.WARNING)
-        runtime = self.trt.Runtime(logger)
-        self.trt.init_libnvinfer_plugins(logger,'') # initialize TensorRT plugins
-        with open(engine_path, "rb") as f:
-            serialized_engine = f.read()
-            f.close()
+            with open(engine_path, "rb") as f:
+                serialized_engine = f.read()
+                f.close()                
+        except IOError:
+            print(f'Error: {IOError}, the item is required')
         engine = runtime.deserialize_cuda_engine(serialized_engine)
         self.context = engine.create_execution_context()
         self.inputs, self.outputs, self.bindings = [], [], []
@@ -64,7 +60,6 @@ class TensorRT_Engine(object):
             self.cuda.memcpy_dtoh_async(out['host'], out['device'], self.stream)
         # synchronize stream
         self.stream.synchronize()
-
         data = [out['host'] for out in self.outputs]
         return data
     
@@ -132,8 +127,7 @@ class TensorRT_Engine(object):
 
         if dets is not None:
             final_boxes, final_scores, final_cls_inds = dets[:,:4], dets[:, 4], dets[:, 5]
-            origin_img = self.vis(origin_img, final_boxes, final_scores, final_cls_inds,
-                             conf=conf, class_names=self.class_names)
+            origin_img = self.vis(origin_img, final_boxes, final_scores, final_cls_inds,conf=conf, class_names=self.class_names)
         return origin_img
 
     @staticmethod
@@ -203,9 +197,7 @@ class TensorRT_Engine(object):
                 keep = self.nms(valid_boxes, valid_scores, nms_thr)
                 if len(keep) > 0:
                     cls_inds = np.ones((len(keep), 1)) * cls_ind
-                    dets = np.concatenate(
-                        [valid_boxes[keep], valid_scores[keep, None], cls_inds], 1
-                    )
+                    dets = np.concatenate([valid_boxes[keep], valid_scores[keep, None], cls_inds], 1)
                     final_dets.append(dets)
         if len(final_dets) == 0:
             return None
@@ -254,7 +246,7 @@ class TensorRT_Engine(object):
         return img
 
 class BackgroundForegroundColors():
-    def __init__(self):
+    def __init__(self,hyp=None):
         self.COLOR = np.array(
     [   0.850, 0.325, 0.098,
         0.000, 1.000, 0.000,
@@ -343,3 +335,5 @@ class BackgroundForegroundColors():
         self.bkColor = (self.COLOR[index] * 255).astype(np.uint8).tolist()
         self.textColor = (0, 0, 0) if np.mean(self.COLOR[index]) > 0.5 else (255, 255, 255)
         return self.textColor, self.bkColor
+    def len(self):
+        return len(self.COLOR)

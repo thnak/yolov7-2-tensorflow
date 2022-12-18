@@ -9,7 +9,7 @@ from utils.torch_utils import is_parallel
 
 
 def smooth_BCE(eps=0.1):  # https://github.com/ultralytics/yolov3/issues/238#issuecomment-598028441
-    # return positive, negative label smoothing BCE targets
+    """return positive, negative label smoothing BCE targets"""
     return 1.0 - 0.5 * eps, 0.5 * eps
 
 
@@ -119,7 +119,7 @@ class SigmoidBin(nn.Module):
 
 
 class FocalLoss(nn.Module):
-    # Wraps focal loss around existing loss_fcn(), i.e. criteria = FocalLoss(nn.BCEWithLogitsLoss(), gamma=1.5)
+    """Wraps focal loss around existing loss_fcn(), i.e. criteria = FocalLoss(nn.BCEWithLogitsLoss(), gamma=1.5)"""
     def __init__(self, loss_fcn, gamma=1.5, alpha=0.25):
         super(FocalLoss, self).__init__()
         self.loss_fcn = loss_fcn  # must be nn.BCEWithLogitsLoss()
@@ -149,7 +149,7 @@ class FocalLoss(nn.Module):
 
 
 class QFocalLoss(nn.Module):
-    # Wraps Quality focal loss around existing loss_fcn(), i.e. criteria = FocalLoss(nn.BCEWithLogitsLoss(), gamma=1.5)
+    """Wraps Quality focal loss around existing loss_fcn(), i.e. criteria = FocalLoss(nn.BCEWithLogitsLoss(), gamma=1.5)"""
     def __init__(self, loss_fcn, gamma=1.5, alpha=0.25):
         super(QFocalLoss, self).__init__()
         self.loss_fcn = loss_fcn  # must be nn.BCEWithLogitsLoss()
@@ -420,7 +420,7 @@ class APLoss(torch.autograd.Function):
 
 
 class ComputeLoss:
-    # Compute losses
+    """Compute losses"""
     def __init__(self, model, autobalance=False):
         super(ComputeLoss, self).__init__()
         device = next(model.parameters()).device  # get model device
@@ -498,7 +498,7 @@ class ComputeLoss:
         return loss * bs, torch.cat((lbox, lobj, lcls, loss)).detach()
 
     def build_targets(self, p, targets):
-        # Build targets for compute_loss(), input targets(image,class,x,y,w,h)
+        """Build targets for compute_loss(), input targets(image,class,x,y,w,h)"""
         na, nt = self.na, targets.shape[0]  # number of anchors, targets
         tcls, tbox, indices, anch = [], [], [], []
         gain = torch.ones(7, device=targets.device).long()  # normalized to gridspace gain
@@ -554,7 +554,7 @@ class ComputeLoss:
 
 
 class ComputeLossOTA:
-    # Compute losses
+    """Compute losses"""
     def __init__(self, model, autobalance=False):
         super(ComputeLossOTA, self).__init__()
         device = next(model.parameters()).device  # get model device
@@ -797,7 +797,7 @@ class ComputeLossOTA:
         return matching_bs, matching_as, matching_gjs, matching_gis, matching_targets, matching_anchs           
 
     def find_3_positive(self, p, targets):
-        # Build targets for compute_loss(), input targets(image,class,x,y,w,h)
+        """Build targets for compute_loss(), input targets(image,class,x,y,w,h)"""
         na, nt = self.na, targets.shape[0]  # number of anchors, targets
         indices, anch = [], []
         gain = torch.ones(7, device=targets.device).long()  # normalized to gridspace gain
@@ -851,7 +851,7 @@ class ComputeLossOTA:
     
 
 class ComputeLossBinOTA:
-    # Compute losses
+    """Compute losses"""
     def __init__(self, model, autobalance=False):
         super(ComputeLossBinOTA, self).__init__()
         device = next(model.parameters()).device  # get model device
@@ -1124,7 +1124,7 @@ class ComputeLossBinOTA:
         return matching_bs, matching_as, matching_gjs, matching_gis, matching_targets, matching_anchs       
 
     def find_3_positive(self, p, targets):
-        # Build targets for compute_loss(), input targets(image,class,x,y,w,h)
+        """Build targets for compute_loss(), input targets(image,class,x,y,w,h)"""
         na, nt = self.na, targets.shape[0]  # number of anchors, targets
         indices, anch = [], []
         gain = torch.ones(7, device=targets.device).long()  # normalized to gridspace gain
@@ -1178,7 +1178,7 @@ class ComputeLossBinOTA:
 
 
 class ComputeLossAuxOTA:
-    # Compute losses
+    """Compute losses"""
     def __init__(self, model, autobalance=False):
         super(ComputeLossAuxOTA, self).__init__()
         device = next(model.parameters()).device  # get model device
@@ -1595,7 +1595,7 @@ class ComputeLossAuxOTA:
         return matching_bs, matching_as, matching_gjs, matching_gis, matching_targets, matching_anchs              
 
     def find_5_positive(self, p, targets):
-        # Build targets for compute_loss(), input targets(image,class,x,y,w,h)
+        """Build targets for compute_loss(), input targets(image,class,x,y,w,h)"""
         na, nt = self.na, targets.shape[0]  # number of anchors, targets
         indices, anch = [], []
         gain = torch.ones(7, device=targets.device).long()  # normalized to gridspace gain
@@ -1648,7 +1648,7 @@ class ComputeLossAuxOTA:
         return indices, anch                 
 
     def find_3_positive(self, p, targets):
-        # Build targets for compute_loss(), input targets(image,class,x,y,w,h)
+        """Build targets for compute_loss(), input targets(image,class,x,y,w,h)"""
         na, nt = self.na, targets.shape[0]  # number of anchors, targets
         indices, anch = [], []
         gain = torch.ones(7, device=targets.device).long()  # normalized to gridspace gain
