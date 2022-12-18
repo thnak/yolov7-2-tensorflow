@@ -13,8 +13,8 @@ torchvision>=0.8.1,!=0.13.0
 tqdm>=4.41.0
 protobuf<4.21.3
 pycuda
-nvidia-tensorrt
 nvidia-pyindex
+nvidia-tensorrt
 youtube_dl
 # Logging -------------------------------------
 tensorboard>=2.4.1
@@ -22,7 +22,7 @@ wandb
 termcolor
 # Plotting ------------------------------------
 pandas>=1.1.4
-seaborn>=0.11.0
+seaborn
 
 # Export --------------------------------------
 onnxsim

@@ -11,7 +11,7 @@ from models.experimental import attempt_load
 from models.yolo import TensorRT_Engine
 from utils.datasets import LoadStreams, LoadImages
 from utils.general import check_img_size, check_requirements, check_imshow, non_max_suppression, apply_classifier, \
-    scale_coords, xyxy2xywh, strip_optimizer, set_logging, increment_path, check_git_status
+    scale_coords, xyxy2xywh, strip_optimizer, set_logging, increment_path, check_git_status, BackgroundForegroundColors
 from utils.plots import plot_one_box_with_return
 from utils.torch_utils import select_device, load_classifier, time_synchronized, TracedModel
 import subprocess
@@ -19,35 +19,40 @@ import shlex
 import platform
 import os
 
-def detect(opt = None):
+
+def detect(opt=None):
     source, weights, view_img, save_txt, imgsz, trace = opt.source, opt.weights, opt.view_img, opt.save_txt, opt.img_size, not opt.no_trace
-    save_img = not opt.nosave and not source.endswith('.txt')  # save inference images
+    save_img = not opt.nosave and not source.endswith(
+        '.txt')  # save inference images
     webcam = source.isnumeric() or source.endswith('.txt') or source.lower().startswith(
         ('rtsp://', 'rtmp://', 'http://', 'https://'))
 
     # Directories
-    save_dir = Path(increment_path(Path(opt.project) / opt.name, exist_ok=opt.exist_ok))  # increment run
-    (save_dir / 'labels' if save_txt else save_dir).mkdir(parents=True, exist_ok=True)  # make dir
-
+    save_dir = Path(increment_path(Path(opt.project) / opt.name,
+                    exist_ok=opt.exist_ok))  # increment run
+    (save_dir / 'labels' if save_txt else save_dir).mkdir(parents=True,
+                                                          exist_ok=True)  # make dir
+    BFC = BackgroundForegroundColors(hyp='./mydataset.yaml')
     # Initialize
     set_logging()
     device = select_device(opt.device)
     half = device.type != 'cpu'  # half precision only supported on CUDA
-    
+
     # Load model
     model = attempt_load(weights, map_location=device)  # load FP32 model
     stride = int(model.stride.max())  # model stride
     imgsz = check_img_size(imgsz, s=stride)  # check img_size
 
     if trace:
-        model = TracedModel(model=model,device=device,img_size=imgsz,saveTrace=False)
-        
+        model = TracedModel(model=model, device=device,
+                            img_size=imgsz, saveTrace=False)
+
     if half:
         model.half()  # to FP16
     if save_img:
         mySys = platform.uname()
         osType = mySys.system
-        try:    
+        try:
             from utils.ffmpeg_ import getGPUtype
             if torch.cuda.is_available():
                 vidCodec = 'hevc_nvenc'
@@ -57,19 +62,22 @@ def detect(opt = None):
                 vidCodec = 'hevc_vaapi'
             else:
                 vidCodec = 'libx264'
-            print(f'Using video codec: {vidCodec}, os: {osType}, gpu: {str(getGPUtype())}')
+            print(
+                f'Using video codec: {vidCodec}, os: {osType}, gpu: {str(getGPUtype())}')
         except:
             if torch.cuda.is_available():
                 vidCodec = 'hevc_nvenc'
             else:
                 vidCodec = 'libx264'
-            print(f'Using video codec: {vidCodec}, os: {osType}, gpu: '+ 'Nvidia' if torch.cuda.is_available() else 'Unknown')
-    
+            print(f'Using video codec: {vidCodec}, os: {osType}, gpu: ' +
+                  'Nvidia' if torch.cuda.is_available() else 'Unknown')
+
     # Second-stage classifier
     classify = False
     if classify:
         modelc = load_classifier(name='resnet101', n=2)  # initialize
-        modelc.load_state_dict(torch.load('weights/resnet101.pt', map_location=device)['model']).to(device).eval()
+        modelc.load_state_dict(torch.load(
+            'weights/resnet101.pt', map_location=device)['model']).to(device).eval()
 
     # Set Dataloader
     vid_path, vid_writer = None, None
@@ -85,12 +93,13 @@ def detect(opt = None):
 
     # Run inference
     if device.type != 'cpu':
-        model(torch.zeros(1, 3, imgsz, imgsz).to(device).type_as(next(model.parameters())))  # run once
+        model(torch.zeros(1, 3, imgsz, imgsz).to(device).type_as(
+            next(model.parameters())))  # run once
     old_img_w = old_img_h = imgsz
     old_img_b = 1
 
     t0 = time.time()
-    avgTime = [[],[]]
+    avgTime = [[], []]
     if opt.datacollection:
         save_txt = True
     for path, img, im0s, vid_cap in dataset:
@@ -116,7 +125,8 @@ def detect(opt = None):
         t2 = time_synchronized()
 
         # Apply NMS
-        pred = non_max_suppression(pred, opt.conf_thres, opt.iou_thres, classes=opt.classes, agnostic=opt.agnostic_nms)
+        pred = non_max_suppression(
+            pred, opt.conf_thres, opt.iou_thres, classes=opt.classes, agnostic=opt.agnostic_nms)
         t3 = time_synchronized()
 
         # Apply Classifier
@@ -125,113 +135,131 @@ def detect(opt = None):
 
         # Process detections
         t4 = time.time()
-        saveImgCollect = False
         for i, det in enumerate(pred):  # detections per image
             if webcam:  # batch_size >= 1
-                p, s, im0, frame = path[i], '%g: ' % i, im0s[i].copy(), dataset.count
+                p, s, im0, frame = path[i], '%g: ' % i, im0s[i].copy(
+                ), dataset.count
             else:
                 p, s, im0, frame = path, '', im0s, getattr(dataset, 'frame', 0)
             imOrigin = im0.copy()
             p = Path(p)  # to Path
             save_path = str(save_dir / p.name)  # img.jpg
-            
-            os.makedirs(str(save_dir / 'labels'),exist_ok=True)
-            txt_path = os.path.join(save_dir,'labels',p.stem) if dataset.mode == 'image' else os.path.join(save_dir,'labels',p.stem+f'_{frame}')
-            
-            gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh
+
+            os.makedirs(str(save_dir / 'labels'), exist_ok=True)
+            txt_path = os.path.join(save_dir, 'labels', p.stem) if dataset.mode == 'image' else os.path.join(
+                save_dir, 'labels', p.stem+f'_{frame}')
+
+            # normalization gain whwh
+            gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]
             if len(det):
-                det[:, :4] = scale_coords(img.shape[2:], det[:, :4], im0.shape).round()
+                det[:, :4] = scale_coords(
+                    img.shape[2:], det[:, :4], im0.shape).round()
                 for c in det[:, -1].unique():
                     n = (det[:, -1] == c).sum()  # detections per class
-                    s += f"{n} {names[int(c)]}{'s' * (n > 1)}, "  # add to string
+                    # add to string
+                    s += f"{n} {names[int(c)]}{'s' * (n > 1)}, "
 
                 # Write results
                 for *xyxy, conf, cls in reversed(det):
                     if save_txt:  # Write to file
                         xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
-                        line = (cls, *xywh, conf) if opt.save_conf else (cls, *xywh)  # label format
-                        saveImgCollect = True
+                        # label format
+                        line = (cls, *xywh, conf) if opt.save_conf else (cls, *xywh)
                         f = open(os.path.join(txt_path+'.txt'), 'a')
                         f.write(('%g ' * len(line)).rstrip() % line + '\n')
                         f.close()
                     if save_img or view_img:
                         label = f'{names[int(cls)]} {conf:.2f}'
-                        im0 = plot_one_box_with_return(xyxy, im0, label=label, color=colors[int(cls)], line_thickness=1)
-                
+                        textColor, bboxColor = BFC.getval(index=int(cls))
+                        im0 = plot_one_box_with_return(xyxy, im0, label=label, txtColor=textColor, bboxColor=bboxColor, line_thickness=1)
+
             # Print time (inference + NMS)
-            tmInf, tmNms = round(1E3 * (t2 - t1),3), round(1E3 * (t3 - t2),3)
+            tmInf, tmNms = round(1E3 * (t2 - t1), 3), round(1E3 * (t3 - t2), 3)
             avgTime[0].append(tmInf)
             avgTime[1].append(tmNms)
             print(f'{s}Done. ({tmInf}ms) Inference, ({tmNms}ms) NMS')
 
             # Stream results
-            if view_img :
-                if dataset.mode == 'image':
-                    im0 = cv2.cvtColor(im0,cv2.COLOR_BGR2RGB)
-                    Image.fromarray(im0, mode='RGB').show()
-                else:
-                    cv2.namedWindow('str(p)',cv2.WINDOW_NORMAL)
-                    cv2.imshow('str(p)', im0)
-                    if cv2.waitKey(1) == 27: 
-                        break
-             
+            if view_img:
+                cv2.namedWindow('Stream result', cv2.WINDOW_NORMAL)
+                cv2.imshow('Stream result', im0)
+                if cv2.waitKey(1) == 27:
+                    break
+
             # Save results (image with detections)
             if save_img or opt.datacollection:
-                if dataset.mode == 'image' and not opt.datacollection:
-                    cv2.imwrite(save_path, imOrigin)
+                if opt.datacollection:
+                    im0 = imOrigin
+                if dataset.mode == 'image':
+                    cv2.imwrite(save_path, im0)
                     print(f"The image with the result is saved in: {save_path}")
                 else:  # 'video' or 'stream'
-                    if opt.datacollection and saveImgCollect:
-                        cv2.imwrite(save_path, imOrigin)
-                        print(f"Collected image with the result is saved in: {save_path}")
-                    elif not opt.datacollection and dataset.mode != 'image':        
-                        if vid_path != save_path:  # new video
-                            vid_path = save_path
-                            if isinstance(vid_writer, cv2.VideoWriter):
-                                vid_writer.release()  # release previous video writer
-                                process.stdin.close()
-                                process.wait()
-                                process.terminate()
-                            if vid_cap:  # video
-                                fps = vid_cap.get(cv2.CAP_PROP_FPS)
-                                w = int(vid_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-                                h = int(vid_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-                            else:  # stream
-                                fps, w, h = 30, im0.shape[1], im0.shape[0]
-                                save_path += '.mp4'
-                            process = subprocess.Popen(shlex.split(f'ffmpeg -y -s {w}x{h} -pixel_format bgr24 -f rawvideo -r {fps} -i pipe: -vcodec {vidCodec} -pix_fmt yuv420p -crf 24')+[save_path], stdin=subprocess.PIPE)
-                        process.stdin.write(im0.tobytes())
-                    else:
-                        print('Nothing to save!')
+                    if vid_path != save_path:  # new video
+                        vid_path = save_path
+                        if isinstance(vid_writer, cv2.VideoWriter):
+                            vid_writer.release()  # release previous video writer
+                            process.stdin.close()
+                            process.wait()
+                            process.terminate()
+                        if vid_cap:  # video
+                            fps = vid_cap.get(cv2.CAP_PROP_FPS)
+                            w = int(vid_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                            h = int(vid_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                        else:  # stream
+                            fps, w, h = 30, im0.shape[1], im0.shape[0]
+                            save_path += '.mp4'
+                        process = subprocess.Popen(shlex.split(f'ffmpeg -y -s {w}x{h} -pixel_format bgr24 -f rawvideo -r {fps} -i pipe: -vcodec {vidCodec} -pix_fmt yuv420p -crf 24')+[save_path], stdin=subprocess.PIPE)
+                    process.stdin.write(im0.tobytes())
         print(f'pre-processing {time.time() - t4:0.3f}s')
     if save_txt or save_img:
         s = f"\n{len(list(save_dir.glob('labels/*.txt')))} labels saved to {save_dir / 'labels'}" if save_txt else ''
         print(f"Results saved to {save_dir}{s}")
     cv2.destroyAllWindows()
-    print(f'Done. ({time.time() - t0:.3f}s), avgInference {round(sum(avgTime[0])/len(avgTime[0]),3)}ms, avgNMS {round(sum(avgTime[1])/len(avgTime[1]),3)}ms')
+    print(
+        f'Done. ({time.time() - t0:.3f}s), avgInference {round(sum(avgTime[0])/len(avgTime[0]),3)}ms, avgNMS {round(sum(avgTime[1])/len(avgTime[1]),3)}ms')
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--weights', nargs='+', type=str, default='./models/yolov7.pt', help='model.pt path(s)')
-    parser.add_argument('--source', type=str, default='inference/images/', help='source')  # file/folder, 0 for webcam
-    parser.add_argument('--img-size', type=int, default=640, help='inference size (pixels)')
-    parser.add_argument('--conf-thres', type=float, default=0.25, help='object confidence threshold')
-    parser.add_argument('--iou-thres', type=float, default=0.45, help='IOU threshold for NMS')
-    parser.add_argument('--device', default='', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
-    parser.add_argument('--view-img', action='store_true', help='display results')
-    parser.add_argument('--save-txt', action='store_true', help='save results to *.txt')
-    parser.add_argument('--save-conf', action='store_true', help='save confidences in --save-txt labels')
-    parser.add_argument('--nosave', action='store_true', help='do not save images/videos')
-    parser.add_argument('--datacollection', action='store_true', help='save image and labels')
-    parser.add_argument('--classes', nargs='+', type=int, help='filter by class: --class 0, or --class 0 2 3')
-    parser.add_argument('--agnostic-nms', action='store_true', help='class-agnostic NMS')
-    parser.add_argument('--augment', action='store_true', help='augmented inference')
-    parser.add_argument('--update', action='store_true', help='update all models')
-    parser.add_argument('--project', default='runs/detect', help='save results to project/name')
-    parser.add_argument('--name', default='exp', help='save results to project/name')
-    parser.add_argument('--exist-ok', action='store_true', help='existing project/name ok, do not increment')
-    parser.add_argument('--no-trace', action='store_true', help='don`t trace model')
+    parser.add_argument('--weights', nargs='+', type=str,
+                        default='./models/yolov7.pt', help='model.pt path(s)')
+    # file/folder, 0 for webcam
+    parser.add_argument('--source', type=str,
+                        default='inference/images/', help='source')
+    parser.add_argument('--img-size', type=int, default=640,
+                        help='inference size (pixels)')
+    parser.add_argument('--conf-thres', type=float,
+                        default=0.25, help='object confidence threshold')
+    parser.add_argument('--iou-thres', type=float,
+                        default=0.45, help='IOU threshold for NMS')
+    parser.add_argument('--device', default='',
+                        help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
+    parser.add_argument('--view-img', action='store_true',
+                        help='display results')
+    parser.add_argument('--save-txt', action='store_true',
+                        help='save results to *.txt')
+    parser.add_argument('--save-conf', action='store_true',
+                        help='save confidences in --save-txt labels')
+    parser.add_argument('--nosave', action='store_true',
+                        help='do not save images/videos')
+    parser.add_argument('--datacollection',
+                        action='store_true', help='save image and labels')
+    parser.add_argument('--classes', nargs='+', type=int,
+                        help='filter by class: --class 0, or --class 0 2 3')
+    parser.add_argument('--agnostic-nms', action='store_true',
+                        help='class-agnostic NMS')
+    parser.add_argument('--augment', action='store_true',
+                        help='augmented inference')
+    parser.add_argument('--update', action='store_true',
+                        help='update all models')
+    parser.add_argument('--project', default='runs/detect',
+                        help='save results to project/name')
+    parser.add_argument('--name', default='exp',
+                        help='save results to project/name')
+    parser.add_argument('--exist-ok', action='store_true',
+                        help='existing project/name ok, do not increment')
+    parser.add_argument('--no-trace', action='store_true',
+                        help='don`t trace model')
     opt = parser.parse_args()
     check_requirements()
     check_git_status()
@@ -239,14 +267,15 @@ if __name__ == '__main__':
         file_extention = os.path.splitext(_)[1]
         if file_extention not in ['.trt', '.engine']:
             with torch.no_grad():
-                if opt.update:  # update all models (to fix SourceChangeWarning)
+                # update all models (to fix SourceChangeWarning)
+                if opt.update:
                     detect(opt=opt)
                     strip_optimizer(_)
                 else:
                     detect(opt)
         else:
             try:
-                pred = TensorRT_Engine(engine_path=_,dataset=None, imgsz=opt.img_size)
+                pred = TensorRT_Engine(
+                    engine_path=_, dataset=None, imgsz=opt.img_size)
             except:
                 pass
-            

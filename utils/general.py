@@ -885,6 +885,9 @@ def increment_path(path, exist_ok=True, sep=''):
 class BackgroundForegroundColors():
     """Custom color for bbox and text"""
     def __init__(self,hyp=None):
+        """__init__
+        args: mydataset.yaml path to get class names
+        """
         self.COLOR = np.array(
     [   0.850, 0.325, 0.098,
         0.000, 1.000, 0.000,
@@ -968,13 +971,22 @@ class BackgroundForegroundColors():
         0.50, 0.5, 0]).astype(np.float32).reshape(-1, 3)
         self.textColor = None
         self.bkColor = None
-    def getval(self, index=0):
+        if hyp is None:
+            hyp = './mydataset.yaml'
+        with open(hyp,'r') as dts:
+            data = yaml.load(dts,Loader=yaml.SafeLoader)
+            dts.close()
+        self.cls = data['names']
+    def getval(self, index=None, labels=''):
         """get text color, bbox color
-        arg: index of class name
+        arg: index of class name, labels
         return: textColor, bboxColor
         """
+        if index is None:
+            index = self.cls.index(labels)
         self.bkColor = (self.COLOR[index] * 255).astype(np.uint8).tolist()
         self.textColor = (0, 0, 0) if np.mean(self.COLOR[index]) > 0.5 else (255, 255, 255)
         return self.textColor, self.bkColor
     def len(self):
+        """return len of COLOR[]"""
         return len(self.COLOR)
