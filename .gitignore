@@ -1,1 +1,4 @@
 __pycache__
+runs/
+TrainRes/train
+TrainRes/val
