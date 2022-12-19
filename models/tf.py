@@ -26,15 +26,30 @@ import tensorflow as tf
 import torch
 import torch.nn as nn
 from tensorflow import keras
-
-from models.common import (C3, SPP, SPPF, Bottleneck, BottleneckCSP, C3x, Concat, Conv, CrossConv, DWConv,
-                           DWConvTranspose2d, Focus, autopad)
+import logging
+import inspect
+from typing import Optional
+from models.common import C3, SPP, SPPF, Bottleneck, BottleneckCSP,SP, C3x, Concat, Conv, CrossConv, DWConv, DWConvTranspose2d, Focus, autopad, MP
 from models.experimental import MixConv2d, attempt_load
 from models.yolo import Detect, Segment
 from utils.activations import SiLU
-from utils.general import LOGGER, make_divisible, print_args
+from utils.general import  make_divisible, colorstr
 
-
+def print_args(args: Optional[dict] = None, show_file=True, show_func=False):
+    # Print function arguments (optional args dict)
+    x = inspect.currentframe().f_back  # previous frame
+    file, _, func, _, _ = inspect.getframeinfo(x)
+    if args is None:  # get args automatically
+        args, _, _, frm = inspect.getargvalues(x)
+        args = {k: v for k, v in frm.items() if k in args}
+    try:
+        file = Path(file).resolve().relative_to(ROOT).with_suffix('')
+    except ValueError:
+        file = Path(file).stem
+    s = (f'{file}: ' if show_file else '') + (f'{func}: ' if show_func else '')
+    LOGGER.info(colorstr(s) + ', '.join(f'{k}={v}' for k, v in args.items()))
+    
+LOGGER = logging.getLogger(__name__)
 class TFBN(keras.layers.Layer):
     # TensorFlow BatchNormalization wrapper
     def __init__(self, w=None):
@@ -208,6 +223,27 @@ class TFBottleneckCSP(keras.layers.Layer):
         y2 = self.cv2(inputs)
         return self.cv4(self.act(self.bn(tf.concat((y1, y2), axis=3))))
 
+class TFMP(keras.layers.Layer):
+    def __init__(self):
+        super(TFMP, self).__init__()
+        self.cv1 = keras.layers.MaxPooling2D(strides=2, pool_size=(2,2), padding='valid')
+    def call(self,inputs):
+        print('babfdjebafhdsvfhbjksadvfhjdskvfdskahjfvdskahvfads')
+        return self.cv1(inputs)
+
+
+class TFSP(keras.layers.Layer):
+    # Spatial pyramid pooling layer used in YOLOv3-SPP
+    def __init__(self, c1, c2, k=(5, 9, 13), w=None):
+        super().__init__()
+        c_ = c1 // 2  # hidden channels
+        self.cv1 = TFConv(c1, c_, 1, 1, w=w.cv1)
+        self.cv2 = TFConv(c_ * (len(k) + 1), c2, 1, 1, w=w.cv2)
+        self.m = [keras.layers.MaxPool2D(pool_size=x, strides=1, padding='SAME') for x in k]
+
+    def call(self, inputs):
+        x = self.cv1(inputs)
+        return self.cv2(tf.concat([x] + [m(x) for m in self.m], 3))
 
 class TFC3(keras.layers.Layer):
     # CSP Bottleneck with 3 convolutions
@@ -383,7 +419,7 @@ def parse_model(d, ch, model, imgsz):  # model_dict, input_channels(3)
     anchors, nc, gd, gw = d['anchors'], d['nc'], d['depth_multiple'], d['width_multiple']
     na = (len(anchors[0]) // 2) if isinstance(anchors, list) else anchors  # number of anchors
     no = na * (nc + 5)  # number of outputs = anchors * (classes + 5)
-
+    print(f'chanel: {ch}')
     layers, save, c2 = [], [], ch[-1]  # layers, savelist, ch out
     for i, (f, n, m, args) in enumerate(d['backbone'] + d['head']):  # from, number, module, args
         m_str = m
@@ -396,13 +432,14 @@ def parse_model(d, ch, model, imgsz):  # model_dict, input_channels(3)
 
         n = max(round(n * gd), 1) if n > 1 else n  # depth gain
         if m in [
-                nn.Conv2d, Conv, DWConv, DWConvTranspose2d, Bottleneck, SPP, SPPF, MixConv2d, Focus, CrossConv,
-                BottleneckCSP, C3, C3x]:
-            c1, c2 = ch[f], args[0]
+                nn.Conv2d, Conv, DWConv, DWConvTranspose2d, Bottleneck, SP, SPP, SPPF, MixConv2d, Focus, CrossConv,
+                BottleneckCSP,C3,C3x, MP]:
+            print(f'debug: {f}')
+            c1, c2 = ch[f], args[0] if len(args) else 0
             c2 = make_divisible(c2 * gw, 8) if c2 != no else c2
 
             args = [c1, c2, *args[1:]]
-            if m in [BottleneckCSP, C3, C3x]:
+            if m in [BottleneckCSP,C3x, C3, MP]:
                 args.insert(2, n)
                 n = 1
         elif m is nn.BatchNorm2d:
@@ -418,12 +455,21 @@ def parse_model(d, ch, model, imgsz):  # model_dict, input_channels(3)
             args.append(imgsz)
         else:
             c2 = ch[f]
+        xxx = m_str.replace('nn.', '')
+        tf_m = eval(f'TF{xxx}')
+        print(f'debugg: model{model.model[i]}, \nargs{args}\n')
+        print(f'debug: len{n}')
+        if m_str == 'MP':
+          abc = tf_m()
+        else:
+          abc = tf_m(*args, w=model.model[i])
+        print(f'\n abc{abc}')
 
-        tf_m = eval('TF' + m_str.replace('nn.', ''))
-        m_ = keras.Sequential([tf_m(*args, w=model.model[i][j]) for j in range(n)]) if n > 1 \
-            else tf_m(*args, w=model.model[i])  # module
-
-        torch_m_ = nn.Sequential(*(m(*args) for _ in range(n))) if n > 1 else m(*args)  # module
+        m_ = keras.Sequential([tf_m(*args, w=model.model[i][j]) for j in range(n)]) if n > 1 else abc  # module
+        if m_str == 'MP':
+          torch_m_ = nn.Sequential(*(m(*args) for _ in range(n))) if n > 1 else m()  # module
+        else:
+          torch_m_ = nn.Sequential(*(m(*args) for _ in range(n))) if n > 1 else m(*args)  # module
         t = str(m)[8:-2].replace('__main__.', '')  # module type
         np = sum(x.numel() for x in torch_m_.parameters())  # number params
         m_.i, m_.f, m_.type, m_.np = i, f, t, np  # attach index, 'from' index, type, number params

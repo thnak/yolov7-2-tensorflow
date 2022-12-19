@@ -1,11 +1,12 @@
 from utils.general import check_requirements, check_version
-import logging
 import os
 import subprocess
 import yaml
 from pathlib import Path
 import re
-
+import torch
+import platform
+MACOS = platform.system() == 'Darwin'  # macOS environment
 def yaml_save(file='data.yaml', data={}):
     # Single-line safe yaml saving
     with open(file, 'w') as f:

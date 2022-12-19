@@ -44,7 +44,7 @@ if __name__ == '__main__':
     set_logging()
     t = time.time()
 
-    print('# Load PyTorch model')
+    print(f'# Load PyTorch model')
     device = select_device(opt.device)
     model = attempt_load(opt.weights, map_location=device)  # load FP32 model
     modelss = model
@@ -86,10 +86,9 @@ if __name__ == '__main__':
 
     # CoreML export
     try:
+        prefix = colorstr('CoreML:')
         import coremltools as ct
-
-        print('\nStarting CoreML export with coremltools %s...' % ct.__version__)
-        # convert model from torchscript and apply pixel scaling as per detect.py
+        print(f'\n{prefix}Starting CoreML export with coremltools %s...' % ct.__version__)
         ct_model = ct.convert(ts, inputs=[ct.ImageType('image', shape=img.shape, scale=1 / 255.0, bias=[0, 0, 0])])
         bits, mode = (8, 'kmeans_lut') if opt.int8 else (16, 'linear') if opt.fp16 else (32, None)
         if bits < 32:
@@ -98,32 +97,31 @@ if __name__ == '__main__':
                     warnings.filterwarnings("ignore", category=DeprecationWarning)  # suppress numpy==1.20 float warning
                     ct_model = ct.models.neural_network.quantization_utils.quantize_weights(ct_model, bits, mode)
             else:
-                print('quantization only supported on macOS, skipping...')
+                print(f'{prefix} quantization only supported on macOS, skipping...')
 
         f = opt.weights.replace('.pt', '.mlmodel')  # filename
         ct_model.save(f)
-        print('CoreML export success, saved as %s' % f)
+        print(f'{prefix} CoreML export success, saved as %s' % f)
         filenames[1] = f
     except Exception as e:
-        print('CoreML export failure: %s' % e)
+        print(f'{prefix} CoreML export failure: %s' % e)
                      
-    # TorchScript-Lite export
+    prefix = colorstr('TorchScript-Lite:')
     try:
-        print('\nStarting TorchScript-Lite export with torch %s...' % torch.__version__)
+        print(f'\n{prefix} Starting TorchScript-Lite export with torch %s...' % torch.__version__)
         f = opt.weights.replace('.pt', '.torchscript.ptl')  # filename
         tsl = torch.jit.trace(model, img, strict=False)
         tsl = optimize_for_mobile(tsl)
         tsl._save_for_lite_interpreter(f)
-        print('TorchScript-Lite export success, saved as %s' % f)
+        print(f'{prefix} TorchScript-Lite export success, saved as %s' % f)
         filenames[2] = f
     except Exception as e:
-        print('TorchScript-Lite export failure: %s' % e)
+        print(f'{prefix} export failure: %s' % e)
 
-    # ONNX export
+    prefix = colorstr('ONNX:')
     try:
         import onnx
-
-        print('\nStarting ONNX export with onnx %s...' % onnx.__version__)
+        print(f'\n{prefix} Starting ONNX export with onnx %s...' % onnx.__version__)
         f = opt.weights.replace('.pt', '.onnx')  # filename
         model.eval()
         output_names = ['classes', 'boxes'] if y is None else ['output']
@@ -151,7 +149,7 @@ if __name__ == '__main__':
             dynamic_axes.update(output_axes)
         if opt.grid:
             if opt.end2end:
-                print('\nStarting export end2end onnx model for %s...' % 'TensorRT' if opt.max_wh is None else 'onnxruntime')
+                print(f'\n{prefix}Starting export end2end onnx model for %s...' % 'TensorRT' if opt.max_wh is None else 'onnxruntime')
                 model = End2End(model,opt.topk_all,opt.iou_thres,opt.conf_thres,opt.max_wh,device,len(labels))
                 if opt.end2end and opt.max_wh is None:
                     output_names = ['num_dets', 'det_boxes', 'det_scores', 'det_classes']
@@ -178,39 +176,34 @@ if __name__ == '__main__':
         if opt.simplify:
             try:
                 import onnxsim
-
-                print('\nStarting to simplify ONNX...')
+                print(f'{prefix}\nStarting to simplify ONNX...')
                 onnx_model, check = onnxsim.simplify(onnx_model)
                 assert check, 'assert check failed'
             except Exception as e:
-                print(f'Simplifier failure: {e}')
-
-        # print(onnx.helper.printable_graph(onnx_model.graph))  # print a human readable model
+                print(f'{prefix} Simplifier failure: {e}')
         onnx.save(onnx_model,f)
-        print('ONNX export success, saved as %s' % f)
+        print(f'{prefix} export success, saved as %s' % f)
 
         if opt.include_nms:
-            print('Registering NMS plugin for ONNX...')
+            print(f'{prefix}Registering NMS plugin for ONNX...')
             mo = RegisterNMS(f)
             mo.register_nms()
             mo.save(f)
         filenames[3] = f
+        print(f'{prefix} export success, saved as {f}')
     except Exception as e:
-        print('ONNX export failure: %s' % e)
-
+        print(f'{prefix} export failure: %s' % e)
     
-    # Finish
-    print('\nExport complete (%.2fs). Visualize with https://github.com/lutzroeder/netron.' % (time.time() - t))
     meta = {'stride': int(max(modelss.stride)), 'names': modelss.names}
-    
+    prefix = colorstr('OpenVINO:')
     try:
         from tools.auxexport import export_openvino
         filenames[4], _ = export_openvino(file_=opt.weights,metadata=meta, half=True,prefix=colorstr('OpenVINI'))
-        print(f'{filenames[4]} finished')
-        
+        print(f'{prefix} export success, saved as {filenames[4]}')
     except Exception as e:
-        print('OpenVINO export failure: %s' % e)
+        print(f'{prefix} export failure: %s' % e)
         
+    prefix = colorstr('TensorFlow SavedModel:')
     try:
         from tools.auxexport import export_saved_model
         im = torch.zeros(opt.batch_size, 3, *opt.img_size).to(device)
@@ -225,23 +218,27 @@ if __name__ == '__main__':
                                            iou_thres=opt.iou_thres,
                                            conf_thres=opt.conf_thres,
                                            keras=False)
-        
+        print(f'{prefix} export success, saved as {filenames[5]}')
     except Exception as e:
-        print('Saved model export failure: %s' % e)
+        print(f'{prefix} export failure: %s' % e)
         
+    prefix = colorstr('TensorFlow GraphDef:')
     try:
         from tools.auxexport import export_pb
         filenames[6], _ = export_pb(s_models,opt.weights)
+        print(f'{prefix} export success, saved as {filenames[6]}')
     except Exception as e:
-        print('pb export failure: %s' % e)
+        print(f'{prefix} export failure: %s' % e)
         
+    prefix = colorstr('TensorFlow.js:')
     try:
         from tools.auxexport import export_tfjs
         filenames[7], _ = export_tfjs(file_=opt.weights, prefix=colorstr('TensorFlow.js'))
-        print(f'{filenames[2]} finished')
+        print(f'{prefix} {filenames[2]} is finished')
     except Exception as e:
-        print('TensorFlow js export failure: %s' % e)
+        print(f'{prefix} export failure: %s' % e)
     prefix = colorstr('Export:')
     for i in filenames:
         if i is not None:
-            print(f'{prefix} {i} exported')
+            print(f'{prefix} {i} is exported.')
+    print(f'\n{prefix} complete (%.2fs). Visualize with https://github.com/lutzroeder/netron.' % (time.time() - t))

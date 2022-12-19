@@ -19,7 +19,6 @@ from utils.torch_utils import time_synchronized
 
 
 ##### basic ####
-
 def autopad(k, p=None):  # kernel, padding
     # Pad to 'same'
     if p is None:
@@ -97,7 +96,7 @@ class Foldcut(nn.Module):
 
 
 class Conv(nn.Module):
-    # Standard convolution
+    """Standard convolution"""
     def __init__(self, c1, c2, k=1, s=1, p=None, g=1, act=True):  # ch_in, ch_out, kernel, stride, padding, groups
         super(Conv, self).__init__()
         self.conv = nn.Conv2d(c1, c2, k, s, autopad(k, p), groups=g, bias=False)
@@ -112,7 +111,7 @@ class Conv(nn.Module):
     
 
 class RobustConv(nn.Module):
-    # Robust convolution (use high kernel size 7-11 for: downsampling and other layers). Train for 300 - 450 epochs.
+    """Robust convolution (use high kernel size 7-11 for: downsampling and other layers). Train for 300 - 450 epochs."""
     def __init__(self, c1, c2, k=7, s=1, p=None, g=1, act=True, layer_scale_init_value=1e-6):  # ch_in, ch_out, kernel, stride, padding, groups
         super(RobustConv, self).__init__()
         self.conv_dw = Conv(c1, c1, k=k, s=s, p=p, g=c1, act=act)
@@ -145,12 +144,12 @@ class RobustConv2(nn.Module):
     
 
 def DWConv(c1, c2, k=1, s=1, act=True):
-    # Depthwise convolution
+    """Depthwise convolution"""
     return Conv(c1, c2, k, s, g=math.gcd(c1, c2), act=act)
 
 
 class GhostConv(nn.Module):
-    # Ghost Convolution https://github.com/huawei-noah/ghostnet
+    """Ghost Convolution https://github.com/huawei-noah/ghostnet"""
     def __init__(self, c1, c2, k=1, s=1, g=1, act=True):  # ch_in, ch_out, kernel, stride, groups
         super(GhostConv, self).__init__()
         c_ = c2 // 2  # hidden channels
@@ -179,7 +178,7 @@ class Stem(nn.Module):
 
 
 class DownC(nn.Module):
-    # Spatial pyramid pooling layer used in YOLOv3-SPP
+    """Spatial pyramid pooling layer used in YOLOv3-SPP"""
     def __init__(self, c1, c2, n=1, k=2):
         super(DownC, self).__init__()
         c_ = int(c1)  # hidden channels
@@ -193,7 +192,7 @@ class DownC(nn.Module):
 
 
 class SPP(nn.Module):
-    # Spatial pyramid pooling layer used in YOLOv3-SPP
+    """Spatial pyramid pooling layer used in YOLOv3-SPP"""
     def __init__(self, c1, c2, k=(5, 9, 13)):
         super(SPP, self).__init__()
         c_ = c1 // 2  # hidden channels
@@ -207,7 +206,7 @@ class SPP(nn.Module):
     
 
 class Bottleneck(nn.Module):
-    # Darknet bottleneck
+    """Darknet bottleneck"""
     def __init__(self, c1, c2, shortcut=True, g=1, e=0.5):  # ch_in, ch_out, shortcut, groups, expansion
         super(Bottleneck, self).__init__()
         c_ = int(c2 * e)  # hidden channels
@@ -220,7 +219,7 @@ class Bottleneck(nn.Module):
 
 
 class Res(nn.Module):
-    # ResNet bottleneck
+    """ResNet bottleneck"""
     def __init__(self, c1, c2, shortcut=True, g=1, e=0.5):  # ch_in, ch_out, shortcut, groups, expansion
         super(Res, self).__init__()
         c_ = int(c2 * e)  # hidden channels
@@ -234,14 +233,14 @@ class Res(nn.Module):
 
 
 class ResX(Res):
-    # ResNet bottleneck
+    """ResNet bottleneck"""
     def __init__(self, c1, c2, shortcut=True, g=32, e=0.5):  # ch_in, ch_out, shortcut, groups, expansion
         super().__init__(c1, c2, shortcut, g, e)
         c_ = int(c2 * e)  # hidden channels
 
 
 class Ghost(nn.Module):
-    # Ghost Bottleneck https://github.com/huawei-noah/ghostnet
+    """Ghost Bottleneck https://github.com/huawei-noah/ghostnet"""
     def __init__(self, c1, c2, k=3, s=1):  # ch_in, ch_out, kernel, stride
         super(Ghost, self).__init__()
         c_ = c2 // 2
@@ -260,7 +259,7 @@ class Ghost(nn.Module):
 ##### cspnet #####
 
 class SPPCSPC(nn.Module):
-    # CSP https://github.com/WongKinYiu/CrossStagePartialNetworks
+    """CSP https://github.com/WongKinYiu/CrossStagePartialNetworks"""
     def __init__(self, c1, c2, n=1, shortcut=False, g=1, e=0.5, k=(5, 9, 13)):
         super(SPPCSPC, self).__init__()
         c_ = int(2 * c2 * e)  # hidden channels
@@ -280,7 +279,7 @@ class SPPCSPC(nn.Module):
         return self.cv7(torch.cat((y1, y2), dim=1))
 
 class GhostSPPCSPC(SPPCSPC):
-    # CSP https://github.com/WongKinYiu/CrossStagePartialNetworks
+    """CSP https://github.com/WongKinYiu/CrossStagePartialNetworks"""
     def __init__(self, c1, c2, n=1, shortcut=False, g=1, e=0.5, k=(5, 9, 13)):
         super().__init__(c1, c2, n, shortcut, g, e, k)
         c_ = int(2 * c2 * e)  # hidden channels
@@ -305,7 +304,7 @@ class GhostStem(Stem):
         
 
 class BottleneckCSPA(nn.Module):
-    # CSP https://github.com/WongKinYiu/CrossStagePartialNetworks
+    """CSP https://github.com/WongKinYiu/CrossStagePartialNetworks"""
     def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5):  # ch_in, ch_out, number, shortcut, groups, expansion
         super(BottleneckCSPA, self).__init__()
         c_ = int(c2 * e)  # hidden channels
@@ -321,7 +320,7 @@ class BottleneckCSPA(nn.Module):
 
 
 class BottleneckCSPB(nn.Module):
-    # CSP https://github.com/WongKinYiu/CrossStagePartialNetworks
+    """CSP https://github.com/WongKinYiu/CrossStagePartialNetworks"""
     def __init__(self, c1, c2, n=1, shortcut=False, g=1, e=0.5):  # ch_in, ch_out, number, shortcut, groups, expansion
         super(BottleneckCSPB, self).__init__()
         c_ = int(c2)  # hidden channels
@@ -338,7 +337,7 @@ class BottleneckCSPB(nn.Module):
 
 
 class BottleneckCSPC(nn.Module):
-    # CSP https://github.com/WongKinYiu/CrossStagePartialNetworks
+    """CSP https://github.com/WongKinYiu/CrossStagePartialNetworks"""
     def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5):  # ch_in, ch_out, number, shortcut, groups, expansion
         super(BottleneckCSPC, self).__init__()
         c_ = int(c2 * e)  # hidden channels
@@ -355,7 +354,7 @@ class BottleneckCSPC(nn.Module):
 
 
 class ResCSPA(BottleneckCSPA):
-    # CSP https://github.com/WongKinYiu/CrossStagePartialNetworks
+    """CSP https://github.com/WongKinYiu/CrossStagePartialNetworks"""
     def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5):  # ch_in, ch_out, number, shortcut, groups, expansion
         super().__init__(c1, c2, n, shortcut, g, e)
         c_ = int(c2 * e)  # hidden channels
@@ -363,7 +362,7 @@ class ResCSPA(BottleneckCSPA):
 
 
 class ResCSPB(BottleneckCSPB):
-    # CSP https://github.com/WongKinYiu/CrossStagePartialNetworks
+    """CSP https://github.com/WongKinYiu/CrossStagePartialNetworks"""
     def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5):  # ch_in, ch_out, number, shortcut, groups, expansion
         super().__init__(c1, c2, n, shortcut, g, e)
         c_ = int(c2)  # hidden channels
@@ -371,7 +370,7 @@ class ResCSPB(BottleneckCSPB):
 
 
 class ResCSPC(BottleneckCSPC):
-    # CSP https://github.com/WongKinYiu/CrossStagePartialNetworks
+    """CSP https://github.com/WongKinYiu/CrossStagePartialNetworks"""
     def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5):  # ch_in, ch_out, number, shortcut, groups, expansion
         super().__init__(c1, c2, n, shortcut, g, e)
         c_ = int(c2 * e)  # hidden channels
@@ -379,7 +378,7 @@ class ResCSPC(BottleneckCSPC):
 
 
 class ResXCSPA(ResCSPA):
-    # CSP https://github.com/WongKinYiu/CrossStagePartialNetworks
+    """CSP https://github.com/WongKinYiu/CrossStagePartialNetworks"""
     def __init__(self, c1, c2, n=1, shortcut=True, g=32, e=0.5):  # ch_in, ch_out, number, shortcut, groups, expansion
         super().__init__(c1, c2, n, shortcut, g, e)
         c_ = int(c2 * e)  # hidden channels
@@ -387,7 +386,7 @@ class ResXCSPA(ResCSPA):
 
 
 class ResXCSPB(ResCSPB):
-    # CSP https://github.com/WongKinYiu/CrossStagePartialNetworks
+    """CSP https://github.com/WongKinYiu/CrossStagePartialNetworks"""
     def __init__(self, c1, c2, n=1, shortcut=True, g=32, e=0.5):  # ch_in, ch_out, number, shortcut, groups, expansion
         super().__init__(c1, c2, n, shortcut, g, e)
         c_ = int(c2)  # hidden channels
@@ -395,7 +394,7 @@ class ResXCSPB(ResCSPB):
 
 
 class ResXCSPC(ResCSPC):
-    # CSP https://github.com/WongKinYiu/CrossStagePartialNetworks
+    """CSP https://github.com/WongKinYiu/CrossStagePartialNetworks"""
     def __init__(self, c1, c2, n=1, shortcut=True, g=32, e=0.5):  # ch_in, ch_out, number, shortcut, groups, expansion
         super().__init__(c1, c2, n, shortcut, g, e)
         c_ = int(c2 * e)  # hidden channels
@@ -403,7 +402,7 @@ class ResXCSPC(ResCSPC):
 
 
 class GhostCSPA(BottleneckCSPA):
-    # CSP https://github.com/WongKinYiu/CrossStagePartialNetworks
+    """CSP https://github.com/WongKinYiu/CrossStagePartialNetworks"""
     def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5):  # ch_in, ch_out, number, shortcut, groups, expansion
         super().__init__(c1, c2, n, shortcut, g, e)
         c_ = int(c2 * e)  # hidden channels
@@ -411,7 +410,7 @@ class GhostCSPA(BottleneckCSPA):
 
 
 class GhostCSPB(BottleneckCSPB):
-    # CSP https://github.com/WongKinYiu/CrossStagePartialNetworks
+    """CSP https://github.com/WongKinYiu/CrossStagePartialNetworks"""
     def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5):  # ch_in, ch_out, number, shortcut, groups, expansion
         super().__init__(c1, c2, n, shortcut, g, e)
         c_ = int(c2)  # hidden channels
@@ -419,7 +418,7 @@ class GhostCSPB(BottleneckCSPB):
 
 
 class GhostCSPC(BottleneckCSPC):
-    # CSP https://github.com/WongKinYiu/CrossStagePartialNetworks
+    """CSP https://github.com/WongKinYiu/CrossStagePartialNetworks"""
     def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5):  # ch_in, ch_out, number, shortcut, groups, expansion
         super().__init__(c1, c2, n, shortcut, g, e)
         c_ = int(c2 * e)  # hidden channels
@@ -644,7 +643,7 @@ class RepConv(nn.Module):
 
 
 class RepBottleneck(Bottleneck):
-    # Standard bottleneck
+    """Standard bottleneck"""
     def __init__(self, c1, c2, shortcut=True, g=1, e=0.5):  # ch_in, ch_out, shortcut, groups, expansion
         super().__init__(c1, c2, shortcut=True, g=1, e=0.5)
         c_ = int(c2 * e)  # hidden channels
@@ -652,7 +651,7 @@ class RepBottleneck(Bottleneck):
 
 
 class RepBottleneckCSPA(BottleneckCSPA):
-    # CSP Bottleneck https://github.com/WongKinYiu/CrossStagePartialNetworks
+    """CSP Bottleneck https://github.com/WongKinYiu/CrossStagePartialNetworks"""
     def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5):  # ch_in, ch_out, number, shortcut, groups, expansion
         super().__init__(c1, c2, n, shortcut, g, e)
         c_ = int(c2 * e)  # hidden channels
@@ -660,7 +659,7 @@ class RepBottleneckCSPA(BottleneckCSPA):
 
 
 class RepBottleneckCSPB(BottleneckCSPB):
-    # CSP Bottleneck https://github.com/WongKinYiu/CrossStagePartialNetworks
+    """CSP Bottleneck https://github.com/WongKinYiu/CrossStagePartialNetworks"""
     def __init__(self, c1, c2, n=1, shortcut=False, g=1, e=0.5):  # ch_in, ch_out, number, shortcut, groups, expansion
         super().__init__(c1, c2, n, shortcut, g, e)
         c_ = int(c2)  # hidden channels
@@ -668,7 +667,7 @@ class RepBottleneckCSPB(BottleneckCSPB):
 
 
 class RepBottleneckCSPC(BottleneckCSPC):
-    # CSP Bottleneck https://github.com/WongKinYiu/CrossStagePartialNetworks
+    """CSP Bottleneck https://github.com/WongKinYiu/CrossStagePartialNetworks"""
     def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5):  # ch_in, ch_out, number, shortcut, groups, expansion
         super().__init__(c1, c2, n, shortcut, g, e)
         c_ = int(c2 * e)  # hidden channels
@@ -684,7 +683,7 @@ class RepRes(Res):
 
 
 class RepResCSPA(ResCSPA):
-    # CSP Bottleneck https://github.com/WongKinYiu/CrossStagePartialNetworks
+    """CSP Bottleneck https://github.com/WongKinYiu/CrossStagePartialNetworks"""
     def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5):  # ch_in, ch_out, number, shortcut, groups, expansion
         super().__init__(c1, c2, n, shortcut, g, e)
         c_ = int(c2 * e)  # hidden channels
@@ -692,7 +691,7 @@ class RepResCSPA(ResCSPA):
 
 
 class RepResCSPB(ResCSPB):
-    # CSP Bottleneck https://github.com/WongKinYiu/CrossStagePartialNetworks
+    """CSP Bottleneck https://github.com/WongKinYiu/CrossStagePartialNetworks"""
     def __init__(self, c1, c2, n=1, shortcut=False, g=1, e=0.5):  # ch_in, ch_out, number, shortcut, groups, expansion
         super().__init__(c1, c2, n, shortcut, g, e)
         c_ = int(c2)  # hidden channels
@@ -700,7 +699,7 @@ class RepResCSPB(ResCSPB):
 
 
 class RepResCSPC(ResCSPC):
-    # CSP Bottleneck https://github.com/WongKinYiu/CrossStagePartialNetworks
+    """CSP Bottleneck https://github.com/WongKinYiu/CrossStagePartialNetworks"""
     def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5):  # ch_in, ch_out, number, shortcut, groups, expansion
         super().__init__(c1, c2, n, shortcut, g, e)
         c_ = int(c2 * e)  # hidden channels
@@ -716,7 +715,7 @@ class RepResX(ResX):
 
 
 class RepResXCSPA(ResXCSPA):
-    # CSP Bottleneck https://github.com/WongKinYiu/CrossStagePartialNetworks
+    """CSP Bottleneck https://github.com/WongKinYiu/CrossStagePartialNetworks"""
     def __init__(self, c1, c2, n=1, shortcut=True, g=32, e=0.5):  # ch_in, ch_out, number, shortcut, groups, expansion
         super().__init__(c1, c2, n, shortcut, g, e)
         c_ = int(c2 * e)  # hidden channels
@@ -724,7 +723,7 @@ class RepResXCSPA(ResXCSPA):
 
 
 class RepResXCSPB(ResXCSPB):
-    # CSP Bottleneck https://github.com/WongKinYiu/CrossStagePartialNetworks
+    """CSP Bottleneck https://github.com/WongKinYiu/CrossStagePartialNetworks"""
     def __init__(self, c1, c2, n=1, shortcut=False, g=32, e=0.5):  # ch_in, ch_out, number, shortcut, groups, expansion
         super().__init__(c1, c2, n, shortcut, g, e)
         c_ = int(c2)  # hidden channels
@@ -732,7 +731,7 @@ class RepResXCSPB(ResXCSPB):
 
 
 class RepResXCSPC(ResXCSPC):
-    # CSP Bottleneck https://github.com/WongKinYiu/CrossStagePartialNetworks
+    """CSP Bottleneck https://github.com/WongKinYiu/CrossStagePartialNetworks"""
     def __init__(self, c1, c2, n=1, shortcut=True, g=32, e=0.5):  # ch_in, ch_out, number, shortcut, groups, expansion
         super().__init__(c1, c2, n, shortcut, g, e)
         c_ = int(c2 * e)  # hidden channels
@@ -744,7 +743,7 @@ class RepResXCSPC(ResXCSPC):
 ##### transformer #####
 
 class TransformerLayer(nn.Module):
-    # Transformer layer https://arxiv.org/abs/2010.11929 (LayerNorm layers removed for better performance)
+    """Transformer layer https://arxiv.org/abs/2010.11929 (LayerNorm layers removed for better performance)"""
     def __init__(self, c, num_heads):
         super().__init__()
         self.q = nn.Linear(c, c, bias=False)
@@ -761,7 +760,7 @@ class TransformerLayer(nn.Module):
 
 
 class TransformerBlock(nn.Module):
-    # Vision Transformer https://arxiv.org/abs/2010.11929
+    """Vision Transformer https://arxiv.org/abs/2010.11929"""
     def __init__(self, c1, c2, num_heads, num_layers):
         super().__init__()
         self.conv = None
@@ -792,9 +791,103 @@ class TransformerBlock(nn.Module):
 
 
 ##### yolov5 #####
+class C3(nn.Module):
+    """CSP Bottleneck with 3 convolutions"""
+    def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5):  # ch_in, ch_out, number, shortcut, groups, expansion
+        super().__init__()
+        c_ = int(c2 * e)  # hidden channels
+        self.cv1 = Conv(c1, c_, 1, 1)
+        self.cv2 = Conv(c1, c_, 1, 1)
+        self.cv3 = Conv(2 * c_, c2, 1)  # optional act=FReLU(c2)
+        self.m = nn.Sequential(*(Bottleneck(c_, c_, shortcut, g, e=1.0) for _ in range(n)))
+
+    def forward(self, x):
+        return self.cv3(torch.cat((self.m(self.cv1(x)), self.cv2(x)), 1))
+
+class C3x(C3):
+    """C3 module with cross-convolutions"""
+    def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5):
+        super().__init__(c1, c2, n, shortcut, g, e)
+        c_ = int(c2 * e)
+        self.m = nn.Sequential(*(CrossConv(c_, c_, 3, 1, g, 1.0, shortcut) for _ in range(n)))
+
+
+class C3TR(C3):
+    """C3 module with TransformerBlock()"""
+    def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5):
+        super().__init__(c1, c2, n, shortcut, g, e)
+        c_ = int(c2 * e)
+        self.m = TransformerBlock(c_, c_, 4, n)
+
+
+class C3SPP(C3):
+    """C3 module with SPP()"""
+    def __init__(self, c1, c2, k=(5, 9, 13), n=1, shortcut=True, g=1, e=0.5):
+        super().__init__(c1, c2, n, shortcut, g, e)
+        c_ = int(c2 * e)
+        self.m = SPP(c_, c_, k)
+        
+class DWConvTranspose2d(nn.ConvTranspose2d):
+    """Depth-wise transpose convolution"""
+    def __init__(self, c1, c2, k=1, s=1, p1=0, p2=0):  # ch_in, ch_out, kernel, stride, padding, padding_out
+        super().__init__(c1, c2, k, s, p1, p2, groups=math.gcd(c1, c2))
+        
+class CrossConv(nn.Module):
+    """Cross Convolution Downsample"""
+    def __init__(self, c1, c2, k=3, s=1, g=1, e=1.0, shortcut=False):
+        # ch_in, ch_out, kernel, stride, groups, expansion, shortcut
+        super().__init__()
+        c_ = int(c2 * e)  # hidden channels
+        self.cv1 = Conv(c1, c_, (1, k), (1, s))
+        self.cv2 = Conv(c_, c2, (k, 1), (s, 1), g=g)
+        self.add = shortcut and c1 == c2
+
+    def forward(self, x):
+        return x + self.cv2(self.cv1(x)) if self.add else self.cv2(self.cv1(x))
+
+class GhostBottleneck(nn.Module):
+    """Ghost Bottleneck https://github.com/huawei-noah/ghostnet"""
+    def __init__(self, c1, c2, k=3, s=1):  # ch_in, ch_out, kernel, stride
+        super().__init__()
+        c_ = c2 // 2
+        self.conv = nn.Sequential(
+            GhostConv(c1, c_, 1, 1),  # pw
+            DWConv(c_, c_, k, s, act=False) if s == 2 else nn.Identity(),  # dw
+            GhostConv(c_, c2, 1, 1, act=False))  # pw-linear
+        self.shortcut = nn.Sequential(DWConv(c1, c1, k, s, act=False), Conv(c1, c2, 1, 1,
+                                                                            act=False)) if s == 2 else nn.Identity()
+
+    def forward(self, x):
+        return self.conv(x) + self.shortcut(x)
+
+class C3Ghost(C3):
+    """C3 module with GhostBottleneck()"""
+    def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5):
+        super().__init__(c1, c2, n, shortcut, g, e)
+        c_ = int(c2 * e)  # hidden channels
+        self.m = nn.Sequential(*(GhostBottleneck(c_, c_) for _ in range(n)))
+        
+class BottleneckCSP(nn.Module):
+    """CSP Bottleneck https://github.com/WongKinYiu/CrossStagePartialNetworks"""
+    def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5):  # ch_in, ch_out, number, shortcut, groups, expansion
+        super().__init__()
+        c_ = int(c2 * e)  # hidden channels
+        self.cv1 = Conv(c1, c_, 1, 1)
+        self.cv2 = nn.Conv2d(c1, c_, 1, 1, bias=False)
+        self.cv3 = nn.Conv2d(c_, c_, 1, 1, bias=False)
+        self.cv4 = Conv(2 * c_, c2, 1, 1)
+        self.bn = nn.BatchNorm2d(2 * c_)  # applied to cat(cv2, cv3)
+        self.act = nn.SiLU()
+        self.m = nn.Sequential(*(Bottleneck(c_, c_, shortcut, g, e=1.0) for _ in range(n)))
+
+    def forward(self, x):
+        y1 = self.cv3(self.m(self.cv1(x)))
+        y2 = self.cv2(x)
+        return self.cv4(self.act(self.bn(torch.cat((y1, y2), 1))))
+
 
 class Focus(nn.Module):
-    # Focus wh information into c-space
+    """Focus wh information into c-space"""
     def __init__(self, c1, c2, k=1, s=1, p=None, g=1, act=True):  # ch_in, ch_out, kernel, stride, padding, groups
         super(Focus, self).__init__()
         self.conv = Conv(c1 * 4, c2, k, s, p, g, act)
@@ -806,7 +899,7 @@ class Focus(nn.Module):
         
 
 class SPPF(nn.Module):
-    # Spatial Pyramid Pooling - Fast (SPPF) layer for YOLOv5 by Glenn Jocher
+    """Spatial Pyramid Pooling - Fast (SPPF) layer for YOLOv5 by Glenn Jocher"""
     def __init__(self, c1, c2, k=5):  # equivalent to SPP(k=(5, 9, 13))
         super().__init__()
         c_ = c1 // 2  # hidden channels
@@ -822,7 +915,7 @@ class SPPF(nn.Module):
     
     
 class Contract(nn.Module):
-    # Contract width-height into channels, i.e. x(1,64,80,80) to x(1,256,40,40)
+    """Contract width-height into channels, i.e. x(1,64,80,80) to x(1,256,40,40)"""
     def __init__(self, gain=2):
         super().__init__()
         self.gain = gain
@@ -836,7 +929,7 @@ class Contract(nn.Module):
 
 
 class Expand(nn.Module):
-    # Expand channels into width-height, i.e. x(1,64,80,80) to x(1,16,160,160)
+    """Expand channels into width-height, i.e. x(1,64,80,80) to x(1,16,160,160)"""
     def __init__(self, gain=2):
         super().__init__()
         self.gain = gain
@@ -850,7 +943,7 @@ class Expand(nn.Module):
 
 
 class NMS(nn.Module):
-    # Non-Maximum Suppression (NMS) module
+    """Non-Maximum Suppression (NMS) module"""
     conf = 0.25  # confidence threshold
     iou = 0.45  # IoU threshold
     classes = None  # (optional list) filter by class
@@ -863,7 +956,7 @@ class NMS(nn.Module):
 
 
 class autoShape(nn.Module):
-    # input-robust model wrapper for passing cv2/np/PIL/torch inputs. Includes preprocessing, inference and NMS
+    """input-robust model wrapper for passing cv2/np/PIL/torch inputs. Includes preprocessing, inference and NMS"""
     conf = 0.25  # NMS confidence threshold
     iou = 0.45  # NMS IoU threshold
     classes = None  # (optional list) filter by class
@@ -878,14 +971,14 @@ class autoShape(nn.Module):
 
     @torch.no_grad()
     def forward(self, imgs, size=640, augment=False, profile=False):
-        # Inference from various sources. For height=640, width=1280, RGB images example inputs are:
-        #   filename:   imgs = 'data/samples/zidane.jpg'
-        #   URI:             = 'https://github.com/ultralytics/yolov5/releases/download/v1.0/zidane.jpg'
-        #   OpenCV:          = cv2.imread('image.jpg')[:,:,::-1]  # HWC BGR to RGB x(640,1280,3)
-        #   PIL:             = Image.open('image.jpg')  # HWC x(640,1280,3)
-        #   numpy:           = np.zeros((640,1280,3))  # HWC
-        #   torch:           = torch.zeros(16,3,320,640)  # BCHW (scaled to size=640, 0-1 values)
-        #   multiple:        = [Image.open('image1.jpg'), Image.open('image2.jpg'), ...]  # list of images
+        """Inference from various sources. For height=640, width=1280, RGB images example inputs are:
+           filename:   imgs = 'data/samples/zidane.jpg'
+           URI:             = 'https://github.com/ultralytics/yolov5/releases/download/v1.0/zidane.jpg'
+           OpenCV:          = cv2.imread('image.jpg')[:,:,::-1]  # HWC BGR to RGB x(640,1280,3)
+           PIL:             = Image.open('image.jpg')  # HWC x(640,1280,3)
+           numpy:           = np.zeros((640,1280,3))  # HWC
+           torch:           = torch.zeros(16,3,320,640)  # BCHW (scaled to size=640, 0-1 values)
+           multiple:        = [Image.open('image1.jpg'), Image.open('image2.jpg'), ...]  # list of images"""
 
         t = [time_synchronized()]
         p = next(self.model.parameters())  # for device and type
@@ -933,7 +1026,7 @@ class autoShape(nn.Module):
 
 
 class Detections:
-    # detections class for YOLOv5 inference results
+    """detections class for YOLOv5 inference results"""
     def __init__(self, imgs, pred, files, times=None, names=None, shape=None):
         super(Detections, self).__init__()
         d = pred[0].device  # device
@@ -1013,7 +1106,7 @@ class Detections:
 
 
 class Classify(nn.Module):
-    # Classification head, i.e. x(b,c1,20,20) to x(b,c2)
+    """Classification head, i.e. x(b,c1,20,20) to x(b,c2)"""
     def __init__(self, c1, c2, k=1, s=1, p=None, g=1):  # ch_in, ch_out, kernel, stride, padding, groups
         super(Classify, self).__init__()
         self.aap = nn.AdaptiveAvgPool2d(1)  # to x(b,c1,1,1)
@@ -1600,7 +1693,7 @@ class SwinTransformerBlock(nn.Module):
 
 
 class STCSPA(nn.Module):
-    # CSP Bottleneck https://github.com/WongKinYiu/CrossStagePartialNetworks
+    """CSP Bottleneck https://github.com/WongKinYiu/CrossStagePartialNetworks"""
     def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5):  # ch_in, ch_out, number, shortcut, groups, expansion
         super(STCSPA, self).__init__()
         c_ = int(c2 * e)  # hidden channels
@@ -1618,7 +1711,7 @@ class STCSPA(nn.Module):
 
 
 class STCSPB(nn.Module):
-    # CSP Bottleneck https://github.com/WongKinYiu/CrossStagePartialNetworks
+    """CSP Bottleneck https://github.com/WongKinYiu/CrossStagePartialNetworks"""
     def __init__(self, c1, c2, n=1, shortcut=False, g=1, e=0.5):  # ch_in, ch_out, number, shortcut, groups, expansion
         super(STCSPB, self).__init__()
         c_ = int(c2)  # hidden channels
@@ -1637,7 +1730,7 @@ class STCSPB(nn.Module):
 
 
 class STCSPC(nn.Module):
-    # CSP Bottleneck https://github.com/WongKinYiu/CrossStagePartialNetworks
+    """CSP Bottleneck https://github.com/WongKinYiu/CrossStagePartialNetworks"""
     def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5):  # ch_in, ch_out, number, shortcut, groups, expansion
         super(STCSPC, self).__init__()
         c_ = int(c2 * e)  # hidden channels
@@ -1962,7 +2055,7 @@ class SwinTransformer2Block(nn.Module):
 
 
 class ST2CSPA(nn.Module):
-    # CSP Bottleneck https://github.com/WongKinYiu/CrossStagePartialNetworks
+    """CSP Bottleneck https://github.com/WongKinYiu/CrossStagePartialNetworks"""
     def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5):  # ch_in, ch_out, number, shortcut, groups, expansion
         super(ST2CSPA, self).__init__()
         c_ = int(c2 * e)  # hidden channels
@@ -1980,7 +2073,7 @@ class ST2CSPA(nn.Module):
 
 
 class ST2CSPB(nn.Module):
-    # CSP Bottleneck https://github.com/WongKinYiu/CrossStagePartialNetworks
+    """CSP Bottleneck https://github.com/WongKinYiu/CrossStagePartialNetworks"""
     def __init__(self, c1, c2, n=1, shortcut=False, g=1, e=0.5):  # ch_in, ch_out, number, shortcut, groups, expansion
         super(ST2CSPB, self).__init__()
         c_ = int(c2)  # hidden channels
@@ -1999,7 +2092,7 @@ class ST2CSPB(nn.Module):
 
 
 class ST2CSPC(nn.Module):
-    # CSP Bottleneck https://github.com/WongKinYiu/CrossStagePartialNetworks
+    """CSP Bottleneck https://github.com/WongKinYiu/CrossStagePartialNetworks"""
     def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5):  # ch_in, ch_out, number, shortcut, groups, expansion
         super(ST2CSPC, self).__init__()
         c_ = int(c2 * e)  # hidden channels
