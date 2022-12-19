@@ -2,17 +2,19 @@ import argparse
 import sys
 import time
 import warnings
-
+import logging
+import subprocess
+import os
+import yaml
 sys.path.append('./')  # to run '$ python *.py' files in subdirectories
 
 import torch
 import torch.nn as nn
 from torch.utils.mobile_optimizer import optimize_for_mobile
-
 import models
 from models.experimental import attempt_load, End2End
 from utils.activations import Hardswish, SiLU
-from utils.general import set_logging, check_img_size
+from utils.general import set_logging, check_img_size, check_requirements, colorstr
 from utils.torch_utils import select_device
 from utils.add_nms import RegisterNMS
 
@@ -42,9 +44,10 @@ if __name__ == '__main__':
     set_logging()
     t = time.time()
 
-    # Load PyTorch model
+    print('# Load PyTorch model')
     device = select_device(opt.device)
     model = attempt_load(opt.weights, map_location=device)  # load FP32 model
+    modelss = model
     labels = model.names
 
     # Checks
@@ -69,7 +72,7 @@ if __name__ == '__main__':
     if opt.include_nms:
         model.model[-1].include_nms = True
         y = None
-
+    filenames = [None] *10
     # TorchScript export
     try:
         print('\nStarting TorchScript export with torch %s...' % torch.__version__)
@@ -77,6 +80,7 @@ if __name__ == '__main__':
         ts = torch.jit.trace(model, img, strict=False)
         ts.save(f)
         print('TorchScript export success, saved as %s' % f)
+        filenames[0] = f
     except Exception as e:
         print('TorchScript export failure: %s' % e)
 
@@ -99,6 +103,7 @@ if __name__ == '__main__':
         f = opt.weights.replace('.pt', '.mlmodel')  # filename
         ct_model.save(f)
         print('CoreML export success, saved as %s' % f)
+        filenames[1] = f
     except Exception as e:
         print('CoreML export failure: %s' % e)
                      
@@ -110,6 +115,7 @@ if __name__ == '__main__':
         tsl = optimize_for_mobile(tsl)
         tsl._save_for_lite_interpreter(f)
         print('TorchScript-Lite export success, saved as %s' % f)
+        filenames[2] = f
     except Exception as e:
         print('TorchScript-Lite export failure: %s' % e)
 
@@ -169,15 +175,6 @@ if __name__ == '__main__':
                 for j in i.type.tensor_type.shape.dim:
                     j.dim_param = str(shapes.pop(0))
 
-        # print(onnx.helper.printable_graph(onnx_model.graph))  # print a human readable model
-
-        # # Metadata
-        # d = {'stride': int(max(model.stride))}
-        # for k, v in d.items():
-        #     meta = onnx_model.metadata_props.add()
-        #     meta.key, meta.value = k, str(v)
-        # onnx.save(onnx_model, f)
-
         if opt.simplify:
             try:
                 import onnxsim
@@ -197,9 +194,54 @@ if __name__ == '__main__':
             mo = RegisterNMS(f)
             mo.register_nms()
             mo.save(f)
-
+        filenames[3] = f
     except Exception as e:
         print('ONNX export failure: %s' % e)
 
+    
     # Finish
     print('\nExport complete (%.2fs). Visualize with https://github.com/lutzroeder/netron.' % (time.time() - t))
+    meta = {'stride': int(max(modelss.stride)), 'names': modelss.names}
+    
+    try:
+        from tools.auxexport import export_openvino
+        filenames[4], _ = export_openvino(file_=opt.weights,metadata=meta, half=True,prefix=colorstr('OpenVINI'))
+        print(f'{filenames[4]} finished')
+        
+    except Exception as e:
+        print('OpenVINO export failure: %s' % e)
+        
+    try:
+        from tools.auxexport import export_saved_model
+        im = torch.zeros(opt.batch_size, 3, *opt.img_size).to(device)
+        filenames[5], s_models = export_saved_model(modelss.cpu(),
+                                           im,
+                                           opt.weights,
+                                           False,
+                                           tf_nms=False or False or True,
+                                           agnostic_nms=False or True,
+                                           topk_per_class=opt.topk_all,
+                                           topk_all=opt.topk_all,
+                                           iou_thres=opt.iou_thres,
+                                           conf_thres=opt.conf_thres,
+                                           keras=False)
+        
+    except Exception as e:
+        print('Saved model export failure: %s' % e)
+        
+    try:
+        from tools.auxexport import export_pb
+        filenames[6], _ = export_pb(s_models,opt.weights)
+    except Exception as e:
+        print('pb export failure: %s' % e)
+        
+    try:
+        from tools.auxexport import export_tfjs
+        filenames[7], _ = export_tfjs(file_=opt.weights, prefix=colorstr('TensorFlow.js'))
+        print(f'{filenames[2]} finished')
+    except Exception as e:
+        print('TensorFlow js export failure: %s' % e)
+    prefix = colorstr('Export:')
+    for i in filenames:
+        if i is not None:
+            print(f'{prefix} {i} exported')

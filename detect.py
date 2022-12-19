@@ -250,7 +250,7 @@ if __name__ == '__main__':
                 # update all models (to fix SourceChangeWarning)
                 if opt.update:
                     detect(opt=opt)
-                    strip_optimizer(_)
+                    strip_optimizer(f=_,halfModel=True)
                 else:
                     detect(opt)
         else:

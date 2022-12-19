@@ -25,10 +25,10 @@ pandas>=1.1.4
 seaborn
 
 # Export --------------------------------------
-onnxsim
-onnx-graphsurgeon
+
 coremltools>=4.1  # CoreML export
 onnx>=1.9.0  # ONNX export
+onnxsim
 onnx-simplifier>=0.3.6  # ONNX simplifier
 scikit-learn<=1.1.2  # CoreML quantization
 tensorflow>=2.4.1  # TFLite export
@@ -41,5 +41,6 @@ ipython  # interactive notebook
 psutil  # system utilization
 thop # FLOPs computation
 albumentations
+onnx-graphsurgeon
 # pycocotools>=2.0  # COCO mAP
 # roboflow

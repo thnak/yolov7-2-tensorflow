@@ -788,7 +788,7 @@ def non_max_suppression_kpt(prediction, conf_thres=0.25, iou_thres=0.45, classes
     return output
 
 
-def strip_optimizer(f='best.pt', s=''):  # from utils.general import *; 
+def strip_optimizer(f='best.pt', s='', halfModel=False):  # from utils.general import *; 
     """Strip optimizer from 'f' to finalize training, optionally save as 's'"""
     x = torch.load(f, map_location=torch.device('cpu'))
     if x.get('ema'):
@@ -796,7 +796,8 @@ def strip_optimizer(f='best.pt', s=''):  # from utils.general import *;
     for k in 'optimizer', 'training_results', 'wandb_id', 'ema', 'updates':  # keys
         x[k] = None
     x['epoch'] = -1
-    # x['model'].half()  # to FP16
+    if halfModel:
+        x['model'].half()  # to FP16
     for p in x['model'].parameters():
         p.requires_grad = False
     torch.save(x, s or f)
@@ -994,3 +995,20 @@ class BackgroundForegroundColors():
     def len(self):
         """return len of COLOR[]"""
         return len(self.COLOR)
+    
+def yaml_save(file='data.yaml', data={}):
+    """Single-line safe yaml saving"""
+    with open(file, 'w') as f:
+        yaml.safe_dump({k: str(v) if isinstance(v, Path) else v for k, v in data.items()}, f, sort_keys=False)
+    
+def check_version(current='0.0.0', minimum='0.0.0', name='version ', pinned=False, hard=False, verbose=False):
+    """Check version vs. required version"""
+    import pkg_resources as pkg
+    current, minimum = (pkg.parse_version(x) for x in (current, minimum))
+    result = (current == minimum) if pinned else (current >= minimum)  # bool
+    s = f'WARNING ⚠️ {name}{minimum} is required by YOLOv5, but {name}{current} is currently installed'  # string
+    if hard:
+        assert result, emojis(s)  # assert min requirements met
+    if verbose and not result:
+        print(s)
+    return result

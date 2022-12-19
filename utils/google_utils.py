@@ -22,6 +22,9 @@ def attempt_download(file, repo='WongKinYiu/yolov7'):
 
     if not file.exists():
         try:
+            from utils.general import colorstr
+            prefix = colorstr(f'Attemp_download():')
+            print(f'{prefix} file not found, staring downloading...')
             response = requests.get(f'https://api.github.com/repos/{repo}/releases/latest').json()  # github api
             if response['message'] == 'Not Found':
                 response = requests.get(f'https://api.github.com/repos/WongKinYiu/yolov7/releases').json()

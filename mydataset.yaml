@@ -1,6 +1,6 @@
-train: "D:/Users/Downloads/dataset/train"
-val: "D:/Users/Downloads/dataset/val"
-test: ./TrainRes/dataset
+train: "TrainRes/train"
+val: "TrainRes/val"
+test: "TrainRes/test"
 nc: 1
 names:
   [
