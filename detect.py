@@ -44,7 +44,6 @@ def detect(opt=None):
     if half:
         model.half()  # to FP16
 
-
     # Second-stage classifier
     classify = False
     if classify:

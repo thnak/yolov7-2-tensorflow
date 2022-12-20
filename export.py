@@ -65,8 +65,13 @@ if __name__ == '__main__':
                 m.act = Hardswish()
             elif isinstance(m.act, nn.SiLU):
                 m.act = SiLU()
+            elif isinstance(m, models.yolo.Detect) or isinstance(m, models.yolo.IDetect):
+                m.dynamic = opt.dynamic
+            elif isinstance(m, models.yolo.IKeypoint) or isinstance(m, models.yolo.IAuxDetect) or isinstance(m, models.yolo.IBin):
+                m.dynamic = opt.dynamic
         # elif isinstance(m, models.yolo.Detect):
         #     m.forward = m.forward_export  # assign forward (optional)
+
     model.model[-1].export = not opt.grid  # set Detect() layer grid export
     y = model(img)  # dry run
     if opt.include_nms:
@@ -79,10 +84,10 @@ if __name__ == '__main__':
         f = opt.weights.replace('.pt', '.torchscript.pt')  # filename
         ts = torch.jit.trace(model, img, strict=False)
         ts.save(f)
-        print('TorchScript export success, saved as %s' % f)
+        print('TorchScript export success✅, saved as %s' % f)
         filenames[0] = f
     except Exception as e:
-        print('TorchScript export failure: %s' % e)
+        print('TorchScript export failure🐛🪲: %s' % e)
 
     # CoreML export
     try:
@@ -101,10 +106,10 @@ if __name__ == '__main__':
 
         f = opt.weights.replace('.pt', '.mlmodel')  # filename
         ct_model.save(f)
-        print(f'{prefix} CoreML export success, saved as %s' % f)
+        print(f'{prefix} CoreML export success✅, saved as %s' % f)
         filenames[1] = f
     except Exception as e:
-        print(f'{prefix} CoreML export failure: %s' % e)
+        print(f'{prefix} CoreML export failure🐛🪲: %s' % e)
                      
     prefix = colorstr('TorchScript-Lite:')
     try:
@@ -113,10 +118,10 @@ if __name__ == '__main__':
         tsl = torch.jit.trace(model, img, strict=False)
         tsl = optimize_for_mobile(tsl)
         tsl._save_for_lite_interpreter(f)
-        print(f'{prefix} TorchScript-Lite export success, saved as %s' % f)
+        print(f'{prefix} TorchScript-Lite export success✅, saved as %s' % f)
         filenames[2] = f
     except Exception as e:
-        print(f'{prefix} export failure: %s' % e)
+        print(f'{prefix} export failure🐛🪲: %s' % e)
 
     prefix = colorstr('ONNX:')
     try:
@@ -176,32 +181,41 @@ if __name__ == '__main__':
         if opt.simplify:
             try:
                 import onnxsim
-                print(f'{prefix}\nStarting to simplify ONNX...')
+                print(f'{prefix}Starting to simplify ONNX...')
                 onnx_model, check = onnxsim.simplify(onnx_model)
                 assert check, 'assert check failed'
             except Exception as e:
-                print(f'{prefix} Simplifier failure: {e}')
+                print(f'{prefix} Simplifier failure🐛🪲: {e}')
         onnx.save(onnx_model,f)
-        print(f'{prefix} export success, saved as %s' % f)
+        print(f'{prefix} export success✅, saved as {f}')
 
         if opt.include_nms:
-            print(f'{prefix}Registering NMS plugin for ONNX...')
+            print(f'{prefix} Registering NMS plugin for ONNX...')
             mo = RegisterNMS(f)
             mo.register_nms()
             mo.save(f)
+            print(f'{prefix} registering NMS plugin for ONNX success✅ {f}')
         filenames[3] = f
-        print(f'{prefix} export success, saved as {f}')
+        
     except Exception as e:
-        print(f'{prefix} export failure: %s' % e)
+        print(f'{prefix} export failure🐛🪲: %s' % e)
+    prefix = colorstr('Quantize ONNX Models:')
+    try:
+        saveat = filenames[3].replace('.onnx','quantize_dynamic.onnx')
+        from onnxruntime.quantization import quantize_dynamic
+        quantize_dynamic(filenames[3], saveat)
+        print(f'{prefix} export success✅, saved as {saveat}')
+    except Exception as e:
+        print(f'{prefix} export failure🐛🪲: {e}')
     
     meta = {'stride': int(max(modelss.stride)), 'names': modelss.names}
     prefix = colorstr('OpenVINO:')
     try:
         from tools.auxexport import export_openvino
         filenames[4], _ = export_openvino(file_=opt.weights,metadata=meta, half=True,prefix=colorstr('OpenVINI'))
-        print(f'{prefix} export success, saved as {filenames[4]}')
+        print(f'{prefix} export success✅, saved as {filenames[4]}')
     except Exception as e:
-        print(f'{prefix} export failure: %s' % e)
+        print(f'{prefix} export failure🐛🪲: {e}')
         
     prefix = colorstr('TensorFlow SavedModel:')
     try:
@@ -218,17 +232,17 @@ if __name__ == '__main__':
                                            iou_thres=opt.iou_thres,
                                            conf_thres=opt.conf_thres,
                                            keras=False)
-        print(f'{prefix} export success, saved as {filenames[5]}')
+        print(f'{prefix} export success✅, saved as {filenames[5]}')
     except Exception as e:
-        print(f'{prefix} export failure: %s' % e)
+        print(f'{prefix} export failure🐛🪲: %s' % e)
         
     prefix = colorstr('TensorFlow GraphDef:')
     try:
         from tools.auxexport import export_pb
         filenames[6], _ = export_pb(s_models,opt.weights)
-        print(f'{prefix} export success, saved as {filenames[6]}')
+        print(f'{prefix} export success✅, saved as {filenames[6]}')
     except Exception as e:
-        print(f'{prefix} export failure: %s' % e)
+        print(f'{prefix} export failure🐛🪲: %s' % e)
         
     prefix = colorstr('TensorFlow.js:')
     try:
@@ -236,9 +250,9 @@ if __name__ == '__main__':
         filenames[7], _ = export_tfjs(file_=opt.weights, prefix=colorstr('TensorFlow.js'))
         print(f'{prefix} {filenames[2]} is finished')
     except Exception as e:
-        print(f'{prefix} export failure: %s' % e)
+        print(f'{prefix} export failure🐛🪲: %s' % e)
     prefix = colorstr('Export:')
     for i in filenames:
         if i is not None:
             print(f'{prefix} {i} is exported.')
-    print(f'\n{prefix} complete (%.2fs). Visualize with https://github.com/lutzroeder/netron.' % (time.time() - t))
+    print(f'\n{prefix} complete (%.2fs). Visualize with https://netron.app/.' % (time.time() - t))
