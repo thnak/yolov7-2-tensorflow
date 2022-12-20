@@ -738,7 +738,7 @@ class Model(nn.Module):
         model_info(self, verbose, img_size)
         
 class Segment(Detect):
-    # YOLOv5 Segment head for segmentation models
+    """YOLOv5 Segment head for segmentation models"""
     def __init__(self, nc=80, anchors=(), nm=32, npr=256, ch=(), inplace=True):
         super().__init__(nc, anchors, ch, inplace)
         self.nm = nm  # number of masks

@@ -231,7 +231,7 @@ if __name__ == '__main__':
                                            topk_all=opt.topk_all,
                                            iou_thres=opt.iou_thres,
                                            conf_thres=opt.conf_thres,
-                                           keras=False)
+                                           keras=False,prefix=prefix)
         print(f'{prefix} export success✅, saved as {filenames[5]}')
     except Exception as e:
         print(f'{prefix} export failure🐛🪲: %s' % e)
