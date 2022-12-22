@@ -212,7 +212,7 @@ if __name__ == '__main__':
     prefix = colorstr('OpenVINO:')
     try:
         from tools.auxexport import export_openvino
-        filenames[4], _ = export_openvino(file_=opt.weights,metadata=meta, half=True,prefix=colorstr('OpenVINI'))
+        filenames[4], _ = export_openvino(file_=opt.weights,metadata=meta, half=True,prefix=prefix)
         print(f'{prefix} export success✅, saved as {filenames[4]}')
     except Exception as e:
         print(f'{prefix} export failure🐛🪲: {e}')
@@ -220,9 +220,8 @@ if __name__ == '__main__':
     prefix = colorstr('TensorFlow SavedModel:')
     try:
         from tools.auxexport import export_saved_model
-        im = torch.zeros(opt.batch_size, 3, *opt.img_size).to(device)
         filenames[5], s_models = export_saved_model(modelss.cpu(),
-                                           im,
+                                           img,
                                            opt.weights,
                                            False,
                                            tf_nms=False or False or True,
@@ -239,7 +238,7 @@ if __name__ == '__main__':
     prefix = colorstr('TensorFlow GraphDef:')
     try:
         from tools.auxexport import export_pb
-        filenames[6], _ = export_pb(s_models,opt.weights)
+        filenames[6], _ = export_pb(s_models,opt.weights, prefix=prefix)
         print(f'{prefix} export success✅, saved as {filenames[6]}')
     except Exception as e:
         print(f'{prefix} export failure🐛🪲: %s' % e)
@@ -247,7 +246,7 @@ if __name__ == '__main__':
     prefix = colorstr('TensorFlow.js:')
     try:
         from tools.auxexport import export_tfjs
-        filenames[7], _ = export_tfjs(file_=opt.weights, prefix=colorstr('TensorFlow.js'))
+        filenames[7], _ = export_tfjs(file_=opt.weights, prefix=prefix)
         print(f'{prefix} {filenames[2]} is finished')
     except Exception as e:
         print(f'{prefix} export failure🐛🪲: %s' % e)

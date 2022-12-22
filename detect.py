@@ -241,7 +241,7 @@ if __name__ == '__main__':
     if not opt.no_check:
         check_requirements()
         check_git_status()
-    print(f'len{len(opt.weights)}')
+    opt.weights = opt.weights if isinstance(opt.weights, list) else [opt.weights]
     for _ in opt.weights:
         file_extention = os.path.splitext(_)[1]
         if file_extention not in ['.trt', '.engine']:

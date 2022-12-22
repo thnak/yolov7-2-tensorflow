@@ -1,8 +1,9 @@
 __pycache__
 runs/
+models/*.pt
+models/*.ptl
+models/*.onnx
 TrainRes/train
 TrainRes/val
-deploy_best.torchscript.pt
-deploy_best.torchscript.ptl
 deploy_best_openvino_model
-*.onnx
+deploy_best_web_model
