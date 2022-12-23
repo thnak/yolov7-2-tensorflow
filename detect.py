@@ -11,7 +11,7 @@ from models.experimental import attempt_load
 from models.yolo import TensorRT_Engine
 from utils.datasets import LoadStreams, LoadImages
 from utils.general import check_img_size, check_requirements, check_imshow, non_max_suppression, apply_classifier, \
-    scale_coords, xyxy2xywh, strip_optimizer, set_logging, increment_path, check_git_status, BackgroundForegroundColors
+    scale_coords, xyxy2xywh, strip_optimizer, set_logging, increment_path, check_git_status, BackgroundForegroundColors, xywh2xyxy, box_iou
 from utils.plots import plot_one_box_with_return
 from utils.torch_utils import select_device, load_classifier, time_synchronized, TracedModel
 import os
@@ -57,7 +57,7 @@ def detect(opt=None):
         cudnn.benchmark = True  # set True to speed up constant image size inference
         dataset = LoadStreams(source, img_size=imgsz, stride=stride)
     else:
-        dataset = LoadImages(source, img_size=imgsz, stride=stride)
+        dataset = LoadImages(source, img_size=imgsz, stride=stride, auto=False)
 
     # Get names and colors
     names = model.module.names if hasattr(model, 'module') else model.names
@@ -73,7 +73,7 @@ def detect(opt=None):
     avgTime = [[], []]
     if opt.datacollection:
         save_txt = True
-    for path, img, im0s, vid_cap in dataset:
+    for path, img, im0s, vid_cap, s in dataset:
         img = torch.from_numpy(img).to(device)
         img = img.half() if half else img.float()  # uint8 to fp16/32
         img /= 255.0  # 0 - 255 to 0.0 - 1.0
@@ -90,6 +90,7 @@ def detect(opt=None):
             print(f'{time.time() - twrm:0.3f} warm up finished')
         # Inference
         t1 = time_synchronized()
+        
         with torch.no_grad():   # Calculating gradients would cause a GPU memory leak
             pred = model(img, augment=opt.augment)[0]
         t2 = time_synchronized()
@@ -107,9 +108,9 @@ def detect(opt=None):
         t4 = time.time()
         for i, det in enumerate(pred):  # detections per image
             if webcam:  # batch_size >= 1
-                p, s, im0, frame = path[i], '%g: ' % i, im0s[i].copy(), dataset.count
+                p, s,  im0, frame = path[i], '%g: ' % i, im0s[i].copy(), dataset.count
             else:
-                p, s, im0, frame = path, '', im0s, getattr(dataset, 'frame', 0)
+                p, im0, frame = path, im0s, getattr(dataset, 'frame', 0)
                 
             imOrigin = im0.copy()
             p = Path(p)  # to Path
@@ -131,11 +132,9 @@ def detect(opt=None):
                 for *xyxy, conf, cls in reversed(det):
                     if save_txt:  # Write to file
                         xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
-                        # label format
                         line = (cls, *xywh, conf) if opt.save_conf else (cls, *xywh)
-                        f = open(os.path.join(txt_path+'.txt'), 'a')
-                        f.write(('%g ' * len(line)).rstrip() % line + '\n')
-                        f.close()
+                        with open(os.path.join(txt_path+'.txt'), 'a') as f:
+                            f.write(('%g ' * len(line)).rstrip() % line + '\n')
                     if save_img or view_img > -1:
                         label = f'{names[int(cls)]} {conf:.2f}'
                         textColor, bboxColor = BFC.getval(index=int(cls))
@@ -145,7 +144,6 @@ def detect(opt=None):
             tmInf, tmNms = round(1E3 * (t2 - t1), 3), round(1E3 * (t3 - t2), 3)
             avgTime[0].append(tmInf)
             avgTime[1].append(tmNms)
-            print(f'{s}Done. ({tmInf}ms) Inference, ({tmNms}ms) NMS')
 
             # Stream results
             if view_img > -1:
@@ -173,7 +171,7 @@ def detect(opt=None):
                             save_path += '.mp4'
                         ffmpeg = FFMPEG_recorder(savePath=save_path,videoDimensions=(w,h),fps=fps)
                     ffmpeg.writeFrame(im0)
-        print(f'pre-processing {(time.time() - t4):0.3f}s')
+        print(f'{s}pre-proc {(time.time() - t4):0.3f}s, infer: {round(tmInf,3)}, nms: {round(tmNms,3)}')
     if save_txt or save_img:
         s = f"\n{len(list(save_dir.glob('labels/*.txt')))} labels saved to {save_dir / 'labels'}" if save_txt else ''
         print(f"Results saved to {save_dir}{s}")
@@ -214,7 +212,8 @@ def detectTensorRT(tensorrtEngine,opt=None):
     del pred
     if view_img > -1:
         cv2.destroyAllWindows()
-    
+
+        
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--weights', nargs='+', type=str,default=['./models/yolov7.pt'], help='model.pt path(s)')
@@ -241,10 +240,13 @@ if __name__ == '__main__':
     if not opt.no_check:
         check_requirements()
         check_git_status()
+    save_dir = Path(increment_path(Path(opt.project) / opt.name, exist_ok=opt.exist_ok))  # increment run
+    (save_dir / 'labels' if opt.save_txt else save_dir).mkdir(parents=True, exist_ok=True)  # make dir
+    
     opt.weights = opt.weights if isinstance(opt.weights, list) else [opt.weights]
     for _ in opt.weights:
         file_extention = os.path.splitext(_)[1]
-        if file_extention not in ['.trt', '.engine']:
+        if file_extention not in ['.trt', '.engine', '.onnx']:
             with torch.no_grad():
                 # update all models (to fix SourceChangeWarning)
                 if opt.update:
@@ -252,5 +254,68 @@ if __name__ == '__main__':
                     strip_optimizer(f=_,halfModel=True)
                 else:
                     detect(opt)
+                    
+        elif file_extention in ['.onnx']:
+            from models.yolo import ONNX_Engine
+            device = torch.device('cpu')
+            imgsz = check_img_size(opt.img_size, s=32)
+            dataset = LoadImages(opt.source, img_size=imgsz, auto=False)
+            model = ONNX_Engine(ONNX_EnginePath=_,mydataset='mydataset.yaml'
+                                ,confThres=opt.conf_thres, 
+                                iouThres=opt.iou_thres,device=device)
+            names = model.names
+            from utils.general import colorstr
+            prefix = colorstr('ONNX_Engine')
+            print(f'{prefix}: {vars(model)}\n')
+            BFC = BackgroundForegroundColors(hyp='./mydataset.yaml')
+            half = device.type != 'cpu'
+            seen, hide_conf, hide_labels, avgSpeed = 0 , False, False, []
+            for path, img, im0s, vid_cap, s in dataset:
+                model.warmup()
+                t1 = time.time()
+                pred = model.infer(img)
+                t2 = time.time() - t1
+                avgSpeed.append(t2)
+                for i, det in enumerate(pred):
+                    seen += 1
+                    p, im0, frame = path, im0s.copy(), getattr(dataset, 'frame', 0)
+
+                    p = Path(p)  # to Path
+                    save_path = str(save_dir / p.name)  # im.jpg
+                    txt_path = str(save_dir / 'labels' / p.stem) + ('' if dataset.mode == 'image' else f'_{frame}')  # im.txt
+                    s += '%gx%g ' % img.shape[1:]  # print string
+                    s += f'speed: {round(t2*1000,3)}ms '
+                    gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh
+                    if len(det):
+                        det[:, :4] = scale_coords(img.shape[1:], det[:, :4], im0.shape).round()
+
+                        # Print results
+                        for c in det[:, 5].unique():
+                            n = (det[:, 5] == c).sum()  # detections per class
+                            s += f"{n} {names[int(c)]}{'s' * (n > 1)}, "  # add to string
+
+                        # Write results
+                        for *xyxy, conf, cls in reversed(det):
+                            if opt.save_txt:  # Write to file
+                                xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
+                                line = (cls, *xywh, conf) if opt.save_conf else (cls, *xywh)  # label format
+                                with open(f'{txt_path}.txt', 'a') as f:
+                                    f.write(('%g ' * len(line)).rstrip() % line + '\n')
+
+                            if not opt.nosave or opt.view_img:  # Add bbox to image
+                                c = int(cls)  # integer class
+                                label = None if hide_labels else (names[c] if hide_conf else f'{names[c]} {conf:.2f}')
+                                txtColor, bboxColor = BFC.getval(index=int(cls))
+                                im0 = plot_one_box_with_return(xyxy, im0, label=label, txtColor=txtColor, bboxColor=bboxColor, line_thickness=1)
+                    print(f'{s}')
+                    if opt.view_img > -1:
+                        cv2.namedWindow(f'{dataset.mode} {path}', cv2.WINDOW_NORMAL)
+                        cv2.imshow(f'{dataset.mode} {path}', im0)
+                        if cv2.waitKey(opt.view_img) == 27:
+                            break
+                        
+            cv2.destroyAllWindows()
+            print(f'Finished. avg: {round((sum(avgSpeed) / len(avgSpeed))*1000,3)}ms')
+                
         else:
             detectTensorRT(_,opt)

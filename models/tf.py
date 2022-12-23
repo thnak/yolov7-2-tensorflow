@@ -591,7 +591,7 @@ def parse_model(d, ch, model, imgsz):  # model_dict, input_channels(3)
         tf_m = eval(f'TF{xxx}')
         if m_str == 'MP':
             args = args[:2]
-            abc = tf_m(*args, w=None)
+            abc = tf_m()
         else:
             abc = tf_m(*args, w=model.model[i])
             

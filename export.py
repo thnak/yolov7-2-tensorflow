@@ -31,6 +31,7 @@ if __name__ == '__main__':
     parser.add_argument('--topk-all', type=int, default=100, help='topk objects for every images')
     parser.add_argument('--iou-thres', type=float, default=0.45, help='iou threshold for NMS')
     parser.add_argument('--conf-thres', type=float, default=0.25, help='conf threshold for NMS')
+    parser.add_argument('--onnx-opset', type=int, default=13, help='onnx opset version')
     parser.add_argument('--device', default='cpu', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     parser.add_argument('--simplify', action='store_true', help='simplify onnx model')
     parser.add_argument('--include-nms', action='store_true', help='export end2end onnx(EfficientNMS_TRT)')
@@ -165,7 +166,7 @@ if __name__ == '__main__':
             else:
                 model.model[-1].concat = True
 
-        torch.onnx.export(model, img, f, verbose=False, opset_version=12, input_names=['images'],
+        torch.onnx.export(model, img, f, verbose=False, opset_version=opt.onnx_opset, input_names=['images'],
                           output_names=output_names,
                           dynamic_axes=dynamic_axes)
 

@@ -5,5 +5,5 @@ models/*.ptl
 models/*.onnx
 TrainRes/train
 TrainRes/val
-deploy_best_openvino_model
-deploy_best_web_model
+best_openvino_model/
+best_web_model/

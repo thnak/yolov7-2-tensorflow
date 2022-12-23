@@ -5,15 +5,17 @@ from copy import deepcopy
 
 sys.path.append('./')  # to run '$ python *.py' files in subdirectories
 logger = logging.getLogger(__name__)
+import time
 import torch
+import torchvision
 from models.common import *
 from models.experimental import *
 from utils.autoanchor import check_anchor_order
-from utils.general import make_divisible, check_file, set_logging, colorstr
+from utils.general import make_divisible, check_file, set_logging, colorstr, xywh2xyxy, box_iou
 from utils.torch_utils import time_synchronized, fuse_conv_and_bn, model_info, scale_img, initialize_weights, \
     select_device, copy_attr
 from utils.loss import SigmoidBin
-
+import yaml
 try:
     import thop  # for FLOPS computation
 except ImportError:
@@ -736,28 +738,245 @@ class Model(nn.Module):
 
     def info(self, verbose=False, img_size=640):  # print model information
         model_info(self, verbose, img_size)
-        
-class Segment(Detect):
-    """YOLOv5 Segment head for segmentation models"""
-    def __init__(self, nc=80, anchors=(), nm=32, npr=256, ch=(), inplace=True):
-        super().__init__(nc, anchors, ch, inplace)
-        self.nm = nm  # number of masks
-        self.npr = npr  # number of protos
-        self.no = 5 + nc + self.nm  # number of outputs per anchor
-        self.m = nn.ModuleList(nn.Conv2d(x, self.no * self.na, 1) for x in ch)  # output conv
-        self.proto = Proto(ch[0], self.npr, self.nm)  # protos
-        self.detect = Detect.forward
 
-    def forward(self, x):
-        p = self.proto(x[0])
-        x = self.detect(self, x)
-        return (x, p) if self.training else (x[0], p) if self.export else (x[0], p, x[1])
+
+class ONNX_Engine(object):
+    """ONNX Engine class for inference with onnxruntime"""
+    def __init__(self, ONNX_EnginePath='', mydataset=None, 
+                 confThres=0.25, iouThres = 0.45, device = torch.device('cpu'), 
+                 classes_nms=None, agnostic_nms=False, multi_label_nms=False,labels=(), max_det_nms = 300, nm = 0):
+        """initial an ONNX Engine
+
+        Args:
+            ONNX_EnginePath (str, optional): _description_. Defaults to ''.
+            mydataset (_type_, optional): _description_. Defaults to None.
+            confThres (float, optional): _description_. Defaults to 0.25.
+            iouThres (float, optional): _description_. Defaults to 0.45.
+            device (_type_, optional): _description_. Defaults to torch.device('cpu').
+            classes_nms (_type_, optional): _description_. Defaults to None.
+            agnostic_nms (bool, optional): _description_. Defaults to False.
+            multi_label_nms (bool, optional): _description_. Defaults to False.
+            labels (tuple, optional): _description_. Defaults to ().
+            max_det_nms (int, optional): _description_. Defaults to 300.
+            nm (int, optional): _description_. Defaults to 0.
+        """
+        self.names= None
+        self.confThres = confThres
+        self.iouThres = iouThres
+        self.classes = classes_nms
+        self.agnostic = agnostic_nms
+        self.multi_label = multi_label_nms
+        self.labels = labels
+        self.max_det = max_det_nms
+        self.nm = nm
+
+        self.cuda_is_available = torch.cuda.is_available()
+        self.half = True if device.type != 'cpu' else False
+        self.device = device
+        import onnxruntime as onnxrt    
+        import onnx    
+        self.GB = 2 * 1024 * 1024 * 1024 #2GB
+        self.runTime = onnxrt
+        onnx_model = onnx.load(ONNX_EnginePath)  # load onnx model
+        onnx.checker.check_model(onnx_model)  # check onnx model
+        self.providers = [
+            ('TensorrtExecutionProvider',
+             {  
+                'device_id': 0,
+                'trt_max_workspace_size': self.GB,
+                'trt_fp16_enable': True,
+                'trt_dla_enable': True
+                }),
+            ('CUDAExecutionProvider', 
+             {
+                'device_id': 0,
+                'arena_extend_strategy': 'kNextPowerOfTwo',
+                'gpu_mem_limit': self.GB,
+                'cudnn_conv_algo_search': 'EXHAUSTIVE',
+                'do_copy_in_default_stream': True,
+                'enable_cuda_graph': True}),
+            'CPUExecutionProvider'] if self.cuda_is_available else ['CPUExecutionProvider']
+        
+        session_opt = self.runTime.SessionOptions()
+        session_opt.enable_profiling = False
+        session_opt.graph_optimization_level  = self.runTime.GraphOptimizationLevel.ORT_ENABLE_ALL
+        session_opt.execution_mode = self.runTime.ExecutionMode.ORT_SEQUENTIAL
+        self.session = self.runTime.InferenceSession(ONNX_EnginePath, sess_options=session_opt, provider_options=self.providers)
+        self.output_names = [x.name for x in self.session.get_outputs()]
+        meta = self.session.get_modelmeta().custom_metadata_map
+        if 'stride' in meta:
+            self.stride, self.names = int(meta['stride']), eval(meta['names'])
+            
+        if mydataset is not None:
+            with open(mydataset,errors='ignore') as f:
+                data = yaml.safe_load(f)
+                self.names = data['names']
+                self.nc = data['nc']
+        else:
+            self.nc = 999
+            self.names = [f'object {i}' for i in range(self.nc)]
+        
+    def infer(self, im):
+        """inference an image
+
+        Args:
+            im (_type_): _description_
+
+        Returns:
+            _type_: _description_
+        """
+        im = torch.from_numpy(im).to(self.device)
+        im = im.half() if self.half else im.float()  # uint8 to fp16/32
+        im /= 255.0  # 0 - 255 to 0.0 - 1.0
+        if im.ndimension() == 3:
+            im = im.unsqueeze(0)
+        if len(im.shape) == 3:
+            im = im[None]  # expand for batch dim
+        im = im.cpu().numpy()
+        y = self.session.run(self.output_names, {self.session.get_inputs()[0].name: im})
+        if isinstance(y, (list, tuple)):
+            self.prediction = self.from_numpy(y[0]) if len(y) == 1 else [self.from_numpy(x) for x in y]     
+            return self.non_max_suppression()
+        else:
+            self.prediction = self.from_numpy(y)
+            return self.non_max_suppression()
+    
+    def from_numpy(self, x):
+        return torch.from_numpy(x).to(self.device) if isinstance(x, np.ndarray) else x
+    
+    def warmup(self, imgsz=(1, 3, 640, 640)):
+        """Warming up...
+
+        Args:
+            imgsz (tuple, optional): _description_. Defaults to (1, 3, 640, 640).
+        No return
+        """
+        im = torch.empty(*imgsz, dtype=torch.half if self.half else torch.float, device=self.device)
+        if self.device.type != 'cpu':
+            for _ in range(1):
+                print(f'\nWarming up: \n')
+                self.infer(im)               
+                
+    def non_max_suppression(self):
+        """Non-Maximum Suppression (NMS) on inference results to reject overlapping detections
+
+        Returns:
+            
+        """
+        prediction = self.prediction
+        conf_thres = self.confThres
+        iou_thres = self.iouThres
+        classes = self.classes
+        agnostic = self.agnostic
+        multi_label = self.multi_label
+        labels = self.labels
+        max_det = self.max_det
+        nm = self.nm
+        
+        # Checks
+        assert 0 <= conf_thres <= 1, f'Invalid Confidence threshold {conf_thres}, valid values are between 0.0 and 1.0'
+        assert 0 <= iou_thres <= 1, f'Invalid IoU {iou_thres}, valid values are between 0.0 and 1.0'
+        if isinstance(prediction, (list, tuple)):  # YOLOv5 model in validation model, output = (inference_out, loss_out)
+            prediction = prediction[0]  # select only inference output
+
+        device = prediction.device
+        mps = 'mps' in device.type  # Apple MPS
+        if mps:  # MPS not fully supported yet, convert tensors to CPU before NMS
+            prediction = prediction.cpu()
+        bs = prediction.shape[0]  # batch size
+        nc = prediction.shape[2] - nm - 5  # number of classes
+        xc = prediction[..., 4] > conf_thres  # candidates
+
+        # Settings
+        max_wh = 7680  # (pixels) maximum box width and height
+        max_nms = 30000  # maximum number of boxes into torchvision.ops.nms()
+        time_limit = 0.5 + 0.05 * bs  # seconds to quit after
+        redundant = True  # require redundant detections
+        multi_label &= nc > 1  # multiple labels per box (adds 0.5ms/img)
+        merge = False  # use merge-NMS
+
+        t = time.time()
+        mi = 5 + nc  # mask start index
+        output = [torch.zeros((0, 6 + nm), device=prediction.device)] * bs
+        for xi, x in enumerate(prediction):  # image index, image inference
+            x = x[xc[xi]]  # confidence
+
+            # Cat apriori labels if autolabelling
+            if labels and len(labels[xi]):
+                lb = labels[xi]
+                v = torch.zeros((len(lb), nc + nm + 5), device=x.device)
+                v[:, :4] = lb[:, 1:5]  # box
+                v[:, 4] = 1.0  # conf
+                v[range(len(lb)), lb[:, 0].long() + 5] = 1.0  # cls
+                x = torch.cat((x, v), 0)
+
+            # If none remain process next image
+            if not x.shape[0]:
+                continue
+
+            # Compute conf
+            x[:, 5:] *= x[:, 4:5]  # conf = obj_conf * cls_conf
+
+            # Box/Mask
+            box = xywh2xyxy(x[:, :4])  # center_x, center_y, width, height) to (x1, y1, x2, y2)
+            mask = x[:, mi:]  # zero columns if no masks
+
+            # Detections matrix nx6 (xyxy, conf, cls)
+            if multi_label:
+                i, j = (x[:, 5:mi] > conf_thres).nonzero(as_tuple=False).T
+                x = torch.cat((box[i], x[i, 5 + j, None], j[:, None].float(), mask[i]), 1)
+            else:  # best class only
+                conf, j = x[:, 5:mi].max(1, keepdim=True)
+                x = torch.cat((box, conf, j.float(), mask), 1)[conf.view(-1) > conf_thres]
+
+            # Filter by class
+            if classes is not None:
+                x = x[(x[:, 5:6] == torch.tensor(classes, device=x.device)).any(1)]
+            # Check shape
+            n = x.shape[0]  # number of boxes
+            if not n:  # no boxes
+                continue
+            x = x[x[:, 4].argsort(descending=True)[:max_nms]]  # sort by confidence and remove excess boxes
+
+            # Batched NMS
+            c = x[:, 5:6] * (0 if agnostic else max_wh)  # classes
+            boxes, scores = x[:, :4] + c, x[:, 4]  # boxes (offset by class), scores
+            i = torchvision.ops.nms(boxes, scores, iou_thres)  # NMS
+            i = i[:max_det]  # limit detections
+            if merge and (1 < n < 3E3):  # Merge NMS (boxes merged using weighted mean)
+                # update boxes as boxes(i,4) = weights(i,n) * boxes(n,4)
+                iou = box_iou(boxes[i], boxes) > iou_thres  # iou matrix
+                weights = iou * scores[None]  # box weights
+                x[i, :4] = torch.mm(weights, x[:, :4]).float() / weights.sum(1, keepdim=True)  # merged boxes
+                if redundant:
+                    i = i[iou.sum(1) > 1]  # require redundancy
+
+            output[xi] = x[i]
+            if mps:
+                output[xi] = output[xi].to(device)
+            if (time.time() - t) > time_limit:
+                print(f'WARNING ⚠️ NMS time limit {time_limit:.3f}s exceeded')
+                break  # time limit exceeded
+
+        return output
+        
+    def stop():
+        pass
 
 class TensorRT_Engine(object):
-    """Torch-TensorRT
-        Using for TensorRT inference
+    """TensorRT using for TensorRT inference
+    only available on Nvidia's devices
     """
-    def __init__(self, engine_path, names=None, imgsz=(640,640), confThres=0.5, iouThres = 0.45):
+    def __init__(self, TensortRT_EnginePath='', names=None, imgsz=(640,640), confThres=0.5, iouThres = 0.45):
+        """initial a TensorRT Engine
+
+        Args:
+            TensortRT_EnginePath (str, optional): _description_. Defaults to ''.
+            names (_type_, optional): _description_. Defaults to None.
+            imgsz (tuple, optional): _description_. Defaults to (640,640).
+            confThres (float, optional): _description_. Defaults to 0.5.
+            iouThres (float, optional): _description_. Defaults to 0.45.
+        """
         import tensorrt as trt
         import pycuda.driver as cuda
         import pycuda.autoinit
@@ -791,7 +1010,7 @@ class TensorRT_Engine(object):
                     dataset_cls_name.close()
                     self.n_classes = data_['nc']
                     self.class_names = data_['names']
-            with open(engine_path, "rb") as f:
+            with open(TensortRT_EnginePath, "rb") as f:
                 serialized_engine = f.read()
                 f.close()                
         except IOError:
@@ -1096,6 +1315,22 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
             ch = []
         ch.append(c2)
     return nn.Sequential(*layers), sorted(save)
+
+class Segment(Detect):
+    """YOLOv5 Segment head for segmentation models"""
+    def __init__(self, nc=80, anchors=(), nm=32, npr=256, ch=(), inplace=True):
+        super().__init__(nc, anchors, ch, inplace)
+        self.nm = nm  # number of masks
+        self.npr = npr  # number of protos
+        self.no = 5 + nc + self.nm  # number of outputs per anchor
+        self.m = nn.ModuleList(nn.Conv2d(x, self.no * self.na, 1) for x in ch)  # output conv
+        self.proto = Proto(ch[0], self.npr, self.nm)  # protos
+        self.detect = Detect.forward
+
+    def forward(self, x):
+        p = self.proto(x[0])
+        x = self.detect(self, x)
+        return (x, p) if self.training else (x[0], p) if self.export else (x[0], p, x[1])
 
 
 if __name__ == '__main__':
