@@ -115,11 +115,35 @@ class _RepeatSampler(object):
     def __iter__(self):
         while True:
             yield from iter(self.sampler)
+            
+def is_stream_or_webcam(source=''):
+    """_summary_
+    Args:
+        source (str, optional): _description_. Defaults to ''. source
+
+    Returns:
+        True if webcam, txt, streaming...
+    """
+    webcam = source.isnumeric() or source.endswith('.txt') or source.lower().startswith(('rtsp://', 'rtmp://', 'http://', 'https://'))
+    return webcam
 
 
 class LoadImages:
-    # YOLOv5 image/video dataloader, i.e. `python detect.py --source image.jpg/vid.mp4`
+    """Load image from media resouce"""
     def __init__(self, path, img_size=640, stride=32, auto=True, transforms=None, vid_stride=1):
+        """_summary_
+
+        Args:
+            path (_type_): _description_. media file's path or txt file with media path for each line
+            img_size (int, optional): _description_. Defaults to 640.
+            stride (int, optional): _description_. Defaults to 32. Stride of YOLO network
+            auto (bool, optional): _description_. Defaults to True. set False for rectangle shape
+            transforms (_type_, optional): _description_. Defaults to None.
+            vid_stride (int, optional): _description_. Defaults to 1.
+
+        Raises:
+            FileNotFoundError: _description_
+        """
         if isinstance(path, str) and Path(path).suffix == ".txt":  # *.txt file with img/vid/dir on each line
             path = Path(path).read_text().rsplit()
         files = []
@@ -204,7 +228,6 @@ class LoadImages:
         self.cap = cv2.VideoCapture(path)
         self.frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT) / self.vid_stride)
         self.orientation = int(self.cap.get(cv2.CAP_PROP_ORIENTATION_META))  # rotation degrees
-        # self.cap.set(cv2.CAP_PROP_ORIENTATION_AUTO, 0)  # disable https://github.com/ultralytics/yolov5/issues/8493
 
     def _cv2_rotate(self, im):
         # Rotate a cv2 video manually
@@ -219,75 +242,23 @@ class LoadImages:
     def __len__(self):
         return self.nf  # number of files
 
-
-
-class LoadWebcam:  # for inference
-
-    def __init__(self, pipe='0', img_size=640, stride=32):
-        """ pipe = 'rtsp://192.168.1.64/1'  # IP camera
-            pipe = 'rtsp://username:password@192.168.1.64/1'  # IP camera with login
-            pipe = 'http://wmccpinetop.axiscam.net/mjpg/video.mjpg'  # IP golf camera
-        """        
-        self.img_size = img_size
-        self.stride = stride
-        if pipe.isnumeric():
-            pipe = eval(pipe)  # local camera
-        self.pipe = pipe
-        self.cap = cv2.VideoCapture(pipe)  # video capture object
-        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 3)  # set buffer size
-
-    def __iter__(self):
-        self.count = -1
-        return self
-
-    def __next__(self):
-        self.count += 1
-        if cv2.waitKey(1) == ord('q'):  # q to quit
-            self.cap.release()
-            cv2.destroyAllWindows()
-            raise StopIteration
-
-        # Read frame
-        if self.pipe == 0:  # local camera
-            ret_val, img0 = self.cap.read()
-            img0 = cv2.flip(img0, 1)  # flip left-right
-        else:  # IP camera
-            n = 0
-            while True:
-                n += 1
-                self.cap.grab()
-                if n % 30 == 0:  # skip frames
-                    ret_val, img0 = self.cap.retrieve()
-                    if ret_val:
-                        break
-
-        # Print
-        assert ret_val, f'Camera Error {self.pipe}'
-        img_path = 'webcam.jpg'
-        print(f'webcam {self.count}: ', end='')
-
-        # Padded resize
-        img = letterbox(img0, self.img_size, stride=self.stride)[0]
-
-        # Convert
-        img = img[:, :, ::-1].transpose(2, 0, 1)  # BGR to RGB, to 3x416x416
-        img = np.ascontiguousarray(img)
-
-        return img_path, img, img0, None
-
-    def __len__(self):
-        return 0
-
-
 class LoadStreams:
-    """multiple IP streaming or RTSP cameras
+    """multiple IP streaming, RTSP cameras or webcam
     press q key to quite  
     """
-    def __init__(self, sources='streams.txt', img_size=640, stride=32):
+    def __init__(self, sources='streams.txt', img_size=640, stride=32, auto=True):
+        """_summary_
+
+        Args:
+            sources (str, optional): _description_. Defaults to 'streams.txt'.
+            img_size (int, optional): _description_. Defaults to 640.
+            stride (int, optional): _description_. Defaults to 32.
+            auto (bool, optional): _description_. Defaults to True.
+        """
         self.mode = 'streaming'
         self.img_size = img_size
         self.stride = stride
-
+        self.auto = auto
         if os.path.isfile(sources):
             with open(sources, 'r') as f:
                 sources = [x.strip() for x in f.read().strip().splitlines() if len(x.strip())]
@@ -318,10 +289,10 @@ class LoadStreams:
         print('')  # newline
 
         # check for common shapes
-        s = np.stack([letterbox(x, self.img_size, stride=self.stride)[0].shape for x in self.imgs], 0)  # shapes
-        self.rect = np.unique(s, axis=0).shape[0] == 1  # rect inference if all shapes equal
-        if not self.rect:
-            print('WARNING: Different stream shapes detected. For optimal performance supply similarly-shaped streams.')
+        # s = np.stack([letterbox(x, self.img_size, stride=self.stride)[0].shape for x in self.imgs], 0)  # shapes
+        # self.rect = np.unique(s, axis=0).shape[0] == 1  # rect inference if all shapes equal
+        # if not self.rect:
+        #     print('WARNING: Different stream shapes detected. For optimal performance supply similarly-shaped streams.')
 
     def update(self, index, cap):
         # Read next stream frame in a daemon thread
@@ -346,12 +317,8 @@ class LoadStreams:
     def __next__(self):
         self.count += 1
         img0 = self.imgs.copy()
-        if cv2.waitKey(1) == ord('q'):  # q to quit
-            cv2.destroyAllWindows()
-            raise StopIteration
-
         # Letterbox
-        img = [letterbox(x, self.img_size, auto=self.rect, stride=self.stride)[0] for x in img0]
+        img = [letterbox(x, self.img_size, auto=self.auto, stride=self.stride)[0] for x in img0]
 
         # Stack
         img = np.stack(img, 0)
@@ -359,7 +326,7 @@ class LoadStreams:
         # Convert
         img = img[:, :, :, ::-1].transpose(0, 3, 1, 2)  # BGR to RGB, to bsx3x416x416
         img = np.ascontiguousarray(img)            
-        return self.sources, img, img0, None
+        return self.sources, img, img0, None, None
 
     def __len__(self):
         return 0  # 1E12 frames = 32 streams at 30 FPS for 30 years

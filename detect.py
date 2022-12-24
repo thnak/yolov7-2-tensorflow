@@ -9,9 +9,9 @@ from numpy import random
 from termcolor import colored
 from models.experimental import attempt_load
 from models.yolo import TensorRT_Engine
-from utils.datasets import LoadStreams, LoadImages
-from utils.general import check_img_size, check_requirements, check_imshow, non_max_suppression, apply_classifier, \
-    scale_coords, xyxy2xywh, strip_optimizer, set_logging, increment_path, check_git_status, BackgroundForegroundColors, xywh2xyxy, box_iou
+from utils.datasets import LoadStreams, LoadImages, is_stream_or_webcam
+from utils.general import check_img_size, check_requirements, non_max_suppression, apply_classifier, \
+    scale_coords, xyxy2xywh, strip_optimizer, set_logging, increment_path, check_git_status, BackgroundForegroundColors, colorstr
 from utils.plots import plot_one_box_with_return
 from utils.torch_utils import select_device, load_classifier, time_synchronized, TracedModel
 import os
@@ -20,7 +20,7 @@ from utils.ffmpeg_ import  FFMPEG_recorder
 def detect(opt=None):
     source, weights, view_img, save_txt, imgsz, trace = opt.source, opt.weights, opt.view_img, opt.save_txt, opt.img_size, not opt.no_trace
     save_img = not opt.nosave and not source.endswith('.txt')  # save inference images
-    webcam = source.isnumeric() or source.endswith('.txt') or source.lower().startswith(('rtsp://', 'rtmp://', 'http://', 'https://'))
+    webcam = is_stream_or_webcam(source)
 
     # Directories
     save_dir = Path(increment_path(Path(opt.project) / opt.name,
@@ -55,7 +55,7 @@ def detect(opt=None):
     vid_path = None
     if webcam:
         cudnn.benchmark = True  # set True to speed up constant image size inference
-        dataset = LoadStreams(source, img_size=imgsz, stride=stride)
+        dataset = LoadStreams(source, img_size=imgsz, stride=stride, auto=True)
     else:
         dataset = LoadImages(source, img_size=imgsz, stride=stride, auto=True)
 
@@ -64,8 +64,7 @@ def detect(opt=None):
 
     # Run inference
     if device.type != 'cpu':
-        model(torch.zeros(1, 3, imgsz, imgsz).to(device).type_as(
-            next(model.parameters())))  # run once
+        model(torch.zeros(1, 3, imgsz, imgsz).to(device).type_as(next(model.parameters())))  # run once
     old_img_w = old_img_h = imgsz
     old_img_b = 1
 
@@ -91,13 +90,11 @@ def detect(opt=None):
         # Inference
         t1 = time_synchronized()
         
-        with torch.no_grad():   # Calculating gradients would cause a GPU memory leak
-            pred = model(img, augment=opt.augment)[0]
+        pred = model(img, augment=opt.augment)[0]
         t2 = time_synchronized()
 
         # Apply NMS
-        pred = non_max_suppression(
-            pred, opt.conf_thres, opt.iou_thres, classes=opt.classes, agnostic=opt.agnostic_nms)
+        pred = non_max_suppression(pred, opt.conf_thres, opt.iou_thres, classes=opt.classes, agnostic=opt.agnostic_nms)
         t3 = time_synchronized()
 
         # Apply Classifier
@@ -150,7 +147,8 @@ def detect(opt=None):
                 cv2.namedWindow(f'{dataset.mode} {path}', cv2.WINDOW_NORMAL)
                 cv2.imshow(f'{dataset.mode} {path}', im0)
                 if cv2.waitKey(view_img) == 27:
-                    break
+                    print(colorstr(f'User keyboard interup, exting...'))
+                    exit()
 
             # Save results (image with detections)
             if save_img or opt.datacollection:
@@ -259,12 +257,17 @@ if __name__ == '__main__':
             from models.yolo import ONNX_Engine
             device = torch.device('cpu')
             imgsz = check_img_size(opt.img_size, s=32)
-            dataset = LoadImages(opt.source, img_size=imgsz, auto=False)
+            webcam = is_stream_or_webcam(opt.source)
+            if webcam:
+                dataset = LoadStreams(opt.source, img_size=imgsz, auto=False)
+            else:
+                dataset = LoadImages(opt.source, img_size=imgsz, auto=False)
+                
             model = ONNX_Engine(ONNX_EnginePath=_,mydataset='mydataset.yaml'
                                 ,confThres=opt.conf_thres, 
                                 iouThres=opt.iou_thres,device=device)
             names = model.names
-            from utils.general import colorstr
+            
             prefix = colorstr('ONNX_Engine')
             print(f'{prefix}: {vars(model)}\n')
             BFC = BackgroundForegroundColors(hyp='./mydataset.yaml')
@@ -273,21 +276,28 @@ if __name__ == '__main__':
             for path, img, im0s, vid_cap, s in dataset:
                 model.warmup()
                 t1 = time.time()
-                pred = model.infer(img)
+                pred, img = model.infer(img)
                 t2 = time.time() - t1
                 avgSpeed.append(t2)
+                img_h, img_w = img.shape[2:]
+                
                 for i, det in enumerate(pred):
                     seen += 1
-                    p, im0, frame = path, im0s.copy(), getattr(dataset, 'frame', 0)
+                    if webcam:
+                        p, s,  im0, frame = path[i], '%g: ' % i, im0s[i].copy(), dataset.count
+                    else:
+                        p, im0, frame = path, im0s.copy(), getattr(dataset, 'frame', 0)
 
-                    p = Path(p)  # to Path
+                    p = Path(p)
                     save_path = str(save_dir / p.name)  # im.jpg
                     txt_path = str(save_dir / 'labels' / p.stem) + ('' if dataset.mode == 'image' else f'_{frame}')  # im.txt
-                    s += '%gx%g ' % img.shape[1:]  # print string
+
+                    s += f'{img_h}x{img_w} '
+                        
                     s += f'speed: {round(t2*1000,3)}ms '
                     gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh
                     if len(det):
-                        det[:, :4] = scale_coords(img.shape[1:], det[:, :4], im0.shape).round()
+                        det[:, :4] = scale_coords((img_h, img_w), det[:, :4], im0.shape).round()
 
                         # Print results
                         for c in det[:, 5].unique():
@@ -303,7 +313,7 @@ if __name__ == '__main__':
                                     f.write(('%g ' * len(line)).rstrip() % line + '\n')
 
                             if not opt.nosave or opt.view_img:  # Add bbox to image
-                                c = int(cls)  # integer class
+                                c = int(cls)
                                 label = None if hide_labels else (names[c] if hide_conf else f'{names[c]} {conf:.2f}')
                                 txtColor, bboxColor = BFC.getval(index=int(cls))
                                 im0 = plot_one_box_with_return(xyxy, im0, label=label, txtColor=txtColor, bboxColor=bboxColor, line_thickness=1)
@@ -312,8 +322,9 @@ if __name__ == '__main__':
                         cv2.namedWindow(f'{dataset.mode} {path}', cv2.WINDOW_NORMAL)
                         cv2.imshow(f'{dataset.mode} {path}', im0)
                         if cv2.waitKey(opt.view_img) == 27:
-                            break
-                        
+                            print(colorstr(f'User keyboard interup, exting...'))
+                            exit()
+            del model, dataset
             cv2.destroyAllWindows()
             print(f'Finished. avg: {round((sum(avgSpeed) / len(avgSpeed))*1000,3)}ms')
                 

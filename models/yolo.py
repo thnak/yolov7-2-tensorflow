@@ -761,6 +761,7 @@ class ONNX_Engine(object):
             nm (int, optional): _description_. Defaults to 0.
             maxWorkSpace (int, optional): _description_. Defaults to 2GB.
         """
+        
         self.names= None
         self.confThres = confThres
         self.iouThres = iouThres
@@ -844,10 +845,10 @@ class ONNX_Engine(object):
         y = self.session.run(self.output_names, {self.session.get_inputs()[0].name: im})
         if isinstance(y, (list, tuple)):
             self.prediction = self.from_numpy(y[0]) if len(y) == 1 else [self.from_numpy(x) for x in y]     
-            return self.non_max_suppression()
+            return self.non_max_suppression(), im
         else:
             self.prediction = self.from_numpy(y)
-            return self.non_max_suppression()
+            return self.non_max_suppression(), im
     
     def from_numpy(self, x):
         return torch.from_numpy(x).to(self.device) if isinstance(x, np.ndarray) else x
