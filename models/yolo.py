@@ -744,7 +744,7 @@ class ONNX_Engine(object):
     """ONNX Engine class for inference with onnxruntime"""
     def __init__(self, ONNX_EnginePath='', mydataset=None, 
                  confThres=0.25, iouThres = 0.45, device = torch.device('cpu'), 
-                 classes_nms=None, agnostic_nms=False, multi_label_nms=False,labels=(), max_det_nms = 300, nm = 0):
+                 classes_nms=None, agnostic_nms=False, multi_label_nms=False,labels=(), max_det_nms = 300, nm = 0, maxWorkSpace=2 * 1024 * 1024 * 1024):
         """initial an ONNX Engine
 
         Args:
@@ -759,6 +759,7 @@ class ONNX_Engine(object):
             labels (tuple, optional): _description_. Defaults to ().
             max_det_nms (int, optional): _description_. Defaults to 300.
             nm (int, optional): _description_. Defaults to 0.
+            maxWorkSpace (int, optional): _description_. Defaults to 2GB.
         """
         self.names= None
         self.confThres = confThres
@@ -769,16 +770,23 @@ class ONNX_Engine(object):
         self.labels = labels
         self.max_det = max_det_nms
         self.nm = nm
-
-        self.cuda_is_available = torch.cuda.is_available()
         self.half = True if device.type != 'cpu' else False
         self.device = device
         import onnxruntime as onnxrt    
-        import onnx    
-        self.GB = 2 * 1024 * 1024 * 1024 #2GB
+           
+        self.GB = maxWorkSpace
         self.runTime = onnxrt
-        onnx_model = onnx.load(ONNX_EnginePath)  # load onnx model
-        onnx.checker.check_model(onnx_model)  # check onnx model
+
+        try:
+            import onnx 
+            onnx_model = onnx.load(ONNX_EnginePath)  # load onnx model
+            onnx.checker.check_model(onnx_model)  # check onnx model
+        except onnx.checker.ValidationError as e:
+            print(f"The model is invalid: {e}")
+            exit()
+        else:
+            pass
+            
         self.providers = [
             ('TensorrtExecutionProvider',
              {  
@@ -795,7 +803,7 @@ class ONNX_Engine(object):
                 'cudnn_conv_algo_search': 'EXHAUSTIVE',
                 'do_copy_in_default_stream': True,
                 'enable_cuda_graph': True}),
-            'CPUExecutionProvider'] if self.cuda_is_available else ['CPUExecutionProvider']
+            'CPUExecutionProvider'] if self.half else ['CPUExecutionProvider']
         
         session_opt = self.runTime.SessionOptions()
         session_opt.enable_profiling = False

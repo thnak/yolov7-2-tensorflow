@@ -31,7 +31,7 @@ if __name__ == '__main__':
     parser.add_argument('--topk-all', type=int, default=100, help='topk objects for every images')
     parser.add_argument('--iou-thres', type=float, default=0.45, help='iou threshold for NMS')
     parser.add_argument('--conf-thres', type=float, default=0.25, help='conf threshold for NMS')
-    parser.add_argument('--onnx-opset', type=int, default=13, help='onnx opset version')
+    parser.add_argument('--onnx-opset', type=int, default=17, help='onnx opset version')
     parser.add_argument('--device', default='cpu', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     parser.add_argument('--simplify', action='store_true', help='simplify onnx model')
     parser.add_argument('--include-nms', action='store_true', help='export end2end onnx(EfficientNMS_TRT)')
@@ -88,7 +88,7 @@ if __name__ == '__main__':
         print('TorchScript export success✅, saved as %s' % f)
         filenames[0] = f
     except Exception as e:
-        print('TorchScript export failure🐛🪲: %s' % e)
+        print(f'TorchScript export failure🐛🪲: {e}')
 
     # CoreML export
     try:
@@ -110,7 +110,7 @@ if __name__ == '__main__':
         print(f'{prefix} CoreML export success✅, saved as %s' % f)
         filenames[1] = f
     except Exception as e:
-        print(f'{prefix} CoreML export failure🐛🪲: %s' % e)
+        print(f'{prefix} CoreML export failure🐛🪲: {e}')
                      
     prefix = colorstr('TorchScript-Lite:')
     try:
@@ -122,7 +122,7 @@ if __name__ == '__main__':
         print(f'{prefix} TorchScript-Lite export success✅, saved as %s' % f)
         filenames[2] = f
     except Exception as e:
-        print(f'{prefix} export failure🐛🪲: %s' % e)
+        print(f'{prefix} export failure🐛🪲: {e}')
 
     prefix = colorstr('ONNX:')
     try:
@@ -199,13 +199,14 @@ if __name__ == '__main__':
         filenames[3] = f
         
     except Exception as e:
-        print(f'{prefix} export failure🐛🪲: %s' % e)
+        print(f'{prefix} export failure🐛🪲: {e}')
     prefix = colorstr('Quantize ONNX Models:')
     try:
-        saveat = filenames[3].replace('.onnx','quantize_dynamic.onnx')
-        from onnxruntime.quantization import quantize_dynamic
-        quantize_dynamic(filenames[3], saveat)
-        print(f'{prefix} export success✅, saved as {saveat}')
+        saveas = filenames[3].replace('.onnx','_quantize_dynamic.onnx')
+        from onnxruntime.quantization import quantize_dynamic, QuantType, quantize, QuantizationMode, StaticQuantConfig, quantize_static, CalibrationDataReader
+        quantize_static(filenames[3], filenames[3].replace('.onnx', '_quantize_static.onnx'), weight_type=QuantType.QUInt8)
+        quantize_dynamic(filenames[3], saveas,weight_type=QuantType.QUInt8, reduce_range=True)
+        print(f'{prefix} export success✅, saved as {saveas}')
     except Exception as e:
         print(f'{prefix} export failure🐛🪲: {e}')
     
@@ -234,7 +235,7 @@ if __name__ == '__main__':
                                            keras=False,prefix=prefix)
         print(f'{prefix} export success✅, saved as {filenames[5]}')
     except Exception as e:
-        print(f'{prefix} export failure🐛🪲: %s' % e)
+        print(f'{prefix} export failure🐛🪲: {e}')
         
     prefix = colorstr('TensorFlow GraphDef:')
     try:
@@ -242,7 +243,7 @@ if __name__ == '__main__':
         filenames[6], _ = export_pb(s_models,opt.weights, prefix=prefix)
         print(f'{prefix} export success✅, saved as {filenames[6]}')
     except Exception as e:
-        print(f'{prefix} export failure🐛🪲: %s' % e)
+        print(f'{prefix} export failure🐛🪲: {e}')
         
     prefix = colorstr('TensorFlow.js:')
     try:
@@ -250,7 +251,22 @@ if __name__ == '__main__':
         filenames[7], _ = export_tfjs(file_=opt.weights, prefix=prefix)
         print(f'{prefix} {filenames[2]} is finished')
     except Exception as e:
-        print(f'{prefix} export failure🐛🪲: %s' % e)
+        print(f'{prefix} export failure🐛🪲: {e}')
+        
+        
+    prefix = colorstr('Tensorflow lite')
+    try:
+        import tensorflow as tf
+        f = opt.weights.replace('.pt','.pb')
+        fo = opt.weights.replace('.pt', '.tflite')
+        converter = tf.lite.TFLiteConverter.from_saved_model(f'{f}')
+        tf_lite = converter.convert()
+        with open(fo, 'wb') as fi:
+            fi.write(tf_lite)
+        print(f'{prefix} export finished: {e}')
+    except Exception as e:
+        print(f'{prefix} export failure🐛🪲: {e}')
+        
     prefix = colorstr('Export:')
     for i in filenames:
         if i is not None:

@@ -57,7 +57,7 @@ def detect(opt=None):
         cudnn.benchmark = True  # set True to speed up constant image size inference
         dataset = LoadStreams(source, img_size=imgsz, stride=stride)
     else:
-        dataset = LoadImages(source, img_size=imgsz, stride=stride, auto=False)
+        dataset = LoadImages(source, img_size=imgsz, stride=stride, auto=True)
 
     # Get names and colors
     names = model.module.names if hasattr(model, 'module') else model.names
@@ -111,7 +111,7 @@ def detect(opt=None):
                 p, s,  im0, frame = path[i], '%g: ' % i, im0s[i].copy(), dataset.count
             else:
                 p, im0, frame = path, im0s, getattr(dataset, 'frame', 0)
-                
+            s += '%gx%g ' % img.shape[2:] 
             imOrigin = im0.copy()
             p = Path(p)  # to Path
             save_path = str(save_dir / p.name)  # img.jpg

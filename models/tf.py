@@ -31,7 +31,7 @@ import inspect
 from typing import Optional
 from models.common import C3, SPP, SPPF, Bottleneck, BottleneckCSP,SP, C3x, Concat, Conv, CrossConv, DWConv, DWConvTranspose2d, Focus, autopad, MP
 from models.experimental import MixConv2d, attempt_load
-from models.yolo import Detect, Segment
+from models.yolo import Detect, Segment, IDetect
 from utils.activations import SiLU
 from utils.general import  make_divisible, colorstr
 
@@ -104,16 +104,16 @@ class TFImplicitM(nn.Module):
         return self.implicit * x
     
 
-class TFIDetect(keras.layers.Layer):
+class TFIDetect(nn.Module):
     stride = None  # strides computed during build
     export = False  # onnx export
     end2end = False
     include_nms = False
     concat = False
-    dynamic = False
+    dynamic = False #https://github.com/WongKinYiu/yolov7/pull/1270
     
-    def __init__(self, nc=80, anchors=(), ch=(), w=None):  # detection layer
-        super(TFIDetect, self).__init__()
+    def __init__(self, nc=80, anchors=(), ch=()):  # detection layer
+        super().__init__()
         self.nc = nc  # number of classes
         self.no = nc + 5  # number of outputs per anchor
         self.nl = len(anchors)  # number of detection layers
@@ -122,31 +122,9 @@ class TFIDetect(keras.layers.Layer):
         a = torch.tensor(anchors).float().view(self.nl, -1, 2)
         self.register_buffer('anchors', a)  # shape(nl,na,2)
         self.register_buffer('anchor_grid', a.clone().view(self.nl, 1, -1, 1, 1, 2))  # shape(nl,1,na,1,1,2)
-        self.m = [TFConv2d(x, self.no * self.na, 1,w=w.m[i]) for i, x in enumerate(ch)] # output conv
-        self.ia = nn.ModuleList(TFImplicitA(x) for x in ch)
-        self.im = nn.ModuleList(TFImplicitM(self.no * self.na) for _ in ch)
+        self.m = nn.ModuleList(nn.Conv2d(x, self.no * self.na, 1) for x in ch)  # output conv
         self.dynamic = False
     def forward(self, x):
-        # x = x.copy()  # for profiling
-        z = []  # inference output
-        self.training |= self.export
-        for i in range(self.nl):
-            x[i] = self.m[i](self.ia[i](x[i]))  # conv
-            x[i] = self.im[i](x[i])
-            bs, _, ny, nx = x[i].shape  # x(bs,255,20,20) to x(bs,3,20,20,85)
-            x[i] = x[i].view(bs, self.na, self.no, ny, nx).permute(0, 1, 3, 4, 2).contiguous()
-
-            if not self.training:  # inference
-                if self.dynamic or self.grid[i].shape[2:4] != x[i].shape[2:4]:
-                    self.grid[i] = self._make_grid(nx, ny).to(x[i].device)
-
-                y = x[i].sigmoid()
-                y[..., 0:2] = (y[..., 0:2] * 2. - 0.5 + self.grid[i]) * self.stride[i]  # xy
-                y[..., 2:4] = (y[..., 2:4] * 2) ** 2 * self.anchor_grid[i]  # wh
-                z.append(y.view(bs, -1, self.no))
-        return x if self.training else (torch.cat(z, 1), x)
-    
-    def fuseforward(self, x):
         # x = x.copy()  # for profiling
         z = []  # inference output
         self.training |= self.export
@@ -156,9 +134,8 @@ class TFIDetect(keras.layers.Layer):
             x[i] = x[i].view(bs, self.na, self.no, ny, nx).permute(0, 1, 3, 4, 2).contiguous()
 
             if not self.training:  # inference
-                if self.grid[i].shape[2:4] != x[i].shape[2:4]:
+                if self.dynamic or self.grid[i].shape[2:4] != x[i].shape[2:4]:
                     self.grid[i] = self._make_grid(nx, ny).to(x[i].device)
-
                 y = x[i].sigmoid()
                 if not torch.onnx.is_in_onnx_export():
                     y[..., 0:2] = (y[..., 0:2] * 2. - 0.5 + self.grid[i]) * self.stride[i]  # xy
@@ -178,26 +155,12 @@ class TFIDetect(keras.layers.Layer):
             z = self.convert(z)
             out = (z, )
         elif self.concat:
-            out = torch.cat(z, 1)            
+            out = torch.cat(z, 1)
         else:
             out = (torch.cat(z, 1), x)
 
         return out
-    
-    def fuse(self):
-        print("IDetect.fuse")
-        # fuse ImplicitA and Convolution
-        for i in range(len(self.m)):
-            c1,c2,_,_ = self.m[i].weight.shape
-            c1_,c2_, _,_ = self.ia[i].implicit.shape
-            self.m[i].bias += torch.matmul(self.m[i].weight.reshape(c1,c2),self.ia[i].implicit.reshape(c2_,c1_)).squeeze(1)
 
-        # fuse TFImplicitM and Convolution
-        for i in range(len(self.m)):
-            c1,c2, _,_ = self.im[i].implicit.shape
-            self.m[i].bias *= self.im[i].implicit.reshape(c2)
-            self.m[i].weight *= self.im[i].implicit.transpose(0,1)
-            
     @staticmethod
     def _make_grid(nx=20, ny=20):
         yv, xv = torch.meshgrid([torch.arange(ny), torch.arange(nx)], indexing='ij')
@@ -577,7 +540,7 @@ def parse_model(d, ch, model, imgsz):  # model_dict, input_channels(3)
             args = [ch[f]]
         elif m is Concat:
             c2 = sum(ch[-1 if x == -1 else x + 1] for x in f)
-        elif m in [Detect, Segment]:
+        elif m in [Detect, IDetect, Segment]:
             args.append([ch[x + 1] for x in f])
             if isinstance(args[1], int):  # number of anchors
                 args[1] = [list(range(args[1] * 2))] * len(f)
@@ -589,9 +552,9 @@ def parse_model(d, ch, model, imgsz):  # model_dict, input_channels(3)
         
         xxx = m_str.replace('nn.', '')
         tf_m = eval(f'TF{xxx}')
-        if m_str == 'MP':
+        if m_str == 'MP' or m_str == 'IDetect':
             args = args[:2]
-            abc = tf_m()
+            abc = tf_m(*args)
         else:
             abc = tf_m(*args, w=model.model[i])
             
