@@ -7,7 +7,7 @@ import subprocess
 import os
 import yaml
 sys.path.append('./')  # to run '$ python *.py' files in subdirectories
-
+from termcolor import colored
 import torch
 import torch.nn as nn
 from torch.utils.mobile_optimizer import optimize_for_mobile
@@ -37,6 +37,7 @@ if __name__ == '__main__':
     parser.add_argument('--include-nms', action='store_true', help='export end2end onnx(EfficientNMS_TRT)')
     parser.add_argument('--fp16', action='store_true', help='CoreML FP16 half-precision export')
     parser.add_argument('--int8', action='store_true', help='CoreML INT8 quantization')
+    parser.add_argument('--v', action='store_true', help='Verbose log')
     opt = parser.parse_args()
     opt.img_size *= 2 if len(opt.img_size) == 1 else 1  # expand
     opt.dynamic = opt.dynamic and not opt.end2end
@@ -81,7 +82,8 @@ if __name__ == '__main__':
     filenames = [None] *10
     # TorchScript export
     try:
-        print('\nStarting TorchScript export with torch %s...' % torch.__version__)
+        prefix = colorstr('TorchScript:')
+        print(f'\n{prefix} Starting TorchScript export with torch %s...{torch.__version__}' )
         f = opt.weights.replace('.pt', '.torchscript.pt')  # filename
         ts = torch.jit.trace(model, img, strict=False)
         ts.save(f)
@@ -94,7 +96,7 @@ if __name__ == '__main__':
     try:
         prefix = colorstr('CoreML:')
         import coremltools as ct
-        print(f'\n{prefix}Starting CoreML export with coremltools %s...' % ct.__version__)
+        print(f'\n{prefix}Starting CoreML export with coremltools {ct.__version__}')
         ct_model = ct.convert(ts, inputs=[ct.ImageType('image', shape=img.shape, scale=1 / 255.0, bias=[0, 0, 0])])
         bits, mode = (8, 'kmeans_lut') if opt.int8 else (16, 'linear') if opt.fp16 else (32, None)
         if bits < 32:
@@ -114,12 +116,12 @@ if __name__ == '__main__':
                      
     prefix = colorstr('TorchScript-Lite:')
     try:
-        print(f'\n{prefix} Starting TorchScript-Lite export with torch %s...' % torch.__version__)
+        print(f'\n{prefix} Starting TorchScript-Lite export with torch {torch.__version__}' )
         f = opt.weights.replace('.pt', '.torchscript.ptl')  # filename
         tsl = torch.jit.trace(model, img, strict=False)
         tsl = optimize_for_mobile(tsl)
         tsl._save_for_lite_interpreter(f)
-        print(f'{prefix} TorchScript-Lite export success✅, saved as %s' % f)
+        print(f'{prefix} TorchScript-Lite export success✅, saved as {f}')
         filenames[2] = f
     except Exception as e:
         print(f'{prefix} export failure🐛🪲: {e}')
@@ -127,7 +129,7 @@ if __name__ == '__main__':
     prefix = colorstr('ONNX:')
     try:
         import onnx
-        print(f'\n{prefix} Starting ONNX export with onnx %s...' % onnx.__version__)
+        print(f'\n{prefix} Starting ONNX export with onnx {onnx.__version__}')
         f = opt.weights.replace('.pt', '.onnx')  # filename
         model.eval()
         output_names = ['classes', 'boxes'] if y is None else ['output']
@@ -155,7 +157,8 @@ if __name__ == '__main__':
             dynamic_axes.update(output_axes)
         if opt.grid:
             if opt.end2end:
-                print(f'\n{prefix}Starting export end2end onnx model for %s...' % 'TensorRT' if opt.max_wh is None else 'onnxruntime')
+                x = 'TensorRT' if opt.max_wh is None else 'onnxruntime'
+                print(f'\n{prefix}Starting export end2end onnx model for {colorstr(x)}')
                 model = End2End(model,opt.topk_all,opt.iou_thres,opt.conf_thres,opt.max_wh,device,len(labels))
                 if opt.end2end and opt.max_wh is None:
                     output_names = ['num_dets', 'det_boxes', 'det_scores', 'det_classes']
@@ -166,7 +169,7 @@ if __name__ == '__main__':
             else:
                 model.model[-1].concat = True
 
-        torch.onnx.export(model, img, f, verbose=False, opset_version=opt.onnx_opset, input_names=['images'],
+        torch.onnx.export(model, img, f, verbose=opt.v, opset_version=opt.onnx_opset, input_names=['images'],
                           output_names=output_names,
                           dynamic_axes=dynamic_axes)
 

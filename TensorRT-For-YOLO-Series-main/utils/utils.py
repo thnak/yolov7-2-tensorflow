@@ -9,6 +9,13 @@ class TensorRT_Engine(object):
         Using for TensorRT inference
     """
     def __init__(self, engine_path, dataset='', imgsz=(640,640)):
+        """_summary_
+
+        Args:
+            engine_path (_type_): _description_
+            dataset (str, optional): _description_. Defaults to ''.
+            imgsz (tuple, optional): _description_. Defaults to (640,640).
+        """
         import tensorrt as trt
         import pycuda.driver as cuda
         import pycuda.autoinit
@@ -32,16 +39,19 @@ class TensorRT_Engine(object):
         runtime = self.trt.Runtime(logger)
         self.trt.init_libnvinfer_plugins(logger,'') # initialize TensorRT plugins        
         try:
-            with open(dataset,'r') as dataset_cls_name:
-                data_ = self.yaml.load(dataset_cls_name, Loader=self.yaml.SafeLoader)
-                dataset_cls_name.close()
-                self.n_classes = data_['nc']
-                self.class_names = data_['names']
+            if os.path.exists(dataset):
+                with open(dataset,'r') as dataset_cls_name:
+                    data_ = self.yaml.load(dataset_cls_name, Loader=self.yaml.SafeLoader)
+                    self.n_classes = data_['nc']
+                    self.class_names = data_['names']
+            else:
+                self.n_classes = 999
+                self.class_names = [i for i in range(self.n_classes)]
             with open(engine_path, "rb") as f:
                 serialized_engine = f.read()
-                f.close()                
         except IOError:
             print(f'Error: {IOError}, the item is required')
+            exit()
         engine = runtime.deserialize_cuda_engine(serialized_engine)
         self.context = engine.create_execution_context()
         self.inputs, self.outputs, self.bindings = [], [], []
@@ -134,7 +144,7 @@ class TensorRT_Engine(object):
             dets = np.concatenate([final_boxes[:num[0]], np.array(final_scores)[:num[0]].reshape(-1, 1), np.array(final_cls_inds)[:num[0]].reshape(-1, 1)], axis=-1)
         else:
             predictions = np.reshape(data, (1, -1, int(5+self.n_classes)))[0]
-            dets = self.postprocess(predictions,ratio)
+            dets = self.postprocess(predictions=predictions, ratio=ratio)
 
         if dets is not None:
             final_boxes, final_scores, final_cls_inds = dets[:,:4], dets[:, 4], dets[:, 5]

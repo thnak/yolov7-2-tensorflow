@@ -182,26 +182,24 @@ def detect(opt=None):
 def detectTensorRT(tensorrtEngine,opt=None):
     source, weights, view_img, save_txt, imgsz, trace = opt.source, opt.weights, opt.view_img, opt.save_txt, opt.img_size, not opt.no_trace
     save_img = not opt.nosave and not source.endswith('.txt')  # save inference images
-    webcam = source.isnumeric() or source.endswith('.txt') or source.lower().startswith(('rtsp://', 'rtmp://', 'http://', 'https://'))
+    webcam = is_stream_or_webcam(source=source)
     
     
-    device = select_device('cpu')
-    model = attempt_load(weights, map_location=device)  # load FP32 model
-    stride = int(model.stride.max())  # model stride
+    stride = 32
     imgsz = check_img_size(imgsz, s=stride)  # check img_size
     
     
     if webcam:
-        dataset = LoadStreams(source, img_size=imgsz, stride=stride)
+        dataset = LoadStreams(source, img_size=imgsz, stride=stride, auto=True)
     else:
-        dataset = LoadImages(source, img_size=imgsz, stride=stride)
-    names = model.module.names if hasattr(model, 'module') else model.names
-    del model
+        dataset = LoadImages(source, img_size=imgsz, stride=stride, auto=True)
+
     
     
     pred = TensorRT_Engine(engine_path=tensorrtEngine, names=names, imgsz=opt.img_size, confThres=opt.conf_thres, iouThres=opt.iou_thres)
-    for path, img, im0s, vid_cap in dataset:
-        img = pred.inference(im0s, end2end=True)
+    for path, img, im0s, vid_cap, s in dataset:
+        img = pred.inference(img, end2end=True)
+        
         if view_img > -1:
             cv2.namedWindow('TensortRT Engine', img)
             cv2.imshow('TensortRT Engine', cv2.WINDOW_NORMAL)
@@ -244,7 +242,7 @@ if __name__ == '__main__':
     opt.weights = opt.weights if isinstance(opt.weights, list) else [opt.weights]
     for _ in opt.weights:
         file_extention = os.path.splitext(_)[1]
-        if file_extention not in ['.trt', '.engine', '.onnx']:
+        if file_extention not in ['.pt']:
             with torch.no_grad():
                 # update all models (to fix SourceChangeWarning)
                 if opt.update:
@@ -328,5 +326,5 @@ if __name__ == '__main__':
             cv2.destroyAllWindows()
             print(f'Finished. avg: {round((sum(avgSpeed) / len(avgSpeed))*1000,3)}ms')
                 
-        else:
+        elif _ in ['.trt', '.engine']:
             detectTensorRT(_,opt)
