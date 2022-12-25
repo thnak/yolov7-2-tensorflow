@@ -130,7 +130,7 @@ def detect(opt=None):
                 cv2.namedWindow(f'{dataset.mode} {path}', cv2.WINDOW_NORMAL)
                 cv2.imshow(f'{dataset.mode} {path}', im0)
                 if cv2.waitKey(view_img) == 27:
-                    print(colorstr(f'User keyboard interup, exting...'))
+                    print(colorstr(f'User keyboard interupt, exiting...'))
                     exit()
 
             if save_img or opt.datacollection:
@@ -173,28 +173,32 @@ def detectTensorRT(tensorrtEngine,opt=None,save=''):
     
     
     if webcam:
-        dataset = LoadStreams(source, img_size=imgsz, stride=stride, auto=True)
+        dataset = LoadStreams(source, img_size=imgsz, stride=stride, auto=None)
     else:
-        dataset = LoadImages(source, img_size=imgsz, stride=stride, auto=True)
+        dataset = LoadImages(source, img_size=imgsz, stride=stride, auto=None)
     
     count = 0
     pred = TensorRT_Engine(TensortRT_EnginePath=tensorrtEngine, confThres=opt.conf_thres, iouThres=opt.iou_thres)
     for path, img, im0s, vid_cap, s in dataset:
         t1 = time.time()
-        img = pred.inference(img, end2end=True)
+        img = pred.inference(im0s, end2end=True)
         print(f'speed: {time.time() - t1}s, shape{img.shape}')
         if view_img > -1:
             cv2.namedWindow('TensortRT Engine', img)
             cv2.imshow('TensortRT Engine', cv2.WINDOW_NORMAL)
         if save_img:
-            pa = f'{str(save)}/{count}.jpg'
-
-            count +=1
-            ret = cv2.imwrite(pa,img)
-            print(f'saved as {pa}, ret: {ret}, exit: {os.path.exists(pa)}')
-    del pred
+            if dataset.mode == 'image':
+                pa = f'{str(save)}/image{count}.jpg'
+                count +=1
+                ret = cv2.imwrite(pa,img)
+                print(f'saved as {pa}, ret: {ret}, exit: {os.path.exists(pa)}')
+            else:
+                
+                pass
+    del pred, dataset
     if view_img > -1:
         cv2.destroyAllWindows()
+
 
         
 if __name__ == '__main__':
@@ -304,7 +308,7 @@ if __name__ == '__main__':
                         cv2.namedWindow(f'{dataset.mode} {path}', cv2.WINDOW_NORMAL)
                         cv2.imshow(f'{dataset.mode} {path}', im0)
                         if cv2.waitKey(opt.view_img) == 27:
-                            print(colorstr(f'User keyboard interup, exting...'))
+                            print(colorstr(f'User keyboard interupt, exiting...'))
                             exit()
                     if not opt.nosave:
                         pass

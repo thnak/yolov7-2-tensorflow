@@ -976,7 +976,7 @@ class TensorRT_Engine(object):
     """TensorRT using for TensorRT inference
     only available on Nvidia's devices
     """
-    def __init__(self, TensortRT_EnginePath='', names='/yam.yaml', imgsz=(640,640), confThres=0.5, iouThres = 0.45):
+    def __init__(self, TensorRT_EnginePath='', names='/yam.yaml', imgsz=(640,640), confThres=0.5, iouThres = 0.45):
         """initial a TensorRT Engine
 
         Args:
@@ -1019,7 +1019,7 @@ class TensorRT_Engine(object):
             else:
                 self.n_classes = 999
                 self.class_names = [i for i in range(self.n_classes)]
-            with open(TensortRT_EnginePath, "rb") as f:
+            with open(TensorRT_EnginePath, "rb") as f:
                 serialized_engine = f.read()
         except IOError:
             print(f'Error: {IOError}, the item is required')
@@ -1114,8 +1114,6 @@ class TensorRT_Engine(object):
             Return: image
         """
         img, ratio = self.preproc(origin_img, self.imgsz, self.mean, self.std)
-        # img, ratio = origin_img,  min(self.imgsz[0] / origin_img.shape[0], self.imgsz[1] / origin_img.shape[1])
-        print(f'shape: {img.shape}')
         data = self.infer(img)
         if end2end:
             num, final_boxes, final_scores, final_cls_inds = data

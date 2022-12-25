@@ -130,7 +130,7 @@ def is_stream_or_webcam(source=''):
 
 class LoadImages:
     """Load image from media resouce"""
-    def __init__(self, path, img_size=640, stride=32, auto=True, transforms=None, vid_stride=1):
+    def __init__(self, path, img_size=640, stride=32, auto=True, vid_stride=1):
         """_summary_
 
         Args:
@@ -169,7 +169,6 @@ class LoadImages:
         self.video_flag = [False] * ni + [True] * nv
         self.mode = 'image'
         self.auto = auto
-        self.transforms = transforms  # optional
         self.vid_stride = vid_stride  # video frame-rate stride
         if any(videos):
             self._new_video(videos[0])  # new video
@@ -203,7 +202,6 @@ class LoadImages:
                 ret_val, im0 = self.cap.read()
 
             self.frame += 1
-            # im0 = self._cv2_rotate(im0)  # for use if cv2 autorotation is False
             s = f'video {self.count + 1}/{self.nf} ({self.frame}/{self.frames}) {path}: '
 
         else:
@@ -213,13 +211,12 @@ class LoadImages:
             assert im0 is not None, f'Image Not Found {path}'
             s = f'image {self.count}/{self.nf} {path}: '
 
-        if self.transforms:
-            im = self.transforms(im0)  # transforms
-        else:
+        if self.auto is not None:
             im = letterbox(im0, self.img_size, stride=self.stride, auto=self.auto)[0]  # padded resize
             im = im.transpose((2, 0, 1))[::-1]  # HWC to CHW, BGR to RGB
             im = np.ascontiguousarray(im)  # contiguous
-
+        else:
+            im = None
         return path, im, im0, self.cap, s
 
     def _new_video(self, path):
@@ -228,16 +225,6 @@ class LoadImages:
         self.cap = cv2.VideoCapture(path)
         self.frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT) / self.vid_stride)
         self.orientation = int(self.cap.get(cv2.CAP_PROP_ORIENTATION_META))  # rotation degrees
-
-    def _cv2_rotate(self, im):
-        # Rotate a cv2 video manually
-        if self.orientation == 0:
-            return cv2.rotate(im, cv2.ROTATE_90_CLOCKWISE)
-        elif self.orientation == 180:
-            return cv2.rotate(im, cv2.ROTATE_90_COUNTERCLOCKWISE)
-        elif self.orientation == 90:
-            return cv2.rotate(im, cv2.ROTATE_180)
-        return im
 
     def __len__(self):
         return self.nf  # number of files
@@ -288,12 +275,6 @@ class LoadStreams:
             thread.start()
         print('')  # newline
 
-        # check for common shapes
-        # s = np.stack([letterbox(x, self.img_size, stride=self.stride)[0].shape for x in self.imgs], 0)  # shapes
-        # self.rect = np.unique(s, axis=0).shape[0] == 1  # rect inference if all shapes equal
-        # if not self.rect:
-        #     print('WARNING: Different stream shapes detected. For optimal performance supply similarly-shaped streams.')
-
     def update(self, index, cap):
         # Read next stream frame in a daemon thread
         n = 0
@@ -333,7 +314,7 @@ class LoadStreams:
 
 
 def img2label_paths(img_paths):
-    # Define label paths as a function of image paths
+    """Define label paths as a function of image paths"""
     sa, sb = os.sep + 'images' + os.sep, os.sep + 'labels' + os.sep  # /images/, /labels/ substrings
     return ['txt'.join(x.replace(sa, sb, 1).rsplit(x.split('.')[-1], 1)) for x in img_paths]
 
