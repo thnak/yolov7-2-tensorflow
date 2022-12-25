@@ -1,19 +1,17 @@
 import argparse
 import time
 from pathlib import Path
-from PIL import Image
 import cv2
 import torch
 import torch.backends.cudnn as cudnn
-from numpy import random
 from termcolor import colored
 from models.experimental import attempt_load
 from models.yolo import TensorRT_Engine
 from utils.datasets import LoadStreams, LoadImages, is_stream_or_webcam
-from utils.general import check_img_size, check_requirements, non_max_suppression, apply_classifier, \
+from utils.general import check_img_size, check_requirements, non_max_suppression, \
     scale_coords, xyxy2xywh, strip_optimizer, set_logging, increment_path, check_git_status, BackgroundForegroundColors, colorstr
 from utils.plots import plot_one_box_with_return
-from utils.torch_utils import select_device, load_classifier, time_synchronized, TracedModel
+from utils.torch_utils import select_device, time_synchronized, TracedModel
 import os
 from utils.ffmpeg_ import  FFMPEG_recorder
 
@@ -44,14 +42,7 @@ def detect(opt=None):
     if half:
         model.half()  # to FP16
 
-    # Second-stage classifier
-    classify = False
-    if classify:
-        modelc = load_classifier(name='resnet101', n=2)  # initialize
-        modelc.load_state_dict(torch.load(
-            'weights/resnet101.pt', map_location=device)['model']).to(device).eval()
 
-    # Set Dataloader
     vid_path = None
     if webcam:
         cudnn.benchmark = True  # set True to speed up constant image size inference
@@ -74,8 +65,8 @@ def detect(opt=None):
         save_txt = True
     for path, img, im0s, vid_cap, s in dataset:
         img = torch.from_numpy(img).to(device)
-        img = img.half() if half else img.float()  # uint8 to fp16/32
-        img /= 255.0  # 0 - 255 to 0.0 - 1.0
+        img = img.half() if half else img.float()
+        img /= 255.0
         if img.ndimension() == 3:
             img = img.unsqueeze(0)
         # Warmup
@@ -93,25 +84,20 @@ def detect(opt=None):
         pred = model(img, augment=opt.augment)[0]
         t2 = time_synchronized()
 
-        # Apply NMS
         pred = non_max_suppression(pred, opt.conf_thres, opt.iou_thres, classes=opt.classes, agnostic=opt.agnostic_nms)
         t3 = time_synchronized()
 
-        # Apply Classifier
-        if classify:
-            pred = apply_classifier(pred, modelc, img, im0s)
-
         # Process detections
         t4 = time.time()
-        for i, det in enumerate(pred):  # detections per image
-            if webcam:  # batch_size >= 1
+        for i, det in enumerate(pred):
+            if webcam:
                 p, s,  im0, frame = path[i], '%g: ' % i, im0s[i].copy(), dataset.count
             else:
                 p, im0, frame = path, im0s, getattr(dataset, 'frame', 0)
             s += '%gx%g ' % img.shape[2:] 
             imOrigin = im0.copy()
             p = Path(p)  # to Path
-            save_path = str(save_dir / p.name)  # img.jpg
+            save_path = str(save_dir / p.name) 
 
             os.makedirs(str(save_dir / 'labels'), exist_ok=True)
             txt_path = os.path.join(save_dir, 'labels', p.stem) if dataset.mode == 'image' else os.path.join(save_dir, 'labels', p.stem+f'_{frame}')
@@ -122,8 +108,7 @@ def detect(opt=None):
                 det[:, :4] = scale_coords(img.shape[2:], det[:, :4], im0.shape).round()
                 for c in det[:, -1].unique():
                     n = (det[:, -1] == c).sum()  # detections per class
-                    # add to string
-                    s += f"{n} {names[int(c)]}{'s' * (n > 1)}, "
+                    s += f"{n} {names[int(c)]}{'s' * (n > 1)} "
 
                 # Write results
                 for *xyxy, conf, cls in reversed(det):
@@ -137,12 +122,10 @@ def detect(opt=None):
                         textColor, bboxColor = BFC.getval(index=int(cls))
                         im0 = plot_one_box_with_return(xyxy, im0, label=label, txtColor=textColor, bboxColor=bboxColor, line_thickness=1)
 
-            # Print time (inference + NMS)
             tmInf, tmNms = round(1E3 * (t2 - t1), 3), round(1E3 * (t3 - t2), 3)
             avgTime[0].append(tmInf)
             avgTime[1].append(tmNms)
 
-            # Stream results
             if view_img > -1:
                 cv2.namedWindow(f'{dataset.mode} {path}', cv2.WINDOW_NORMAL)
                 cv2.imshow(f'{dataset.mode} {path}', im0)
@@ -150,25 +133,26 @@ def detect(opt=None):
                     print(colorstr(f'User keyboard interup, exting...'))
                     exit()
 
-            # Save results (image with detections)
             if save_img or opt.datacollection:
                 if opt.datacollection:
                     im0 = imOrigin
                 if dataset.mode == 'image':
                     cv2.imwrite(save_path, im0)
                     print(f"The image with the result is saved in: {save_path}")
-                else:  # 'video' or 'stream'
-                    if vid_path != save_path:  # new video
+                else: 
+                    if vid_path != save_path:
                         vid_path = save_path
-                        if vid_cap:  # video
+                        
+                        if vid_cap: 
                             fps = vid_cap.get(cv2.CAP_PROP_FPS)
                             w = int(vid_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
                             h = int(vid_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-                        else:  # stream
+                        else:
                             fps, w, h = 30, im0.shape[1], im0.shape[0]
-                            save_path += '.mp4'
+                            save_path += '.mp4'                        
                         ffmpeg = FFMPEG_recorder(savePath=save_path,videoDimensions=(w,h),fps=fps)
                     ffmpeg.writeFrame(im0)
+                    ffmpeg.writeSubtitle(title=s,fps=fps)
         print(f'{s}pre-proc {(time.time() - t4):0.3f}s, infer: {round(tmInf,3)}, nms: {round(tmNms,3)}')
     if save_txt or save_img:
         s = f"\n{len(list(save_dir.glob('labels/*.txt')))} labels saved to {save_dir / 'labels'}" if save_txt else ''
@@ -176,35 +160,38 @@ def detect(opt=None):
     cv2.destroyAllWindows()
     if (save_img or opt.datacollection) and dataset.mode != 'image':
         ffmpeg.stopRecorder()
+        ffmpeg.addSubtitle()
         
     print(f'Done. ({time.time() - t0:.3f}s), avgInference {round(sum(avgTime[0])/len(avgTime[0]),3)}ms, avgNMS {round(sum(avgTime[1])/len(avgTime[1]),3)}ms')
 
-def detectTensorRT(tensorrtEngine,opt=None):
+def detectTensorRT(tensorrtEngine,opt=None,save=''):
     source, weights, view_img, save_txt, imgsz, trace = opt.source, opt.weights, opt.view_img, opt.save_txt, opt.img_size, not opt.no_trace
-    save_img = not opt.nosave and not source.endswith('.txt')  # save inference images
+    save_img = not opt.nosave and not source.endswith('.txt') 
     webcam = is_stream_or_webcam(source=source)
-    
-    
     stride = 32
-    imgsz = check_img_size(imgsz, s=stride)  # check img_size
+    imgsz = check_img_size(imgsz, s=stride)
     
     
     if webcam:
         dataset = LoadStreams(source, img_size=imgsz, stride=stride, auto=True)
     else:
         dataset = LoadImages(source, img_size=imgsz, stride=stride, auto=True)
-
     
-    
-    pred = TensorRT_Engine(engine_path=tensorrtEngine, names=names, imgsz=opt.img_size, confThres=opt.conf_thres, iouThres=opt.iou_thres)
+    count = 0
+    pred = TensorRT_Engine(TensortRT_EnginePath=tensorrtEngine, confThres=opt.conf_thres, iouThres=opt.iou_thres)
     for path, img, im0s, vid_cap, s in dataset:
+        t1 = time.time()
         img = pred.inference(img, end2end=True)
-        
+        print(f'speed: {time.time() - t1}s, shape{img.shape}')
         if view_img > -1:
             cv2.namedWindow('TensortRT Engine', img)
             cv2.imshow('TensortRT Engine', cv2.WINDOW_NORMAL)
         if save_img:
-            cv2.imwrite(f'{path}trt.jpg',img)
+            pa = f'{str(save)}/{count}.jpg'
+
+            count +=1
+            ret = cv2.imwrite(pa,img)
+            print(f'saved as {pa}, ret: {ret}, exit: {os.path.exists(pa)}')
     del pred
     if view_img > -1:
         cv2.destroyAllWindows()
@@ -242,9 +229,8 @@ if __name__ == '__main__':
     opt.weights = opt.weights if isinstance(opt.weights, list) else [opt.weights]
     for _ in opt.weights:
         file_extention = os.path.splitext(_)[1]
-        if file_extention not in ['.pt']:
+        if file_extention in ['.pt']:
             with torch.no_grad():
-                # update all models (to fix SourceChangeWarning)
                 if opt.update:
                     detect(opt=opt)
                     strip_optimizer(f=_,halfModel=True)
@@ -287,7 +273,7 @@ if __name__ == '__main__':
                         p, im0, frame = path, im0s.copy(), getattr(dataset, 'frame', 0)
 
                     p = Path(p)
-                    save_path = str(save_dir / p.name)  # im.jpg
+                    save_path = str(save_dir / p.name)
                     txt_path = str(save_dir / 'labels' / p.stem) + ('' if dataset.mode == 'image' else f'_{frame}')  # im.txt
 
                     s += f'{img_h}x{img_w} '
@@ -297,14 +283,12 @@ if __name__ == '__main__':
                     if len(det):
                         det[:, :4] = scale_coords((img_h, img_w), det[:, :4], im0.shape).round()
 
-                        # Print results
                         for c in det[:, 5].unique():
-                            n = (det[:, 5] == c).sum()  # detections per class
-                            s += f"{n} {names[int(c)]}{'s' * (n > 1)}, "  # add to string
+                            n = (det[:, 5] == c).sum()
+                            s += f"{n} {names[int(c)]}{'s' * (n > 1)} "
 
-                        # Write results
                         for *xyxy, conf, cls in reversed(det):
-                            if opt.save_txt:  # Write to file
+                            if opt.save_txt:
                                 xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
                                 line = (cls, *xywh, conf) if opt.save_conf else (cls, *xywh)  # label format
                                 with open(f'{txt_path}.txt', 'a') as f:
@@ -322,9 +306,11 @@ if __name__ == '__main__':
                         if cv2.waitKey(opt.view_img) == 27:
                             print(colorstr(f'User keyboard interup, exting...'))
                             exit()
+                    if not opt.nosave:
+                        pass
             del model, dataset
             cv2.destroyAllWindows()
             print(f'Finished. avg: {round((sum(avgSpeed) / len(avgSpeed))*1000,3)}ms')
                 
-        elif _ in ['.trt', '.engine']:
-            detectTensorRT(_,opt)
+        elif file_extention in ['.trt', '.engine']:
+            detectTensorRT(_,opt, save=save_dir)

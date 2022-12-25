@@ -976,7 +976,7 @@ class TensorRT_Engine(object):
     """TensorRT using for TensorRT inference
     only available on Nvidia's devices
     """
-    def __init__(self, TensortRT_EnginePath='', names=None, imgsz=(640,640), confThres=0.5, iouThres = 0.45):
+    def __init__(self, TensortRT_EnginePath='', names='/yam.yaml', imgsz=(640,640), confThres=0.5, iouThres = 0.45):
         """initial a TensorRT Engine
 
         Args:
@@ -1010,18 +1010,17 @@ class TensorRT_Engine(object):
         logger = self.trt.Logger(self.trt.Logger.WARNING)
         runtime = self.trt.Runtime(logger)
         self.trt.init_libnvinfer_plugins(logger,'') # initialize TensorRT plugins  
-        if names is None:
-            print(f'{self.prefix} class names is empty, finding from file...')
         try:
-            if names is not None:
-                with open('./mydataset.yaml','r') as dataset_cls_name:
+            if os.path.exists(names):
+                with open(names,'r') as dataset_cls_name:
                     data_ = self.yaml.load(dataset_cls_name, Loader=self.yaml.SafeLoader)
-                    dataset_cls_name.close()
                     self.n_classes = data_['nc']
                     self.class_names = data_['names']
+            else:
+                self.n_classes = 999
+                self.class_names = [i for i in range(self.n_classes)]
             with open(TensortRT_EnginePath, "rb") as f:
                 serialized_engine = f.read()
-                f.close()                
         except IOError:
             print(f'Error: {IOError}, the item is required')
             exit()
@@ -1115,6 +1114,8 @@ class TensorRT_Engine(object):
             Return: image
         """
         img, ratio = self.preproc(origin_img, self.imgsz, self.mean, self.std)
+        # img, ratio = origin_img,  min(self.imgsz[0] / origin_img.shape[0], self.imgsz[1] / origin_img.shape[1])
+        print(f'shape: {img.shape}')
         data = self.infer(img)
         if end2end:
             num, final_boxes, final_scores, final_cls_inds = data

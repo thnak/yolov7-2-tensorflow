@@ -1,2 +1,2 @@
-a = [640] * 2
-print(type(a))
+a = 123
+len(a)
