@@ -809,6 +809,8 @@ class ONNX_Engine(object):
         session_opt = self.runTime.SessionOptions()
         session_opt.enable_profiling = False
         session_opt.graph_optimization_level  = self.runTime.GraphOptimizationLevel.ORT_ENABLE_ALL
+        session_opt.optimized_model_filepath = ONNX_EnginePath.replace('.onnx', '2.onnx')
+        
         session_opt.execution_mode = self.runTime.ExecutionMode.ORT_SEQUENTIAL
         self.session = self.runTime.InferenceSession(ONNX_EnginePath, sess_options=session_opt, provider_options=self.providers)
         self.output_names = [x.name for x in self.session.get_outputs()]
@@ -976,7 +978,7 @@ class TensorRT_Engine(object):
     """TensorRT using for TensorRT inference
     only available on Nvidia's devices
     """
-    def __init__(self, TensorRT_EnginePath='', names='/yam.yaml', imgsz=(640,640), confThres=0.5, iouThres = 0.45):
+    def __init__(self, TensorRT_EnginePath='', names='/yam.yaml', confThres=0.5, iouThres = 0.45):
         """initial a TensorRT Engine
 
         Args:
@@ -1002,12 +1004,12 @@ class TensorRT_Engine(object):
         self.os = os
         self.time = time
         self.prefix = colorstr(f'TensorRT engine:')
-        self.imgsz = imgsz
         self.mean = None
         self.std = None
         self.confThres = confThres
         self.iouThes = iouThres
         logger = self.trt.Logger(self.trt.Logger.WARNING)
+        logger = self.trt.Logger.Severity.ERROR
         runtime = self.trt.Runtime(logger)
         self.trt.init_libnvinfer_plugins(logger,'') # initialize TensorRT plugins  
         try:
@@ -1025,6 +1027,7 @@ class TensorRT_Engine(object):
             print(f'Error: {IOError}, the item is required')
             exit()
         engine = runtime.deserialize_cuda_engine(serialized_engine)
+        self.imgsz = engine.get_binding_shape(0)[2:]
         self.context = engine.create_execution_context()
         self.inputs, self.outputs, self.bindings = [], [], []
         self.stream = self.cuda.Stream()

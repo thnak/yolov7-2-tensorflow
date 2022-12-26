@@ -105,7 +105,7 @@ class EngineBuilder:
 
         self.builder = trt.Builder(self.trt_logger)
         self.config = self.builder.create_builder_config()
-        self.config.max_workspace_size = workspace * (2 ** 30)
+        self.config.set_memory_pool_limit(trt.MemoryPoolType.WORKSPACE, workspace * (2 ** 30))
         self.batch_size = None
         self.network = None
         self.parser = None
@@ -138,7 +138,7 @@ class EngineBuilder:
         for output in outputs:
             print("Output '{}' with shape {} and dtype {}".format(output.name, output.shape, output.dtype))
         assert self.batch_size > 0
-        self.builder.max_batch_size = self.batch_size
+        # self.builder.max_batch_size = self.batch_size #from https://github.com/Linaom1214/TensorRT-For-YOLO-Series/commit/87a4f23c6f9d8b41e391bd697bb3bcc024ba0f4e
 
         if end2end:
             previous_output = self.network.get_output(0)
@@ -238,9 +238,9 @@ class EngineBuilder:
                                      exact_batches=True))
                 
 
-        with self.builder.build_engine(self.network, self.config) as engine, open(engine_path, "wb") as f:
+        with self.builder.build_serialized_network(self.network, self.config) as engine, open(engine_path, "wb") as f:
             print("Serializing engine to file: {:}".format(engine_path))
-            f.write(engine.serialize())
+            f.write(engine)
         f.close()
         print('Finished convertion\nConfig:',self.config)
 

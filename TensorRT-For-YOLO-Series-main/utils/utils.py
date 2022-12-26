@@ -8,7 +8,7 @@ class TensorRT_Engine(object):
     """Torch-TensorRT
         Using for TensorRT inference
     """
-    def __init__(self, engine_path, dataset='', imgsz=(640,640)):
+    def __init__(self, engine_path, dataset=''):
         """_summary_
 
         Args:
@@ -31,11 +31,11 @@ class TensorRT_Engine(object):
         self.os = os
         self.time = time
         
-        self.imgsz = imgsz
         self.mean = None
         self.std = None
 
         logger = self.trt.Logger(self.trt.Logger.WARNING)
+        logger = self.trt.Logger.Severity.ERROR
         runtime = self.trt.Runtime(logger)
         self.trt.init_libnvinfer_plugins(logger,'') # initialize TensorRT plugins        
         try:
@@ -53,6 +53,7 @@ class TensorRT_Engine(object):
             print(f'Error: {IOError}, the item is required')
             exit()
         engine = runtime.deserialize_cuda_engine(serialized_engine)
+        self.imgsz = engine.get_binding_shape(0)[2:]
         self.context = engine.create_execution_context()
         self.inputs, self.outputs, self.bindings = [], [], []
         self.stream = self.cuda.Stream()

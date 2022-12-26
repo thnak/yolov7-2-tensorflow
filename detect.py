@@ -169,16 +169,16 @@ def detectTensorRT(tensorrtEngine,opt=None,save=''):
     save_img = not opt.nosave and not source.endswith('.txt') 
     webcam = is_stream_or_webcam(source=source)
     stride = 32
-    imgsz = check_img_size(imgsz, s=stride)
     
-    
+    pred = TensorRT_Engine(TensortRT_EnginePath=tensorrtEngine, confThres=opt.conf_thres, iouThres=opt.iou_thres)
+    imgsz = pred.imgsz
     if webcam:
         dataset = LoadStreams(source, img_size=imgsz, stride=stride, auto=None)
     else:
         dataset = LoadImages(source, img_size=imgsz, stride=stride, auto=None)
     
     count = 0
-    pred = TensorRT_Engine(TensortRT_EnginePath=tensorrtEngine, confThres=opt.conf_thres, iouThres=opt.iou_thres)
+    
     for path, img, im0s, vid_cap, s in dataset:
         t1 = time.time()
         img = pred.inference(im0s, end2end=True)
