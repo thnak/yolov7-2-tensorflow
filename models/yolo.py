@@ -1009,7 +1009,7 @@ class TensorRT_Engine(object):
         self.confThres = confThres
         self.iouThes = iouThres
         logger = self.trt.Logger(self.trt.Logger.WARNING)
-        logger = self.trt.Logger.Severity.ERROR
+        logger.min_severity  = self.trt.Logger.Severity.ERROR
         runtime = self.trt.Runtime(logger)
         self.trt.init_libnvinfer_plugins(logger,'') # initialize TensorRT plugins  
         try:
@@ -1117,7 +1117,9 @@ class TensorRT_Engine(object):
             Return: image
         """
         img, ratio = self.preproc(origin_img, self.imgsz, self.mean, self.std)
+        t1 = self.time.time()
         data = self.infer(img)
+        print(f'speed: {self.time.time() - t1}s')
         if end2end:
             num, final_boxes, final_scores, final_cls_inds = data
             final_boxes = np.reshape(final_boxes/ratio, (-1, 4))
@@ -1274,7 +1276,7 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
                  RepResX, RepResXCSPA, RepResXCSPB, RepResXCSPC, 
                  Ghost, GhostCSPA, GhostCSPB, GhostCSPC,
                  SwinTransformerBlock, STCSPA, STCSPB, STCSPC,
-                 SwinTransformer2Block, ST2CSPA, ST2CSPB, ST2CSPC]:
+                 SwinTransformer2Block, ST2CSPA, ST2CSPB, ST2CSPC, C3]:
             c1, c2 = ch[f], args[0]
             if c2 != no:  # if not output
                 c2 = make_divisible(c2 * gw, 8)

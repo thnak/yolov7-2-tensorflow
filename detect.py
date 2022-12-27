@@ -170,7 +170,7 @@ def detectTensorRT(tensorrtEngine,opt=None,save=''):
     webcam = is_stream_or_webcam(source=source)
     stride = 32
     
-    pred = TensorRT_Engine(TensortRT_EnginePath=tensorrtEngine, confThres=opt.conf_thres, iouThres=opt.iou_thres)
+    pred = TensorRT_Engine(TensorRT_EnginePath=tensorrtEngine, confThres=opt.conf_thres, iouThres=opt.iou_thres)
     imgsz = pred.imgsz
     if webcam:
         dataset = LoadStreams(source, img_size=imgsz, stride=stride, auto=None)
@@ -182,7 +182,6 @@ def detectTensorRT(tensorrtEngine,opt=None,save=''):
     for path, img, im0s, vid_cap, s in dataset:
         t1 = time.time()
         img = pred.inference(im0s, end2end=True)
-        print(f'speed: {time.time() - t1}s, shape{img.shape}')
         if view_img > -1:
             cv2.namedWindow('TensortRT Engine', img)
             cv2.imshow('TensortRT Engine', cv2.WINDOW_NORMAL)

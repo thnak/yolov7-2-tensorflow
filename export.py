@@ -87,10 +87,10 @@ if __name__ == '__main__':
         f = opt.weights.replace('.pt', '.torchscript.pt')  # filename
         ts = torch.jit.trace(model, img, strict=False)
         ts.save(f)
-        print('TorchScript export success✅, saved as %s' % f)
+        print(f'{prefix} export success✅, saved as {f}')
         filenames[0] = f
     except Exception as e:
-        print(f'TorchScript export failure🐛🪲: {e}')
+        print(f'{prefix} export failure🐛🪲: {e}')
 
     # CoreML export
     try:

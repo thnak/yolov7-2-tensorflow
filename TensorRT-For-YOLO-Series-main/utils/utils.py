@@ -35,7 +35,7 @@ class TensorRT_Engine(object):
         self.std = None
 
         logger = self.trt.Logger(self.trt.Logger.WARNING)
-        logger = self.trt.Logger.Severity.ERROR
+        logger.min_severity  = self.trt.Logger.Severity.ERROR
         runtime = self.trt.Runtime(logger)
         self.trt.init_libnvinfer_plugins(logger,'') # initialize TensorRT plugins        
         try:
