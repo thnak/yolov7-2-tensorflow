@@ -243,18 +243,17 @@ if __name__ == '__main__':
         elif file_extention in ['.onnx']:
             from models.yolo import ONNX_Engine
             device = torch.device('cpu')
-            imgsz = check_img_size(opt.img_size, s=32)
             webcam = is_stream_or_webcam(opt.source)
+            model = ONNX_Engine(ONNX_EnginePath=_,mydataset='mydataset.yaml'
+                                ,confThres=opt.conf_thres, 
+                                iouThres=opt.iou_thres,device=device)
+            imgsz = model.imgsz         
             if webcam:
                 dataset = LoadStreams(opt.source, img_size=imgsz, auto=False)
             else:
                 dataset = LoadImages(opt.source, img_size=imgsz, auto=False)
                 
-            model = ONNX_Engine(ONNX_EnginePath=_,mydataset='mydataset.yaml'
-                                ,confThres=opt.conf_thres, 
-                                iouThres=opt.iou_thres,device=device)
             names = model.names
-            
             prefix = colorstr('ONNX_Engine')
             print(f'{prefix}: {vars(model)}\n')
             BFC = BackgroundForegroundColors(hyp='./mydataset.yaml')

@@ -813,6 +813,7 @@ class ONNX_Engine(object):
         
         session_opt.execution_mode = self.runTime.ExecutionMode.ORT_SEQUENTIAL
         self.session = self.runTime.InferenceSession(ONNX_EnginePath, sess_options=session_opt, provider_options=self.providers)
+        self.imgsz = self.session.get_inputs()[0].shape[2:]
         self.output_names = [x.name for x in self.session.get_outputs()]
         meta = self.session.get_modelmeta().custom_metadata_map
         if 'stride' in meta:
