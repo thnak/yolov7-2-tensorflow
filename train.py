@@ -270,9 +270,16 @@ def train(hyp, opt, device, tb_writer=None, evo_num=[0, 0]):
 
     # Trainloader
     dataloader, dataset = create_dataloader(train_path, imgsz, batch_size, gs, opt,
-                                            hyp=hyp, augment=opt.augment, cache=opt.cache_images, rect=opt.rect, rank=rank,
-                                            world_size=opt.world_size, workers=opt.workers,shuffle= not opt.rect,seed=opt.seed,
-                                            image_weights=opt.image_weights, quad=opt.quad, prefix=colorstr('train: '))
+                                            hyp=hyp, augment=opt.augment, 
+                                            cache=opt.cache_images, 
+                                            rect=opt.rect, rank=rank,
+                                            world_size=opt.world_size, 
+                                            workers=opt.workers,
+                                            shuffle= False if opt.rect else True,
+                                            seed=opt.seed,
+                                            image_weights=opt.image_weights, 
+                                            quad=opt.quad, 
+                                            prefix=colorstr('train: '))
     mlc = np.concatenate(dataset.labels, 0)[:, 0].max()  # max label class
     nb = len(dataloader)  # number of batches
     assert mlc < nc, 'Label class %g exceeds nc=%g in %s. Possible class labels are 0-%g' % (
@@ -280,10 +287,15 @@ def train(hyp, opt, device, tb_writer=None, evo_num=[0, 0]):
 
     # Process 0
     if rank in [-1, 0]:
-        testloader = create_dataloader(test_path, imgsz_test, batch_size * 2, gs, opt,  # testloader
-                                       hyp=hyp, cache= opt.cache_images if (opt.cache_images and not opt.notest) else '', rect=False,
+        testloader = create_dataloader(test_path, 
+                                       imgsz_test, 
+                                       batch_size * 2, gs, opt,  # testloader
+                                       hyp=hyp, 
+                                       cache= opt.cache_images if (opt.cache_images and not opt.notest) else '', 
+                                       rect=True,
                                        rank=-1,
-                                       world_size=opt.world_size, workers=opt.workers*2,
+                                       world_size=opt.world_size, 
+                                       workers=opt.workers*2,
                                        pad=0.5, prefix=colorstr('val: '))[0]
 
         if not opt.resume:

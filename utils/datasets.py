@@ -79,7 +79,7 @@ def create_dataloader(path, imgsz, batch_size, stride, opt, hyp=None, augment=Fa
 
     batch_size = min(batch_size, len(dataset))
     nd = torch.cuda.device_count()
-    nw = min([os.cpu_count() // max(1,nd), batch_size if batch_size > 1 else 0, workers])  # number of workers
+    nw = min([os.cpu_count() // max(1,nd, world_size), batch_size if batch_size > 1 else 0, workers])  # number of workers
     sampler = distributed.DistributedSampler(dataset, shuffle=shuffle) if rank != -1 else None
     loader = DataLoader if image_weights else InfiniteDataLoader
     generator = torch.Generator()
@@ -336,6 +336,7 @@ def img2label_paths(img_paths):
 class LoadImagesAndLabels(Dataset):  # for training/testing
     def __init__(self, path, img_size=640, batch_size=16, augment=False, hyp=None, rect=False, image_weights=False,
                  cache_images='ram', single_cls=False, stride=32, pad=0.0, prefix=''):
+        
         self.img_size = img_size
         self.augment = augment
         self.hyp = hyp
@@ -347,7 +348,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         self.path = path   
         self.cache_images = cache_images
         self.img_npy = []
-        self.albumentations = Albumentations(hyp) if augment else None
+        self.albumentations = Albumentations(hyp, rect=rect) if augment else None
 
         try:
             f = []  # image files
@@ -581,10 +582,12 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                                                  scale=hyp['scale'],
                                                  shear=hyp['shear'],
                                                  perspective=hyp['perspective'])
-            
             img, labels = self.albumentations(img, labels)
             nL = len(labels)
             
+            if random.random() < hyp['cutout']:
+                img, labels = cutout(img, labels)
+              
             if random.random() < hyp['paste_in']:
                 sample_labels, sample_images, sample_masks = [], [], [] 
                 while len(sample_labels) < 30:
@@ -592,7 +595,6 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                     sample_labels += sample_labels_
                     sample_images += sample_images_
                     sample_masks += sample_masks_
-                    #print(len(sample_labels))
                     if len(sample_labels) == 0:
                         break
                 labels = pastein(img, labels, sample_labels, sample_images, sample_masks)
@@ -1089,7 +1091,7 @@ def bbox_ioa(box1, box2):
 def cutout(image, labels):
     # Applies image cutout augmentation https://arxiv.org/abs/1708.04552
     h, w = image.shape[:2]
-
+    image2 = image
     # create random masks
     scales = [0.5] * 1 + [0.25] * 2 + [0.125] * 4 + [0.0625] * 8 + [0.03125] * 16  # image size fraction
     for s in scales:
@@ -1103,15 +1105,15 @@ def cutout(image, labels):
         ymax = min(h, ymin + mask_h)
 
         # apply random color mask
-        image[ymin:ymax, xmin:xmax] = [random.randint(64, 191) for _ in range(3)]
+        image2[ymin:ymax, xmin:xmax] = [random.randint(0, 255) for _ in range(3)]
 
         # return unobscured labels
         if len(labels) and s > 0.03:
             box = np.array([xmin, ymin, xmax, ymax], dtype=np.float32)
             ioa = bbox_ioa(box, labels[:, 1:5])  # intersection over area
-            labels = labels[ioa < 0.60]  # remove >60% obscured labels
+            labels = labels[ioa < 0.65]  # remove >60% obscured labels
 
-    return labels
+    return image2 ,labels
     
 
 def pastein(image, labels, sample_labels, sample_images, sample_masks):
@@ -1140,12 +1142,6 @@ def pastein(image, labels, sample_labels, sample_images, sample_masks):
         
         if (ioa < 0.30).all() and len(sample_labels) and (xmax > xmin+20) and (ymax > ymin+20):  # allow 30% obscuration of existing labels
             sel_ind = random.randint(0, len(sample_labels)-1)
-            #print(len(sample_labels))
-            #print(sel_ind)
-            #print((xmax-xmin, ymax-ymin))
-            #print(image[ymin:ymax, xmin:xmax].shape)
-            #print([[sample_labels[sel_ind], *box]])
-            #print(labels.shape)
             hs, ws, cs = sample_images[sel_ind].shape
             r_scale = min((ymax-ymin)/hs, (xmax-xmin)/ws)
             r_w = int(ws*r_scale)
@@ -1158,9 +1154,6 @@ def pastein(image, labels, sample_labels, sample_images, sample_masks):
                 m_ind = r_mask > 0
                 if m_ind.astype(np.int32).sum() > 60:
                     temp_crop[m_ind] = r_image[m_ind]
-                    #print(sample_labels[sel_ind])
-                    #print(sample_images[sel_ind].shape)
-                    #print(temp_crop.shape)
                     box = np.array([xmin, ymin, xmin+r_w, ymin+r_h], dtype=np.float32)
                     if len(labels):
                         labels = np.concatenate((labels, [[sample_labels[sel_ind], *box]]), 0)
@@ -1173,24 +1166,36 @@ def pastein(image, labels, sample_labels, sample_images, sample_masks):
 
 class Albumentations:
     """Data augmentation with Albumentations library"""
-    def __init__(self, hyp=None):
+    def __init__(self, hyp=None, rect = True):
         self.transform = None
         import albumentations as A
         self.transform = A.Compose([
-            A.CLAHE(p=hyp['CLAHE'], clip_limit=hyp['CLAHE_clip_limit'], tile_grid_size=(32,32)),
-            A.RandomBrightnessContrast(brightness_limit=hyp['brightness_limit'], contrast_limit=hyp['contrast_limit'], p=hyp['RandomBrightnessContrast']),
-            A.MedianBlur(p=hyp['MedianBlur'], blur_limit=hyp['MedianBlur_blur_limit']),
+            A.CLAHE(p=hyp['CLAHE'], 
+                    clip_limit=hyp['CLAHE_clip_limit'], 
+                    tile_grid_size=(32,32)),
+            A.RandomBrightnessContrast(brightness_limit=hyp['brightness_limit'], 
+                                       contrast_limit=hyp['contrast_limit'], 
+                                       p=hyp['RandomBrightnessContrast'], 
+                                       brightness_by_max=hyp['brightness_by_max']),
+            A.MedianBlur(p=hyp['MedianBlur'], 
+                         blur_limit=hyp['MedianBlur_blur_limit']),
             A.ToGray(p=hyp['toGray']),
-            A.ImageCompression(quality_lower=hyp['ImageCompression_quality_lower'], quality_upper=100, p=hyp['ImageCompression']),
+            A.ImageCompression(quality_lower=hyp['ImageCompression_quality_lower'], 
+                               quality_upper=100, p=hyp['ImageCompression']),
             A.ISONoise(p=hyp['ISONoise']),
-            A.RandomRotate90(p=hyp['RandomRotate90']),
-            A.HueSaturationValue(hue_shift_limit=hyp['HueSaturationValue_hue_shift_limit'], sat_shift_limit=hyp['HueSaturationValue_sat_shift_limit'], val_shift_limit=hyp['HueSaturationValue_val_shift_limit'], p=hyp['HueSaturationValue']),
+            A.RandomRotate90(p=hyp['RandomRotate90'] if rect is False else 0),
+            A.HueSaturationValue(hue_shift_limit=hyp['HueSaturationValue_hue_shift_limit'],
+                                 sat_shift_limit=hyp['HueSaturationValue_sat_shift_limit'], 
+                                 val_shift_limit=hyp['HueSaturationValue_val_shift_limit'], 
+                                 p=hyp['HueSaturationValue']),
             A.HorizontalFlip(p=hyp['HorizontalFlip']),
             A.VerticalFlip(p=hyp['VerticalFlip']),
             A.ChannelDropout(p=hyp['ChannelDropout']),
-            A.Cutout(p=hyp['Cutout'],max_h_size=hyp['Cutout_max_h_w_size'],max_w_size=hyp['Cutout_max_h_w_size'],num_holes=hyp['Cutout_num_holes']),
-            A.PixelDropout(p=hyp['PixelDropout'])
-            ],
+            # A.Cutout(p=hyp['Cutout'],
+            #          max_h_size=hyp['Cutout_max_h_w_size'],
+            #          max_w_size=hyp['Cutout_max_h_w_size'],
+            #          num_holes=hyp['Cutout_num_holes']),
+            A.PixelDropout(p=hyp['PixelDropout'])],
             
             bbox_params=A.BboxParams(format='pascal_voc', label_fields=['class_labels']))
         logging.info(colorstr('albumentations: ') + ', '.join(f'{x}' for x in self.transform.transforms if x.p))
