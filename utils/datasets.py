@@ -11,13 +11,13 @@ from itertools import repeat
 from multiprocessing.pool import ThreadPool
 from pathlib import Path
 from threading import Thread
+from torch.utils.data import DataLoader, Dataset, dataloader, distributed
 
 import cv2
 import numpy as np
 import torch
 import torch.nn.functional as F
 from PIL import Image, ExifTags
-from torch.utils.data import Dataset
 from tqdm import tqdm
 import psutil
 #from pycocotools import mask as maskUtils
@@ -32,7 +32,7 @@ help_url = 'https://github.com/ultralytics/yolov5/wiki/Train-Custom-Data'
 img_formats = ['bmp', 'jpg', 'jpeg', 'png', 'tif', 'tiff', 'dng', 'webp', 'mpo', 'pfm']  # acceptable image suffixes
 vid_formats = ['asf','mov', 'avi', 'mp4', 'mpg', 'mpeg', 'm4v', 'wmv', 'mkv', 'gif']  # acceptable video suffixes
 logger = logging.getLogger(__name__)
-
+RANK = int(os.getenv('RANK', -1))
 # Get orientation exif tag
 for orientation in ExifTags.TAGS.keys():
     if ExifTags.TAGS[orientation] == 'Orientation':
@@ -52,11 +52,19 @@ def exif_size(img):
         if rotation in [6, 8]:  # rotation 270 or 90
             s = (s[1], s[0])
     return s
-
+def seed_worker(worker_id):
+    # Set dataloader worker seed https://pytorch.org/docs/stable/notes/randomness.html#dataloader
+    worker_seed = torch.initial_seed() % 2 ** 32
+    np.random.seed(worker_seed)
+    random.seed(worker_seed)
+    
 
 def create_dataloader(path, imgsz, batch_size, stride, opt, hyp=None, augment=False, cache='', pad=0.0, rect=False,
-                      rank=-1, world_size=1, workers=8, image_weights=False, quad=False, prefix=''):
+                      rank=-1, world_size=1, workers=8, image_weights=False, quad=False, prefix='', shuffle = True, seed = 0):
     # Make sure only the first process in DDP process the dataset first, and the following others can use the cache
+    if rect and shuffle:
+        print('WARNING ⚠️ --rect is incompatible with DataLoader shuffle, setting shuffle=False')
+        shuffle = False
     with torch_distributed_zero_first(rank):
         dataset = LoadImagesAndLabels(path, imgsz, batch_size,
                                       augment=augment,  # augment images
@@ -70,20 +78,26 @@ def create_dataloader(path, imgsz, batch_size, stride, opt, hyp=None, augment=Fa
                                       prefix=prefix)
 
     batch_size = min(batch_size, len(dataset))
-    nw = min([os.cpu_count() // world_size, batch_size if batch_size > 1 else 0, workers])  # number of workers
-    sampler = torch.utils.data.distributed.DistributedSampler(dataset) if rank != -1 else None
-    loader = torch.utils.data.DataLoader if image_weights else InfiniteDataLoader
-    # Use torch.utils.data.DataLoader() if dataset.properties will update during training else InfiniteDataLoader()
+    nd = torch.cuda.device_count()
+    nw = min([os.cpu_count() // max(1,nd), batch_size if batch_size > 1 else 0, workers])  # number of workers
+    sampler = distributed.DistributedSampler(dataset, shuffle=shuffle) if rank != -1 else None
+    loader = DataLoader if image_weights else InfiniteDataLoader
+    generator = torch.Generator()
+    generator.manual_seed(6148914691236517205 + seed + RANK)
     dataloader = loader(dataset,
                         batch_size=batch_size,
                         num_workers=nw,
                         sampler=sampler,
                         pin_memory=True,
-                        collate_fn=LoadImagesAndLabels.collate_fn4 if quad else LoadImagesAndLabels.collate_fn)
+                        shuffle=shuffle and sampler is None,
+                        worker_init_fn=seed_worker,
+                        collate_fn= LoadImagesAndLabels.collate_fn4 if quad else LoadImagesAndLabels.collate_fn,
+                        generator=generator)
+    
     return dataloader, dataset
 
 
-class InfiniteDataLoader(torch.utils.data.dataloader.DataLoader):
+class InfiniteDataLoader(dataloader.DataLoader):
     """ Dataloader that reuses workers
 
     Uses same syntax as vanilla DataLoader
@@ -637,7 +651,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
 def load_image(self, index):
     img = self.imgs[index]
     imgnpy = self.img_npy[index]
-    if not img and not os.path.exists(imgnpy):
+    if not img and not os.path.exists(imgnpy if isinstance(imgnpy, str) else 'imgnpy.npy'):
         path = self.img_files[index]
         img = cv2.imread(path)
         assert img is not None, 'Image Not Found ' + path

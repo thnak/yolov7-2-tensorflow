@@ -271,7 +271,7 @@ def train(hyp, opt, device, tb_writer=None, evo_num=[0, 0]):
     # Trainloader
     dataloader, dataset = create_dataloader(train_path, imgsz, batch_size, gs, opt,
                                             hyp=hyp, augment=opt.augment, cache=opt.cache_images, rect=opt.rect, rank=rank,
-                                            world_size=opt.world_size, workers=opt.workers,
+                                            world_size=opt.world_size, workers=opt.workers,shuffle= not opt.rect,seed=opt.seed,
                                             image_weights=opt.image_weights, quad=opt.quad, prefix=colorstr('train: '))
     mlc = np.concatenate(dataset.labels, 0)[:, 0].max()  # max label class
     nb = len(dataloader)  # number of batches
@@ -281,7 +281,8 @@ def train(hyp, opt, device, tb_writer=None, evo_num=[0, 0]):
     # Process 0
     if rank in [-1, 0]:
         testloader = create_dataloader(test_path, imgsz_test, batch_size * 2, gs, opt,  # testloader
-                                       hyp=hyp, cache= opt.cache_images if (opt.cache_images and not opt.notest) else '', rect=opt.rect, rank=-1,
+                                       hyp=hyp, cache= opt.cache_images if (opt.cache_images and not opt.notest) else '', rect=False,
+                                       rank=-1,
                                        world_size=opt.world_size, workers=opt.workers*2,
                                        pad=0.5, prefix=colorstr('val: '))[0]
 
@@ -624,6 +625,7 @@ if __name__ == '__main__':
     parser.add_argument('--artifact_alias', type=str, default="latest", help='version of dataset artifact to be used')
     parser.add_argument('--freeze', nargs='+', type=int, default=[0], help='Freeze layers: backbone of yolov7=50, first3=0 1 2')
     parser.add_argument('--v5-metric', action='store_true', help='assume maximum recall as 1.0 in AP calculation')
+    parser.add_argument('--seed', type=int, default=0, help='Global training seed')
     opt = parser.parse_args()
 
     # Set DDP variables
