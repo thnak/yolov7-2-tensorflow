@@ -1034,6 +1034,7 @@ class TensorRT_Engine(object):
         self.context = engine.create_execution_context()
         self.inputs, self.outputs, self.bindings = [], [], []
         self.stream = self.cuda.Stream()
+        
         for binding in engine:
             size = self.trt.volume(engine.get_binding_shape(binding))
             dtype = self.trt.nptype(engine.get_binding_dtype(binding))

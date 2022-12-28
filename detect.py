@@ -192,7 +192,6 @@ def detectTensorRT(tensorrtEngine,opt=None,save=''):
                 ret = cv2.imwrite(pa,img)
                 print(f'saved as {pa}, ret: {ret}, exit: {os.path.exists(pa)}')
             else:
-                
                 pass
     del pred, dataset
     if view_img > -1:
@@ -249,16 +248,17 @@ if __name__ == '__main__':
                                 iouThres=opt.iou_thres,device=device)
             imgsz = model.imgsz         
             if webcam:
-                dataset = LoadStreams(opt.source, img_size=imgsz, auto=False)
+                dataset = LoadStreams(opt.source, img_size=max(imgsz), auto=False)
             else:
-                dataset = LoadImages(opt.source, img_size=imgsz, auto=False)
+                dataset = LoadImages(opt.source, img_size=max(imgsz), auto=False)
                 
-            names = model.names
+            names, vid_path = model.names, None
+            
             prefix = colorstr('ONNX_Engine')
             print(f'{prefix}: {vars(model)}\n')
             BFC = BackgroundForegroundColors(hyp='./mydataset.yaml')
             half = device.type != 'cpu'
-            seen, hide_conf, hide_labels, avgSpeed = 0 , False, False, []
+            seen, hide_conf, hide_labels, avgSpeed = 0 , False, True, []
             for path, img, im0s, vid_cap, s in dataset:
                 model.warmup()
                 t1 = time.time()
@@ -309,8 +309,25 @@ if __name__ == '__main__':
                             print(colorstr(f'User keyboard interupt, exiting...'))
                             exit()
                     if not opt.nosave:
-                        pass
-            del model, dataset
+                        if dataset.mode == 'image':
+                            pass
+                        else:
+                            if vid_path != save_path:
+                                vid_path = save_path
+                                if vid_cap:
+                                    fps = vid_cap.get(cv2.CAP_PROP_FPS)
+                                    w = vid_cap.get(cv2.CAP_PROP_FRAME_WIDTH)
+                                    h = vid_cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
+                                else:
+                                    fps = 30
+                                    h, w = im0.shape[:2]
+                                ffmpeg = FFMPEG_recorder(savePath=vid_path, videoDimensions=(int(w),int(h)), fps=fps)
+                            ffmpeg.writeFrame(image=im0)
+                            ffmpeg.writeSubtitle(title=s,fps=fps)
+                        
+            ffmpeg.stopRecorder()
+            ffmpeg.addSubtitle()
+            del model, dataset, ffmpeg
             cv2.destroyAllWindows()
             print(f'Finished. avg: {round((sum(avgSpeed) / len(avgSpeed))*1000,3)}ms')
                 

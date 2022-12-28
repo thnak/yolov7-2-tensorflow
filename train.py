@@ -34,7 +34,7 @@ from utils.loss import ComputeLoss, ComputeLossOTA
 from utils.plots import plot_images, plot_labels, plot_results, plot_evolution
 from utils.torch_utils import ModelEMA, select_device, intersect_dicts, torch_distributed_zero_first, is_parallel
 from utils.wandb_logging.wandb_utils import WandbLogger, check_wandb_resume
-
+from utils.autobatch import check_train_batch_size
 import utils.Reparameteration as Reparameteration
 
 logger = logging.getLogger(__name__)
@@ -293,6 +293,7 @@ def train(hyp, opt, device, tb_writer=None, evo_num=[0, 0]):
                                        hyp=hyp, 
                                        cache= opt.cache_images if (opt.cache_images and not opt.notest) else '', 
                                        rect=True,
+                                       shuffle=False,
                                        rank=-1,
                                        world_size=opt.world_size, 
                                        workers=opt.workers*2,

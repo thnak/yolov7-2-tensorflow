@@ -2,4 +2,5 @@ model-tiny-640-: False
 model-640: False
 model-tiny-1280: False
 model-1280: False
-fix rectangle training
+fix rectangle training ✅
+auto batch not available for now

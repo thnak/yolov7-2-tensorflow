@@ -31,7 +31,7 @@ class FFMPEG_recorder():
         Args:
             savePath (__str__, optional): _description_. Defaults to None.
             codec (_str_, optional): _description_. Defaults to None.
-            videoDimensions (tuple, optional): _description_. Defaults to (720,1280).
+            videoDimensions (tuple, optional): _description_. Defaults to (1280, 720).
             fps (int, optional): _description_. Defaults to 30FPS.
         """
         self.savePath = savePath
@@ -92,9 +92,9 @@ class FFMPEG_recorder():
             f.write(self.subtitleContent)
         
         if hardSubtitle:
-            process = subprocess.run(f"ffmpeg -hide_banner -i {self.savePath} -vf subtitles='{subfile}' {save}") #error
+            process = subprocess.run(f"ffmpeg -hide_banner -i {self.savePath} -c:v copy -vf subtitles='{subfile}' {save}") #error
         else:
-            process = subprocess.run(f"ffmpeg -hide_banner -i {self.savePath} -i {subfile} -c copy -c:s mov_text -metadata:s:s:0 language=eng {save}")
+            process = subprocess.run(f"ffmpeg -hide_banner -i {self.savePath} -i {subfile} -c:v copy -c:s mov_text -metadata:s:s:0 language=eng {save}")
         
     def addAudio(self):
         pass

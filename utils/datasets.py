@@ -468,10 +468,11 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
     
     def check_cache_ram(self, prefix='',safety_margin=1):
         b, gb = 0, 1 << 30
-        for _ in range(self.n):
+        for _ in range(int(self.n / 10)):
             im = cv2.imread(self.img_files[_])  # sample image
             ratio = self.img_size / max(im.shape[0], im.shape[1])  # max(h, w)  # ratio
             b += im.nbytes * ratio ** 2
+        b *= 10
         mem = psutil.virtual_memory()
         cache = True if b < mem.available*safety_margin else False  # to cache or not to cache, that is the question
         print(f"{prefix}{b / gb:.3f}GB RAM required (estimate), "
@@ -652,8 +653,9 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
 # Ancillary functions --------------------------------------------------------------------------------------------------
 def load_image(self, index):
     img = self.imgs[index]
-    imgnpy = self.img_npy[index]
-    if not img and not os.path.exists(imgnpy if isinstance(imgnpy, str) else 'imgnpy.npy'):
+    imgnpy = self.img_npy[index] 
+    imgnpy = imgnpy if isinstance(imgnpy, str) else 'imgnpy.npy'
+    if img is None and os.path.exists(imgnpy) == False:
         path = self.img_files[index]
         img = cv2.imread(path)
         assert img is not None, 'Image Not Found ' + path
@@ -663,9 +665,9 @@ def load_image(self, index):
             interp = cv2.INTER_AREA if r < 1 else cv2.INTER_CUBIC
             img = cv2.resize(img, (int(w0 * r), int(h0 * r)), interpolation=interp)
         return img, (h0, w0), img.shape[:2]
-    elif img:
+    elif img is not None:
         return self.imgs[index], self.img_hw0[index], self.img_hw[index]
-    elif os.path.exists(imgnpy):
+    elif os.path.exists(imgnpy) == True:
         img = np.load(imgnpy,mmap_mode='r')
         return img, img.shape[:2], img.shape[:2]
 
@@ -1117,7 +1119,6 @@ def cutout(image, labels):
     
 
 def pastein(image, labels, sample_labels, sample_images, sample_masks):
-    # Applies image cutout augmentation https://arxiv.org/abs/1708.04552
     h, w = image.shape[:2]
 
     # create random masks
