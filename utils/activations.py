@@ -112,3 +112,20 @@ class MetaAconC(nn.Module):
         beta = torch.sigmoid(self.fc2(self.fc1(y)))  # bug patch BN layers removed
         dpx = (self.p1 - self.p2) * x
         return dpx * torch.sigmoid(beta * dpx) + self.p2 * x
+
+# Advanced activation function
+
+class Mish_PLUS(nn.Module):
+    # https://www.scirp.org/journal/paperinformation.aspx?paperid=114024
+    def forward(x):
+        M = x*F.softplus(x).tanh()
+        return x*torch.tanh(M)
+    
+class Sigmoid_Tanh(nn.Module):
+    # https://www.scirp.org/journal/paperinformation.aspx?paperid=114024
+    def __init__(self):
+        super().__init__()
+        self.s = nn.Sigmoid()
+        self.t = nn.Tanh()
+    def forward(self,x):
+        return self.s(x) * self.t(x)

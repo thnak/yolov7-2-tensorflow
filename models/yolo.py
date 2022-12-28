@@ -774,6 +774,7 @@ class ONNX_Engine(object):
         self.half = True if device.type != 'cpu' else False
         self.device = device
         import onnxruntime as onnxrt    
+        
            
         self.GB = maxWorkSpace
         self.runTime = onnxrt
@@ -787,7 +788,6 @@ class ONNX_Engine(object):
             exit()
         else:
             pass
-            
         self.providers = [
             ('TensorrtExecutionProvider',
              {  
@@ -808,11 +808,12 @@ class ONNX_Engine(object):
         
         session_opt = self.runTime.SessionOptions()
         session_opt.enable_profiling = False
+        session_opt.enable_mem_pattern = False if 'DmlExecutionProvider' in self.providers else True
         session_opt.graph_optimization_level  = self.runTime.GraphOptimizationLevel.ORT_ENABLE_ALL
-        session_opt.optimized_model_filepath = ONNX_EnginePath.replace('.onnx', '2.onnx')
+        # session_opt.optimized_model_filepath = ONNX_EnginePath.replace('.onnx', '2.onnx')
         
         session_opt.execution_mode = self.runTime.ExecutionMode.ORT_SEQUENTIAL
-        self.session = self.runTime.InferenceSession(ONNX_EnginePath, sess_options=session_opt, provider_options=self.providers)
+        self.session = self.runTime.InferenceSession(ONNX_EnginePath, sess_options=session_opt, providers=self.providers)
         self.imgsz = self.session.get_inputs()[0].shape[2:]
         self.imgsz = self.imgsz if isinstance(self.imgsz[0], int) else [640, 640]
         self.output_names = [x.name for x in self.session.get_outputs()]
