@@ -29,9 +29,14 @@ from tensorflow import keras
 import logging
 import inspect
 from typing import Optional
-from models.common import C3, SPP, SPPF, Bottleneck, BottleneckCSP,SP, C3x, Concat, Conv, CrossConv, DWConv, DWConvTranspose2d, Focus, autopad, MP
+from models.common import C3, SPP, SPPF, Bottleneck, BottleneckCSP,SP, C3x, Concat, Conv, CrossConv, DWConv, DWConvTranspose2d, Focus, autopad, MP, Shortcut,\
+                        Chuncat, Foldcut,ReOrg, Expand, Contract
 from models.experimental import MixConv2d, attempt_load
-from models.yolo import Detect, Segment, IDetect
+from models.yolo import Detect, Segment, IDetect,  RobustConv, RobustConv2, GhostConv, RepConv, RepConv_OREPA, DownC, Stem, GhostStem, \
+                        SPPCSPC, GhostSPPCSPC, BottleneckCSPA, BottleneckCSPB, BottleneckCSPC, RepBottleneck, RepBottleneckCSPA, RepBottleneckCSPB, RepBottleneckCSPC, \
+                        Res, ResCSPA, ResCSPB, ResCSPC, RepRes, RepResCSPA, RepResCSPB, RepResCSPC, ResX, ResXCSPA, ResXCSPB, ResXCSPC, \
+                        RepResX, RepResXCSPA, RepResXCSPB, RepResXCSPC, Ghost, GhostCSPA, GhostCSPB, GhostCSPC,SwinTransformerBlock, STCSPA, STCSPB, STCSPC,\
+                        SwinTransformer2Block, ST2CSPA, ST2CSPB, ST2CSPC, IAuxDetect, IBin, IKeypoint
 from utils.activations import SiLU
 from utils.general import  make_divisible, colorstr
 
@@ -50,6 +55,7 @@ def print_args(args: Optional[dict] = None, show_file=True, show_func=False):
     LOGGER.info(colorstr(s) + ', '.join(f'{k}={v}' for k, v in args.items()))
     
 LOGGER = logging.getLogger(__name__)
+
 class TFBN(keras.layers.Layer):
     # TensorFlow BatchNormalization wrapper
     def __init__(self, w=None):
@@ -67,14 +73,14 @@ class TFBN(keras.layers.Layer):
 class TFMP(keras.layers.Layer):
     def __init__(self, k=2, w=None):
         super(TFMP, self).__init__()
-        self.m = [keras.layers.MaxPool2D(pool_size=k, strides=k)]
+        self.m = keras.layers.MaxPool2D(pool_size=k, strides=k)
     def forward(self, x):
         return self.m(x)
 
 class TFSP(keras.layers.Layer):
     def __init__(self, k=3, s=1, w=None):
         super(TFSP, self).__init__()
-        self.m = [keras.layers.MaxPool2D(pool_size=k, strides=s, padding='SAME')]
+        self.m = keras.layers.MaxPool2D(pool_size=k, strides=s, padding='SAME')
 
     def forward(self, x):
         return self.m(x)
@@ -178,8 +184,6 @@ class TFIDetect(nn.Module):
         box @= convert_matrix                          
         return (box, score)
 
-
-
 class TFPad(keras.layers.Layer):
     # Pad inputs in spatial dimensions 1 and 2
     def __init__(self, pad):
@@ -193,9 +197,13 @@ class TFPad(keras.layers.Layer):
         return tf.pad(inputs, self.pad, mode='constant', constant_values=0)
 
 class TFConv(keras.layers.Layer):
-    """Standard TFconvolution"""
-    def __init__(self, c1, c2, k=1, s=1, p=None, g=1, act=True, w=None):  # ch_in, ch_out, kernel, stride, padding, groups
-        super(TFConv, self).__init__()
+    # Standard convolution
+    def __init__(self, c1, c2, k=1, s=1, p=None, g=1, act=True, w=None):
+        # ch_in, ch_out, weights, kernel, stride, padding, groups
+        super().__init__()
+        assert g == 1, "TF v2.2 Conv2D does not support 'groups' argument"
+        # TensorFlow convolution padding is inconsistent with PyTorch (e.g. k=3 s=2 'SAME' padding)
+        # see https://stackoverflow.com/questions/52975843/comparing-conv2d-with-padding-between-tensorflow-and-pytorch
         conv = keras.layers.Conv2D(
             filters=c2,
             kernel_size=k,
@@ -204,40 +212,12 @@ class TFConv(keras.layers.Layer):
             use_bias=not hasattr(w, 'bn'),
             kernel_initializer=keras.initializers.Constant(w.conv.weight.permute(2, 3, 1, 0).detach().numpy()),
             bias_initializer='zeros' if hasattr(w, 'bn') else keras.initializers.Constant(w.conv.bias.detach().numpy()))
-        
         self.conv = conv if s == 1 else keras.Sequential([TFPad(autopad(k, p)), conv])
         self.bn = TFBN(w.bn) if hasattr(w, 'bn') else tf.identity
         self.act = activations(w.act) if act else tf.identity
 
-    def forward(self, x):
-        return self.act(self.bn(self.conv(x)))
-
-    def fuseforward(self, x):
-        return self.act(self.conv(x))
-    
-# class TFConv(keras.layers.Layer):
-#     # Standard convolution
-#     def __init__(self, c1, c2, k=1, s=1, p=None, g=1, act=True, w=None):
-#         # ch_in, ch_out, weights, kernel, stride, padding, groups
-#         super().__init__()
-#         assert g == 1, "TF v2.2 Conv2D does not support 'groups' argument"
-#         # TensorFlow convolution padding is inconsistent with PyTorch (e.g. k=3 s=2 'SAME' padding)
-#         # see https://stackoverflow.com/questions/52975843/comparing-conv2d-with-padding-between-tensorflow-and-pytorch
-#         conv = keras.layers.Conv2D(
-#             filters=c2,
-#             kernel_size=k,
-#             strides=s,
-#             padding='SAME' if s == 1 else 'VALID',
-#             use_bias=not hasattr(w, 'bn'),
-#             kernel_initializer=keras.initializers.Constant(w.conv.weight.permute(2, 3, 1, 0).detach().numpy()),
-#             bias_initializer='zeros' if hasattr(w, 'bn') else keras.initializers.Constant(w.conv.bias.detach().numpy()))
-#         self.conv = conv if s == 1 else keras.Sequential([TFPad(autopad(k, p)), conv])
-#         self.bn = TFBN(w.bn) if hasattr(w, 'bn') else tf.identity
-#         self.act = activations(w.act) if act else tf.identity
-
-    # def call(self, inputs):
-    #     return self.act(self.bn(self.conv(inputs)))
-
+    def call(self, inputs):
+        return self.act(self.bn(self.conv(inputs)))
 
 class TFDWConv(keras.layers.Layer):
     # Depthwise convolution
@@ -520,30 +500,21 @@ class TFUpsample(keras.layers.Layer):
         return self.upsample(inputs)
 
 class TFConcat(keras.layers.Layer):
+    # TF version of torch.concat()
     def __init__(self, dimension=1, w=None):
-        super(TFConcat, self).__init__()
-        self.d = dimension
+        super().__init__()
+        assert dimension == 1, "convert only NCHW to NHWC concat"
+        self.d = 3
 
-    def forward(self, x):
-        return tf.concat(x, self.d)
+    def call(self, inputs):
+        return tf.concat(inputs, self.d)
     
-# class TFConcat(keras.layers.Layer):
-#     # TF version of torch.concat()
-#     def __init__(self, dimension=1, w=None):
-#         super().__init__()
-#         assert dimension == 1, "convert only NCHW to NHWC concat"
-#         self.d = 3
-
-#     def call(self, inputs):
-#         return tf.concat(inputs, self.d)
-
-
 def parse_model(d, ch, model, imgsz):  # model_dict, input_channels(3)
-    LOGGER.info(f"\n{'':>3}{'from':>18}{'n':>3}{'params':>10}  {'module':<40}{'arguments':<30}")
+    LOGGER.info('\n%3s%18s%3s%10s  %-40s%-30s' % ('', 'from', 'n', 'params', 'module', 'arguments'))
     anchors, nc, gd, gw = d['anchors'], d['nc'], d['depth_multiple'], d['width_multiple']
     na = (len(anchors[0]) // 2) if isinstance(anchors, list) else anchors  # number of anchors
     no = na * (nc + 5)  # number of outputs = anchors * (classes + 5)
-    print(f'chanel: {ch}')
+
     layers, save, c2 = [], [], ch[-1]  # layers, savelist, ch out
     for i, (f, n, m, args) in enumerate(d['backbone'] + d['head']):  # from, number, module, args
         m_str = m
@@ -551,56 +522,129 @@ def parse_model(d, ch, model, imgsz):  # model_dict, input_channels(3)
         for j, a in enumerate(args):
             try:
                 args[j] = eval(a) if isinstance(a, str) else a  # eval strings
-            except NameError:
+            except:
                 pass
 
         n = max(round(n * gd), 1) if n > 1 else n  # depth gain
-        if m in [
-                nn.Conv2d, Conv, DWConv, DWConvTranspose2d, Bottleneck, SP, SPP, SPPF, MixConv2d, Focus, CrossConv,
-                BottleneckCSP,C3,C3x, MP]:
-            c1, c2 = ch[f], args[0] if len(args) else 0
-            c2 = make_divisible(c2 * gw, 8) if c2 != no else c2
+        if m in [nn.Conv2d, Conv, RobustConv, RobustConv2, DWConv, GhostConv, RepConv, RepConv_OREPA, DownC, 
+                 SPP, SPPF, SPPCSPC, GhostSPPCSPC, MixConv2d, Focus, Stem, GhostStem, CrossConv, 
+                 Bottleneck, BottleneckCSPA, BottleneckCSPB, BottleneckCSPC, 
+                 RepBottleneck, RepBottleneckCSPA, RepBottleneckCSPB, RepBottleneckCSPC,  
+                 Res, ResCSPA, ResCSPB, ResCSPC, 
+                 RepRes, RepResCSPA, RepResCSPB, RepResCSPC, 
+                 ResX, ResXCSPA, ResXCSPB, ResXCSPC, 
+                 RepResX, RepResXCSPA, RepResXCSPB, RepResXCSPC, 
+                 Ghost, GhostCSPA, GhostCSPB, GhostCSPC,
+                 SwinTransformerBlock, STCSPA, STCSPB, STCSPC,
+                 SwinTransformer2Block, ST2CSPA, ST2CSPB, ST2CSPC, C3]:
+            c1, c2 = ch[f], args[0]
+            if c2 != no:  # if not output
+                c2 = make_divisible(c2 * gw, 8)
 
             args = [c1, c2, *args[1:]]
-            if m in [BottleneckCSP,C3x, C3, MP]:
-                args.insert(2, n)
+            if m in [DownC, SPPCSPC, GhostSPPCSPC, 
+                     BottleneckCSPA, BottleneckCSPB, BottleneckCSPC, 
+                     RepBottleneckCSPA, RepBottleneckCSPB, RepBottleneckCSPC, 
+                     ResCSPA, ResCSPB, ResCSPC, 
+                     RepResCSPA, RepResCSPB, RepResCSPC, 
+                     ResXCSPA, ResXCSPB, ResXCSPC, 
+                     RepResXCSPA, RepResXCSPB, RepResXCSPC,
+                     GhostCSPA, GhostCSPB, GhostCSPC,
+                     STCSPA, STCSPB, STCSPC,
+                     ST2CSPA, ST2CSPB, ST2CSPC]:
+                args.insert(2, n)  # number of repeats
                 n = 1
         elif m is nn.BatchNorm2d:
             args = [ch[f]]
         elif m is Concat:
             c2 = sum(ch[-1 if x == -1 else x + 1] for x in f)
-        elif m in [Detect, IDetect, Segment]:
-            args.append([ch[x + 1] for x in f])
+        elif m is Chuncat:
+            c2 = sum(ch[-1 if x == -1 else x + 1] for x in f)
+        elif m is Shortcut:
+            c2 = ch[f[0]]
+        elif m is Foldcut:
+            c2 = ch[f] // 2
+        elif m in [Detect, IDetect, IAuxDetect, IBin, IKeypoint]:
+            args.append([ch[x] for x in f])
             if isinstance(args[1], int):  # number of anchors
                 args[1] = [list(range(args[1] * 2))] * len(f)
-            if m is Segment:
-                args[3] = make_divisible(args[3] * gw, 8)
             args.append(imgsz)
+        elif m is ReOrg:
+            c2 = ch[f] * 4
+        elif m is Contract:
+            c2 = ch[f] * args[0] ** 2
+        elif m is Expand:
+            c2 = ch[f] // args[0] ** 2
         else:
             c2 = ch[f]
-        
-        xxx = m_str.replace('nn.', '')
-        tf_m = eval(f'TF{xxx}')
-        if m_str in ['MP']:
-            args = args[:2]
-            abc = tf_m(*args)
-        else:
-            abc = tf_m(*args, w=model.model[i])
+        tf_m = eval('TF' + m_str.replace('nn.', ''))
+        m_ = keras.Sequential([tf_m(*args, w=model.model[i][j]) for j in range(n)]) if n > 1 \
+            else tf_m(*args, w=model.model[i])  # module
             
-        m_ = keras.Sequential([tf_m(*args, w=model.model[i][j]) for j in range(n)]) if n > 1 else abc  # module
-        
-        if m_str in ['MP']:
-          torch_m_ = nn.Sequential(*(m(*args) for _ in range(n))) if n > 1 else m()  # module
-        else:
-          torch_m_ = nn.Sequential(*(m(*args) for _ in range(n))) if n > 1 else m(*args)  # module
+        torch_m = nn.Sequential(*[m(*args) for _ in range(n)]) if n > 1 else m(*args)  # module
         t = str(m)[8:-2].replace('__main__.', '')  # module type
-        np = sum(x.numel() for x in torch_m_.parameters())  # number params
+        np = sum([x.numel() for x in torch_m.parameters()])  # number params
         m_.i, m_.f, m_.type, m_.np = i, f, t, np  # attach index, 'from' index, type, number params
-        LOGGER.info(f'{i:>3}{str(f):>18}{str(n):>3}{np:>10}  {t:<40}{str(args):<30}')  # print
+        LOGGER.info('%3s%18s%3s%10.0f  %-40s%-30s' % (i, f, n, np, t, args))  # print
         save.extend(x % i for x in ([f] if isinstance(f, int) else f) if x != -1)  # append to savelist
         layers.append(m_)
         ch.append(c2)
     return keras.Sequential(layers), sorted(save)
+
+# def parse_model(d, ch, model, imgsz):  # model_dict, input_channels(3)
+#     LOGGER.info(f"\n{'':>3}{'from':>18}{'n':>3}{'params':>10}  {'module':<40}{'arguments':<30}")
+#     anchors, nc, gd, gw = d['anchors'], d['nc'], d['depth_multiple'], d['width_multiple']
+#     na = (len(anchors[0]) // 2) if isinstance(anchors, list) else anchors  # number of anchors
+#     no = na * (nc + 5)  # number of outputs = anchors * (classes + 5)
+
+#     layers, save, c2 = [], [], ch[-1]  # layers, savelist, ch out
+#     for i, (f, n, m, args) in enumerate(d['backbone'] + d['head']):  # from, number, module, args
+#         m_str = m
+#         m = eval(m) if isinstance(m, str) else m  # eval strings
+#         for j, a in enumerate(args):
+#             try:
+#                 args[j] = eval(a) if isinstance(a, str) else a  # eval strings
+#             except NameError:
+#                 pass
+
+#         n = max(round(n * gd), 1) if n > 1 else n  # depth gain
+#         if m in [
+#                 nn.Conv2d, Conv, DWConv, DWConvTranspose2d, Bottleneck, SPP, SPPF, MixConv2d, Focus, CrossConv,
+#                 BottleneckCSP, C3, C3x]:
+#             c1, c2 = ch[f], args[0]
+#             c2 = make_divisible(c2 * gw, 8) if c2 != no else c2
+
+#             args = [c1, c2, *args[1:]]
+#             if m in [BottleneckCSP, C3, C3x]:
+#                 args.insert(2, n)
+#                 n = 1
+#         elif m is nn.BatchNorm2d:
+#             args = [ch[f]]
+#         elif m is Concat:
+#             c2 = sum(ch[-1 if x == -1 else x + 1] for x in f)
+#         elif m in [Detect, Segment]:
+#             args.append([ch[x + 1] for x in f])
+#             if isinstance(args[1], int):  # number of anchors
+#                 args[1] = [list(range(args[1] * 2))] * len(f)
+#             if m is Segment:
+#                 args[3] = make_divisible(args[3] * gw, 8)
+#             args.append(imgsz)
+#         else:
+#             c2 = ch[f]
+
+#         tf_m = eval('TF' + m_str.replace('nn.', ''))
+#         m_ = keras.Sequential([tf_m(*args, w=model.model[i][j]) for j in range(n)]) if n > 1 else tf_m(*args, w=model.model[i])  # module
+
+#         torch_m_ = nn.Sequential(*(m(*args) for _ in range(n))) if n > 1 else m(*args)  # module
+#         t = str(m)[8:-2].replace('__main__.', '')  # module type
+#         np = sum(x.numel() for x in torch_m_.parameters())  # number params
+#         m_.i, m_.f, m_.type, m_.np = i, f, t, np  # attach index, 'from' index, type, number params
+#         LOGGER.info(f'{i:>3}{str(f):>18}{str(n):>3}{np:>10}  {t:<40}{str(args):<30}')  # print
+#         save.extend(x % i for x in ([f] if isinstance(f, int) else f) if x != -1)  # append to savelist
+#         layers.append(m_)
+#         ch.append(c2)
+#     return keras.Sequential(layers), sorted(save)
+
 
 
 class TFModel:
