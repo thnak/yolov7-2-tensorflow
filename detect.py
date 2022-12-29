@@ -333,3 +333,5 @@ if __name__ == '__main__':
                 
         elif file_extention in ['.trt', '.engine']:
             detectTensorRT(_,opt, save=save_dir)
+        elif file_extention in ['.tflite']:
+            pass

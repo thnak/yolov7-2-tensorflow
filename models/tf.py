@@ -112,7 +112,7 @@ class TFIDetect(nn.Module):
     concat = False
     dynamic = False #https://github.com/WongKinYiu/yolov7/pull/1270
     
-    def __init__(self, nc=80, anchors=(), ch=()):  # detection layer
+    def __init__(self, nc=80, anchors=(), ch=(), imgsz=(640, 640), w=None):  # detection layer
         super().__init__()
         self.nc = nc  # number of classes
         self.no = nc + 5  # number of outputs per anchor
@@ -192,29 +192,51 @@ class TFPad(keras.layers.Layer):
     def call(self, inputs):
         return tf.pad(inputs, self.pad, mode='constant', constant_values=0)
 
-
 class TFConv(keras.layers.Layer):
-    # Standard convolution
-    def __init__(self, c1, c2, k=1, s=1, p=None, g=1, act=True, w=None):
-        # ch_in, ch_out, weights, kernel, stride, padding, groups
-        super().__init__()
-        assert g == 1, "TF v2.2 Conv2D does not support 'groups' argument"
-        # TensorFlow convolution padding is inconsistent with PyTorch (e.g. k=3 s=2 'SAME' padding)
-        # see https://stackoverflow.com/questions/52975843/comparing-conv2d-with-padding-between-tensorflow-and-pytorch
+    """Standard TFconvolution"""
+    def __init__(self, c1, c2, k=1, s=1, p=None, g=1, act=True, w=None):  # ch_in, ch_out, kernel, stride, padding, groups
+        super(TFConv, self).__init__()
         conv = keras.layers.Conv2D(
             filters=c2,
             kernel_size=k,
             strides=s,
             padding='SAME' if s == 1 else 'VALID',
             use_bias=not hasattr(w, 'bn'),
-            kernel_initializer=keras.initializers.Constant(w.conv.weight.permute(2, 3, 1, 0).numpy()),
-            bias_initializer='zeros' if hasattr(w, 'bn') else keras.initializers.Constant(w.conv.bias.numpy()))
+            kernel_initializer=keras.initializers.Constant(w.conv.weight.permute(2, 3, 1, 0).detach().numpy()),
+            bias_initializer='zeros' if hasattr(w, 'bn') else keras.initializers.Constant(w.conv.bias.detach().numpy()))
+        
         self.conv = conv if s == 1 else keras.Sequential([TFPad(autopad(k, p)), conv])
         self.bn = TFBN(w.bn) if hasattr(w, 'bn') else tf.identity
         self.act = activations(w.act) if act else tf.identity
 
-    def call(self, inputs):
-        return self.act(self.bn(self.conv(inputs)))
+    def forward(self, x):
+        return self.act(self.bn(self.conv(x)))
+
+    def fuseforward(self, x):
+        return self.act(self.conv(x))
+    
+# class TFConv(keras.layers.Layer):
+#     # Standard convolution
+#     def __init__(self, c1, c2, k=1, s=1, p=None, g=1, act=True, w=None):
+#         # ch_in, ch_out, weights, kernel, stride, padding, groups
+#         super().__init__()
+#         assert g == 1, "TF v2.2 Conv2D does not support 'groups' argument"
+#         # TensorFlow convolution padding is inconsistent with PyTorch (e.g. k=3 s=2 'SAME' padding)
+#         # see https://stackoverflow.com/questions/52975843/comparing-conv2d-with-padding-between-tensorflow-and-pytorch
+#         conv = keras.layers.Conv2D(
+#             filters=c2,
+#             kernel_size=k,
+#             strides=s,
+#             padding='SAME' if s == 1 else 'VALID',
+#             use_bias=not hasattr(w, 'bn'),
+#             kernel_initializer=keras.initializers.Constant(w.conv.weight.permute(2, 3, 1, 0).detach().numpy()),
+#             bias_initializer='zeros' if hasattr(w, 'bn') else keras.initializers.Constant(w.conv.bias.detach().numpy()))
+#         self.conv = conv if s == 1 else keras.Sequential([TFPad(autopad(k, p)), conv])
+#         self.bn = TFBN(w.bn) if hasattr(w, 'bn') else tf.identity
+#         self.act = activations(w.act) if act else tf.identity
+
+    # def call(self, inputs):
+    #     return self.act(self.bn(self.conv(inputs)))
 
 
 class TFDWConv(keras.layers.Layer):
@@ -312,8 +334,8 @@ class TFConv2d(keras.layers.Layer):
                                         padding='VALID',
                                         use_bias=bias,
                                         kernel_initializer=keras.initializers.Constant(
-                                            w.weight.permute(2, 3, 1, 0).numpy()),
-                                        bias_initializer=keras.initializers.Constant(w.bias.numpy()) if bias else None)
+                                            w.weight.permute(2, 3, 1, 0).detach().numpy()),
+                                        bias_initializer=keras.initializers.Constant(w.bias.detach().numpy()) if bias else None)
 
     def call(self, inputs):
         return self.conv(inputs)
@@ -497,16 +519,23 @@ class TFUpsample(keras.layers.Layer):
     def call(self, inputs):
         return self.upsample(inputs)
 
-
 class TFConcat(keras.layers.Layer):
-    # TF version of torch.concat()
     def __init__(self, dimension=1, w=None):
-        super().__init__()
-        assert dimension == 1, "convert only NCHW to NHWC concat"
-        self.d = 3
+        super(TFConcat, self).__init__()
+        self.d = dimension
 
-    def call(self, inputs):
-        return tf.concat(inputs, self.d)
+    def forward(self, x):
+        return tf.concat(x, self.d)
+    
+# class TFConcat(keras.layers.Layer):
+#     # TF version of torch.concat()
+#     def __init__(self, dimension=1, w=None):
+#         super().__init__()
+#         assert dimension == 1, "convert only NCHW to NHWC concat"
+#         self.d = 3
+
+#     def call(self, inputs):
+#         return tf.concat(inputs, self.d)
 
 
 def parse_model(d, ch, model, imgsz):  # model_dict, input_channels(3)
@@ -552,14 +581,15 @@ def parse_model(d, ch, model, imgsz):  # model_dict, input_channels(3)
         
         xxx = m_str.replace('nn.', '')
         tf_m = eval(f'TF{xxx}')
-        if m_str == 'MP' or m_str == 'IDetect':
+        if m_str in ['MP']:
             args = args[:2]
             abc = tf_m(*args)
         else:
             abc = tf_m(*args, w=model.model[i])
             
         m_ = keras.Sequential([tf_m(*args, w=model.model[i][j]) for j in range(n)]) if n > 1 else abc  # module
-        if m_str == 'MP':
+        
+        if m_str in ['MP']:
           torch_m_ = nn.Sequential(*(m(*args) for _ in range(n))) if n > 1 else m()  # module
         else:
           torch_m_ = nn.Sequential(*(m(*args) for _ in range(n))) if n > 1 else m(*args)  # module
