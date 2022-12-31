@@ -258,16 +258,17 @@ if __name__ == '__main__':
             print(f'{prefix}: {vars(model)}\n')
             BFC = BackgroundForegroundColors(hyp='./mydataset.yaml')
             half = device.type != 'cpu'
-            seen, hide_conf, hide_labels, avgSpeed = 0 , False, True, []
+            seen, hide_conf, hide_labels, avgSpeed, end2end = 0 , False, False, [], False
             for path, img, im0s, vid_cap, s in dataset:
                 model.warmup()
                 t1 = time.time()
-                pred, img = model.infer(img)
+                pred, img = model.infer(img, end2end=end2end)                    
                 t2 = time.time() - t1
                 avgSpeed.append(t2)
                 img_h, img_w = img.shape[2:]
                 
                 for i, det in enumerate(pred):
+
                     seen += 1
                     if webcam:
                         p, s,  im0, frame = path[i], '%g: ' % i, im0s[i].copy(), dataset.count
@@ -322,12 +323,14 @@ if __name__ == '__main__':
                                     fps = 30
                                     h, w = im0.shape[:2]
                                 ffmpeg = FFMPEG_recorder(savePath=vid_path, videoDimensions=(int(w),int(h)), fps=fps)
+                                
                             ffmpeg.writeFrame(image=im0)
                             ffmpeg.writeSubtitle(title=s,fps=fps)
-                        
-            ffmpeg.stopRecorder()
-            ffmpeg.addSubtitle()
-            del model, dataset, ffmpeg
+            if not opt.nosave and dataset.mode != 'image':          
+                ffmpeg.stopRecorder()
+                ffmpeg.addSubtitle()
+                del ffmpeg
+            del model, dataset
             cv2.destroyAllWindows()
             print(f'Finished. avg: {round((sum(avgSpeed) / len(avgSpeed))*1000,3)}ms')
                 

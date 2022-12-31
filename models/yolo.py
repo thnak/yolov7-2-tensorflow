@@ -810,13 +810,14 @@ class ONNX_Engine(object):
         session_opt.enable_profiling = False
         session_opt.enable_mem_pattern = False if 'DmlExecutionProvider' in self.providers else True
         session_opt.graph_optimization_level  = self.runTime.GraphOptimizationLevel.ORT_ENABLE_ALL
-        # session_opt.optimized_model_filepath = ONNX_EnginePath.replace('.onnx', '2.onnx')
+        # session_opt.optimized_model_filepath = ONNX_EnginePath.replace('.onnx', '.onnx')
         
         session_opt.execution_mode = self.runTime.ExecutionMode.ORT_SEQUENTIAL
         self.session = self.runTime.InferenceSession(ONNX_EnginePath, sess_options=session_opt, providers=self.providers)
         self.imgsz = self.session.get_inputs()[0].shape[2:]
         self.imgsz = self.imgsz if isinstance(self.imgsz[0], int) else [640, 640]
         self.output_names = [x.name for x in self.session.get_outputs()]
+        self.input_names = [i. name for i in self.session.get_inputs()]
         meta = self.session.get_modelmeta().custom_metadata_map
         if 'stride' in meta:
             self.stride, self.names = int(meta['stride']), eval(meta['names'])
@@ -830,7 +831,7 @@ class ONNX_Engine(object):
             self.nc = 999
             self.names = [f'object {i}' for i in range(self.nc)]
         
-    def infer(self, im):
+    def infer(self, im, end2end=False):
         """inference an image
 
         Args:
@@ -847,17 +848,22 @@ class ONNX_Engine(object):
         if len(im.shape) == 3:
             im = im[None]  # expand for batch dim
         im = im.cpu().numpy()
-        y = self.session.run(self.output_names, {self.session.get_inputs()[0].name: im})
-        if isinstance(y, (list, tuple)):
-            self.prediction = self.from_numpy(y[0]) if len(y) == 1 else [self.from_numpy(x) for x in y]     
-            return self.non_max_suppression(), im
+        y = self.session.run(self.output_names, {self.input_names[0]: im})
+        if end2end:
+            return y, im
         else:
-            self.prediction = self.from_numpy(y)
-            return self.non_max_suppression(), im
+            if isinstance(y, (list, tuple)):
+                self.prediction = self.from_numpy(y[0]) if len(y) == 1 else [self.from_numpy(x) for x in y]     
+                return self.non_max_suppression(), im
+            else:
+                self.prediction = self.from_numpy(y)
+                return self.non_max_suppression(), im
     
     def from_numpy(self, x):
         return torch.from_numpy(x).to(self.device) if isinstance(x, np.ndarray) else x
     
+    def end2end(self):
+        pass
     def warmup(self, imgsz=(1, 3, 640, 640)):
         """Warming up...
 

@@ -631,11 +631,11 @@ def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45, classes=Non
             v[:, 4] = 1.0  # conf
             v[range(len(l)), l[:, 0].long() + 5] = 1.0  # cls
             x = torch.cat((x, v), 0)
-
+        
         # If none remain process next image
         if not x.shape[0]:
             continue
-
+        x = x[x[:, 4].argsort(descending=True)[:max_nms]]
         # Compute conf
         if nc == 1:
             x[:, 5:] = x[:, 4:5] # for models with one class, cls_loss is 0 and cls_conf is always 0.5,
@@ -662,7 +662,7 @@ def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45, classes=Non
         n = x.shape[0]  # number of boxes
         if not n:  # no boxes
             continue
-        x = x[x[:, 4].argsort(descending=True)[:max_nms]]
+        
         # Batched NMS
         c = x[:, 5:6] * (0 if agnostic else max_wh)  # classes
         boxes, scores = x[:, :4] + c, x[:, 4]  # boxes (offset by class), scores

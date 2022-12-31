@@ -762,6 +762,8 @@ def activations(act=nn.SiLU):
         return lambda x: x * tf.nn.relu(x)
     elif isinstance(act, (nn.SiLU, SiLU)):
         return lambda x: keras.activations.swish(x)
+    elif isinstance(act, nn.PReLU):
+        return lambda x: keras.activations.prelu(x)
     else:
         raise Exception(f'no matching TensorFlow activation found for PyTorch activation {act}')
 
