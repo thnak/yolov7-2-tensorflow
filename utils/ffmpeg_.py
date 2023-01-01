@@ -4,6 +4,7 @@ import platform
 import subprocess
 import shlex
 import math
+from termcolor import colored
 try:
     from pyadl import *
 except:
@@ -32,7 +33,7 @@ class FFMPEG_recorder():
             savePath (__str__, optional): _description_. Defaults to None.
             codec (_str_, optional): _description_. Defaults to None.
             videoDimensions (tuple, optional): _description_. Defaults to (1280, 720).
-            fps (int, optional): _description_. Defaults to 30FPS.
+            fps (int, optional): _description_. Defaults to 30
         """
         self.savePath = savePath
         self.codec = None
@@ -49,12 +50,15 @@ class FFMPEG_recorder():
         else:
             self.codec = 'libx264'
         print(f'Using video codec: {self.codec}, os: {osType}')
+        if ' ' in savePath:
+            print(colored('User warning:', 'red'),f"directory path must not include spaces and special characters")
         self.countFrame = 0
         self.startTime = 0.
         mpx = math.prod(self.videoDementions)
         self.bitRate = round(20 * (mpx/(3840*2160)) * (1 if round(self.fps/30,3) < 1 else round(self.fps/30,3)),3)
         self.subtitleContent = ''
         self.process = subprocess.Popen(shlex.split(f'ffmpeg -hide_banner -y -s {self.videoDementions[0]}x{self.videoDementions[1]} -pixel_format bgr24 -f rawvideo -r {self.fps} -i pipe: -vcodec {self.codec} -pix_fmt yuv420p -b:v {self.bitRate}M')+[self.savePath], stdin=subprocess.PIPE)
+    
     def writeFrame(self, image=None):
         """Write frame by frame to video
 
@@ -72,6 +76,12 @@ class FFMPEG_recorder():
         return '%.2d:%.2d:%.2d,%.3d' % (hour, minute, second, millisecond)
     
     def writeSubtitle(self, title='', fps=30):
+        """write subtitle string frame by frame
+
+        Args:
+            title (str, optional): _description_. Defaults to ''.
+            fps (int, optional): _description_. Defaults to 30.
+        """
         timeStep = 1/ fps
         timecode = self.second_to_timecode(self.startTime)
         timecode2 = self.second_to_timecode(self.startTime + timeStep)
@@ -86,17 +96,22 @@ class FFMPEG_recorder():
         self.countFrame += 1
         
     def addSubtitle(self, hardSubtitle=False):
+       
         save = self.savePath.replace('.mp4','withsub.mp4')
+        save = f"""{save}"""
         subfile = save.replace('.mp4','.srt')
         with open(subfile, 'w') as f:
             f.write(self.subtitleContent)
-        
+        self.savePath = f"""{self.savePath}"""
         if hardSubtitle:
-            process = subprocess.run(f"ffmpeg -hide_banner -i {self.savePath} -c:v copy -vf subtitles='{subfile}' {save}") #error
+            process = subprocess.run(f"ffmpeg -hide_banner -i {self.savePath} -c:v copy -vf subtitles='{subfile}' {save}") #error for now
         else:
             process = subprocess.run(f"ffmpeg -hide_banner -i {self.savePath} -i {subfile} -c:v copy -c:s mov_text -metadata:s:s:0 language=eng {save}")
-        
+        return process
+    
     def addAudio(self):
+        """on working
+        """
         pass
         
     def stopRecorder(self):

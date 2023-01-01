@@ -31,7 +31,7 @@ def detect(opt=None):
     half = device.type != 'cpu'  # half precision only supported on CUDA
 
     # Load model
-    model = attempt_load(weights, map_location=device)  # load FP32 model
+    model = attempt_load(weights, map_location='cpu').to(device)  # load FP32 model
     stride = int(model.stride.max())  # model stride
     imgsz = check_img_size(imgsz, s=stride)  # check img_size
 
@@ -229,6 +229,7 @@ if __name__ == '__main__':
     (save_dir / 'labels' if opt.save_txt else save_dir).mkdir(parents=True, exist_ok=True)  # make dir
     
     opt.weights = opt.weights if isinstance(opt.weights, list) else [opt.weights]
+    frame_count_, fps_rate = 0, 0
     for _ in opt.weights:
         file_extention = os.path.splitext(_)[1]
         if file_extention in ['.pt']:
@@ -241,7 +242,7 @@ if __name__ == '__main__':
                     
         elif file_extention in ['.onnx']:
             from models.yolo import ONNX_Engine
-            device = torch.device('cpu')
+            device = select_device(opt.device)
             webcam = is_stream_or_webcam(opt.source)
             model = ONNX_Engine(ONNX_EnginePath=_,mydataset='mydataset.yaml'
                                 ,confThres=opt.conf_thres, 
@@ -264,7 +265,7 @@ if __name__ == '__main__':
                 t1 = time.time()
                 pred, img = model.infer(img, end2end=end2end)                    
                 t2 = time.time() - t1
-                avgSpeed.append(t2)
+                
                 img_h, img_w = img.shape[2:]
                 
                 for i, det in enumerate(pred):
@@ -278,9 +279,17 @@ if __name__ == '__main__':
                     p = Path(p)
                     save_path = str(save_dir / p.name)
                     txt_path = str(save_dir / 'labels' / p.stem) + ('' if dataset.mode == 'image' else f'_{frame}')  # im.txt
-
+                    if frame_count_ == 0:
+                        fps_rate = round(1000/(t2*1000),2)
+                        avgSpeed.append(fps_rate)
+                        fps_rate = sum(avgSpeed)/len(avgSpeed)
+                        avgSpeed = []
+                        frame_count_ += 1
+                    elif frame_count_ == 30:
+                        frame_count_ = 0
+                    else:
+                        frame_count_ += 1
                     s += f'{img_h}x{img_w} '
-                        
                     s += f'speed: {round(t2*1000,3)}ms '
                     gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh
                     if len(det):
@@ -301,7 +310,7 @@ if __name__ == '__main__':
                                 c = int(cls)
                                 label = None if hide_labels else (names[c] if hide_conf else f'{names[c]} {conf:.2f}')
                                 txtColor, bboxColor = BFC.getval(index=int(cls))
-                                im0 = plot_one_box_with_return(xyxy, im0, label=label, txtColor=txtColor, bboxColor=bboxColor, line_thickness=1)
+                                im0 = plot_one_box_with_return(xyxy, im0, label=label, txtColor=txtColor, bboxColor=bboxColor, line_thickness=3, frameinfo=[f'avgFPS: {fps_rate}', f'Total objects: {n}'])
                     print(f'{s}')
                     if opt.view_img > -1:
                         cv2.namedWindow(f'{dataset.mode} {path}', cv2.WINDOW_NORMAL)
@@ -332,7 +341,6 @@ if __name__ == '__main__':
                 del ffmpeg
             del model, dataset
             cv2.destroyAllWindows()
-            print(f'Finished. avg: {round((sum(avgSpeed) / len(avgSpeed))*1000,3)}ms')
                 
         elif file_extention in ['.trt', '.engine']:
             detectTensorRT(_,opt, save=save_dir)

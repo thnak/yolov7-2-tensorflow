@@ -63,18 +63,20 @@ def train(hyp, opt, device, tb_writer=None, evo_num=[0, 0]):
 
     # Configure
     plots = not opt.evolve  # create plots
-    cuda = device.type != 'cpu'
+    cuda = device.type == 'cuda'
     init_seeds(2 + rank)
     with open(opt.data) as f:
         data_dict = yaml.load(f, Loader=yaml.SafeLoader)  # data dict
         f.close()
     is_coco = opt.data.endswith('coco.yaml')
 
+    map_device = 'cpu' if device.type=='privateuseone' else device
+    print(f'map_device: {map_device}')
     # Logging- Doing this before checking the dataset. Might update data_dict
     loggers = {'wandb': None}  # loggers dict
     if rank in [-1, 0]:
         opt.hyp = hyp  # add hyperparameters
-        run_id = torch.load(weights, map_location=device).get(
+        run_id = torch.load(weights, map_location=map_device).get(
             'wandb_id') if weights.endswith('.pt') and os.path.isfile(weights) else None
         wandb_logger = WandbLogger(
             opt, Path(opt.save_dir).stem, run_id, data_dict)
@@ -95,7 +97,7 @@ def train(hyp, opt, device, tb_writer=None, evo_num=[0, 0]):
     if pretrained:
         with torch_distributed_zero_first(rank):
             attempt_download(weights)  # download if not found locally
-        ckpt = torch.load(weights, map_location=device)  # load checkpoint
+        ckpt = torch.load(weights, map_location=map_device)  # load checkpoint
         model = Model(opt.cfg or ckpt['model'].yaml, ch=3, nc=nc, anchors=hyp.get(
             'anchors')).to(device)  # create
         exclude = ['anchor'] if (opt.cfg or hyp.get(
@@ -330,8 +332,7 @@ def train(hyp, opt, device, tb_writer=None, evo_num=[0, 0]):
     model.nc = nc  # attach number of classes to model
     model.hyp = hyp  # attach hyperparameters to model
     model.gr = 1.0  # iou loss ratio (obj_loss = 1.0 or iou)
-    model.class_weights = labels_to_class_weights(
-        dataset.labels, nc).to(device) * nc  # attach class weights
+    model.class_weights = labels_to_class_weights(dataset.labels, nc).float().to(device) * nc  # attach class weights
     model.names = names
 
     # Start training
@@ -645,9 +646,9 @@ if __name__ == '__main__':
     opt.world_size = int(os.environ['WORLD_SIZE']) if 'WORLD_SIZE' in os.environ else 1
     opt.global_rank = int(os.environ['RANK']) if 'RANK' in os.environ else -1
     set_logging(opt.global_rank)
-    if opt.global_rank in [-1, 0]:
-        check_git_status()
-        check_requirements()
+    # if opt.global_rank in [-1, 0]:
+    #     check_git_status()
+    #     check_requirements()
 
     # Resume
     wandb_run = check_wandb_resume(opt)

@@ -17,6 +17,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchvision
 
+
 try:
     import thop  # for FLOPS computation
 except ImportError:
@@ -61,8 +62,16 @@ def git_describe(path=Path(__file__).parent):  # path must be a directory
 
 
 def select_device(device='', batch_size=None):
+    try:
+        if 'dml' in device.lower():
+            import torch_directml
+            return torch_directml.device(torch_directml.default_device())
+    except:
+        pass
     if torch.cuda.is_available():
         device = device if device.isnumeric() and int(device) >= 0 and int(device) < torch.cuda.device_count() else 'cpu'
+    # elif torch_directml.is_available():
+    #     device = torch_directml.device(0)
     else:
         device = 'cpu'   
     s = f'YOLOv7 🚀 {git_describe() or date_modified()} torch {torch.__version__} '  # string
@@ -70,7 +79,7 @@ def select_device(device='', batch_size=None):
     if cpu:
         os.environ['CUDA_VISIBLE_DEVICES'] = '-1'  # force torch.cuda.is_available() = False
     elif device:  # non-cpu device requested
-        os.environ['CUDA_VISIBLE_DEVICES'] = device  # set environment variable
+        # os.environ['CUDA_VISIBLE_DEVICES'] = device  # set environment variable
         assert torch.cuda.is_available(), f'CUDA unavailable, invalid device {device} requested'  # check availability
 
     cuda = not cpu and torch.cuda.is_available()
@@ -86,7 +95,7 @@ def select_device(device='', batch_size=None):
         s += 'CPU\n'
 
     logger.info(s.encode().decode('ascii', 'ignore') if platform.system() == 'Windows' else s)  # emoji-safe
-    return torch.device(f'cuda:{device}' if cuda else 'cpu')
+    return torch.device(f'cuda:{device}' if cuda else 'cpu') #if torch_directml.is_available() is False else torch_directml.device()
 
 
 def time_synchronized():

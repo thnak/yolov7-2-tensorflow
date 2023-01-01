@@ -15,6 +15,7 @@ from utils.general import make_divisible, check_file, set_logging, colorstr, xyw
 from utils.torch_utils import time_synchronized, fuse_conv_and_bn, model_info, scale_img, initialize_weights, \
     select_device, copy_attr
 from utils.loss import SigmoidBin
+from utils.general import check_requirements
 import yaml
 try:
     import thop  # for FLOPS computation
@@ -771,13 +772,51 @@ class ONNX_Engine(object):
         self.labels = labels
         self.max_det = max_det_nms
         self.nm = nm
-        self.half = True if device.type != 'cpu' else False
+        self.half = True if device.type == 'cuda' else False
         self.device = device
-        import onnxruntime as onnxrt    
+          
+        import platform
+        import torch
+        nvidia_GPUDevices = torch.cuda.is_available()
+        is_x64 = True if '64' in platform.architecture()[0] else False
         
-           
-        self.GB = maxWorkSpace
+        my_platform = platform.uname()
+        operating_system = platform.system()
+        node_Name = platform.node()
+        release = platform.release()
+        amd_GPUdevices = True if 'AMD' in platform.machine() else False
+        nvidia_GPUDevices = torch.cuda.is_available()
+        intel_Devicess = True if 'Intel' in platform.machine() else False
+        
+        if operating_system == 'Windows':
+            if is_x64 and amd_GPUdevices:
+                check_requirements(['onnxruntime-directml'])
+            elif is_x64 and nvidia_GPUDevices:
+                check_requirements(['onnxruntime-gpu'])
+            elif is_x64 and intel_Devicess:
+                check_requirements(['onnxruntime-openvino'])
+            elif is_x64 is False and amd_GPUdevices is False:
+                print(f'Onnxruntime for x86 platform require AMD GPU devices')
+                exit()
+            elif is_x64 and amd_GPUdevices is False and nvidia_GPUDevices is False:
+                check_requirements(['onnxruntime'])
+            else:
+                print(f'system not ')
+                exit()
+        elif operating_system == 'Linux':
+            if is_x64 and nvidia_GPUDevices:
+                check_requirements(['onnxruntime-gpu'])
+            elif is_x64 and intel_Devicess:
+                check_requirements(['onnxruntime-openvino'])
+            elif is_x64:
+                check_requirements(['onnxruntime'])
+            elif is_x64 is False:
+                print(f'system not ')
+                exit()                
+        
+        import onnxruntime as onnxrt  
         self.runTime = onnxrt
+        self.GB = maxWorkSpace
 
         try:
             import onnx 
@@ -788,31 +827,35 @@ class ONNX_Engine(object):
             exit()
         else:
             pass
-        self.providers = [
-            ('TensorrtExecutionProvider',
-             {  
-                'device_id': 0,
-                'trt_max_workspace_size': self.GB,
-                'trt_fp16_enable': True,
-                'trt_dla_enable': True
-                }),
-            ('CUDAExecutionProvider', 
-             {
-                'device_id': 0,
-                'arena_extend_strategy': 'kNextPowerOfTwo',
-                'gpu_mem_limit': self.GB,
-                'cudnn_conv_algo_search': 'EXHAUSTIVE',
-                'do_copy_in_default_stream': True,
-                'enable_cuda_graph': True}),
-            'CPUExecutionProvider'] if self.half else ['CPUExecutionProvider']
+        a = self.runTime.get_available_providers
+        # self.providers = [
+        #     ('TensorrtExecutionProvider',
+        #      {  
+        #         'device_id': 0,
+        #         'trt_max_workspace_size': self.GB,
+        #         'trt_fp16_enable': True,
+        #         'trt_dla_enable': True
+        #         }),
+        #     ('CUDAExecutionProvider', 
+        #      {
+        #         'device_id': 0,
+        #         'arena_extend_strategy': 'kNextPowerOfTwo',
+        #         'cudnn_conv1d_pad_to_nc1d: True,
+                    # 'cudnn_conv_use_max_workspace': 2,
+        #         'gpu_mem_limit': self.GB,
+        #         'cudnn_conv_algo_search': 'EXHAUSTIVE',
+        #         'do_copy_in_default_stream': True,
+        #         'enable_cuda_graph': True}),
+        #     'CPUExecutionProvider'] if self.half else ['DmlExecutionProvider']
+        self.providers = self.runTime.get_available_providers()
         
         session_opt = self.runTime.SessionOptions()
         session_opt.enable_profiling = False
         session_opt.enable_mem_pattern = False if 'DmlExecutionProvider' in self.providers else True
         session_opt.graph_optimization_level  = self.runTime.GraphOptimizationLevel.ORT_ENABLE_ALL
         # session_opt.optimized_model_filepath = ONNX_EnginePath.replace('.onnx', '.onnx')
-        
-        session_opt.execution_mode = self.runTime.ExecutionMode.ORT_SEQUENTIAL
+        session_opt.add_session_config_entry('session.dynamic_block_base', '4')
+        session_opt.execution_mode = self.runTime.ExecutionMode.ORT_PARALLEL
         self.session = self.runTime.InferenceSession(ONNX_EnginePath, sess_options=session_opt, providers=self.providers)
         self.imgsz = self.session.get_inputs()[0].shape[2:]
         self.imgsz = self.imgsz if isinstance(self.imgsz[0], int) else [640, 640]
@@ -840,6 +883,7 @@ class ONNX_Engine(object):
         Returns:
             _type_: _description_
         """
+        # print(f'debug: {self.device}')
         im = torch.from_numpy(im).to(self.device)
         im = im.half() if self.half else im.float()  # uint8 to fp16/32
         im /= 255.0  # 0 - 255 to 0.0 - 1.0
@@ -849,6 +893,7 @@ class ONNX_Engine(object):
             im = im[None]  # expand for batch dim
         im = im.cpu().numpy()
         y = self.session.run(self.output_names, {self.input_names[0]: im})
+        # print(f'debug: {y}')
         if end2end:
             return y, im
         else:
@@ -862,7 +907,19 @@ class ONNX_Engine(object):
     def from_numpy(self, x):
         return torch.from_numpy(x).to(self.device) if isinstance(x, np.ndarray) else x
     
-    def end2end(self):
+    def end2end(self, outputs, ori_images, dwdh,ratio):
+        for i,(batch_id,x0,y0,x1,y1,cls_id,score) in enumerate(outputs):
+            image = ori_images[int(batch_id)]
+            box = np.array([x0,y0,x1,y1])
+            box -= np.array(dwdh*2)
+            box /= ratio[0]
+            box = box.round().astype(np.int32).tolist()
+            cls_id = int(cls_id)
+            score = round(float(score),3)
+            name = self.names[cls_id]
+            name += ' '+str(score)
+            # ims = cv2.rectangle(image,box[:2],box[2:],color,1)
+            # ims = cv2.putText(ims,name,(box[0], box[1] - 2),cv2.FONT_HERSHEY_SIMPLEX,0.75,[225, 255, 255],thickness=1)  
         pass
     def warmup(self, imgsz=(1, 3, 640, 640)):
         """Warming up...
