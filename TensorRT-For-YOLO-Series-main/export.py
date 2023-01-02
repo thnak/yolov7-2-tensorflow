@@ -109,6 +109,7 @@ class EngineBuilder:
         self.batch_size = None
         self.network = None
         self.parser = None
+        self.metadata = None
 
     def create_network(self, onnx_path, end2end, conf_thres, iou_thres, max_det):
         """
@@ -127,7 +128,13 @@ class EngineBuilder:
                 for error in range(self.parser.num_errors):
                     print(self.parser.get_error(error))
                 sys.exit(1)
-
+        from models.yolo import ONNX_Engine
+        
+        onnx_engine = ONNX_Engine(onnx_path)
+        self.metadata = {"stride:": onnx_engine.stride, "names": onnx_engine.names, "nc": onnx_engine.nc, "dataloaderAutoScale": onnx_engine.dataloaderAutoScale}
+        print(f'Loaded metadata from ONNX model: {self.metadata}')
+        del onnx_engine        
+        
         inputs = [self.network.get_input(i) for i in range(self.network.num_inputs)]
         outputs = [self.network.get_output(i) for i in range(self.network.num_outputs)]
 
@@ -215,7 +222,8 @@ class EngineBuilder:
         # TODO: Strict type is only needed If the per-layer precision overrides are used
         # If a better method is found to deal with that issue, this flag can be removed.
         self.config.set_flag(trt.BuilderFlag.STRICT_TYPES)
-
+        self.config.set_flag(trt.BuilderFlag.GPU_FALLBACK)
+        
         if precision == "fp16":
             if not self.builder.platform_has_fast_fp16:
                 print("FP16 is not supported natively on this platform/device")
@@ -240,8 +248,10 @@ class EngineBuilder:
 
         with self.builder.build_serialized_network(self.network, self.config) as engine, open(engine_path, "wb") as f:
             print("Serializing engine to file: {:}".format(engine_path))
-            f.write(engine)
-        f.close()
+            # f.write(engine)
+            np.save(f, engine)
+            np.save(f, self.metadata)
+            
         print('Finished convertion\nConfig:',self.config)
 
 def main(args):

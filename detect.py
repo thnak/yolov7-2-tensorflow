@@ -24,10 +24,10 @@ def detect(opt=None):
     save_dir = Path(increment_path(Path(opt.project) / opt.name,
                     exist_ok=opt.exist_ok))  # increment run
     (save_dir / 'labels' if save_txt else save_dir).mkdir(parents=True, exist_ok=True)  # make dir
-    BFC = BackgroundForegroundColors(hyp='./mydataset.yaml')
+    
     # Initialize
     set_logging()
-    device = select_device(opt.device)
+    device = select_device(opt.device)[0]
     half = device.type != 'cpu'  # half precision only supported on CUDA
 
     # Load model
@@ -52,7 +52,7 @@ def detect(opt=None):
 
     # Get names and colors
     names = model.module.names if hasattr(model, 'module') else model.names
-
+    BFC = BackgroundForegroundColors(names=names)
     # Run inference
     if device.type != 'cpu':
         model(torch.zeros(1, 3, imgsz, imgsz).to(device).type_as(next(model.parameters())))  # run once
@@ -168,10 +168,14 @@ def detectTensorRT(tensorrtEngine,opt=None,save=''):
     source, weights, view_img, save_txt, imgsz, trace = opt.source, opt.weights, opt.view_img, opt.save_txt, opt.img_size, not opt.no_trace
     save_img = not opt.nosave and not source.endswith('.txt') 
     webcam = is_stream_or_webcam(source=source)
-    stride = 32
+    
     
     pred = TensorRT_Engine(TensorRT_EnginePath=tensorrtEngine, confThres=opt.conf_thres, iouThres=opt.iou_thres)
     imgsz = pred.imgsz
+    stride = pred.stride
+    names = pred.names
+    nc = pred.nc
+    
     if webcam:
         dataset = LoadStreams(source, img_size=imgsz, stride=stride, auto=None)
     else:
@@ -242,9 +246,9 @@ if __name__ == '__main__':
                     
         elif file_extention in ['.onnx']:
             from models.yolo import ONNX_Engine
-            device = select_device(opt.device)
+            device = select_device(opt.device)[0]
             webcam = is_stream_or_webcam(opt.source)
-            model = ONNX_Engine(ONNX_EnginePath=_,mydataset='mydataset.yaml'
+            model = ONNX_Engine(ONNX_EnginePath=_
                                 ,confThres=opt.conf_thres, 
                                 iouThres=opt.iou_thres,device=device)
             imgsz = model.imgsz         
@@ -254,10 +258,9 @@ if __name__ == '__main__':
                 dataset = LoadImages(opt.source, img_size=max(imgsz), auto=False)
                 
             names, vid_path = model.names, None
-            
             prefix = colorstr('ONNX_Engine')
             print(f'{prefix}: {vars(model)}\n')
-            BFC = BackgroundForegroundColors(hyp='./mydataset.yaml')
+            BFC = BackgroundForegroundColors(names= names)
             half = device.type != 'cpu'
             seen, hide_conf, hide_labels, avgSpeed, end2end = 0 , False, False, [], False
             for path, img, im0s, vid_cap, s in dataset:

@@ -18,6 +18,7 @@ import torch.nn.functional as F
 import torchvision
 
 
+
 try:
     import thop  # for FLOPS computation
 except ImportError:
@@ -70,11 +71,9 @@ def select_device(device='', batch_size=None):
         pass
     if torch.cuda.is_available():
         device = device if device.isnumeric() and int(device) >= 0 and int(device) < torch.cuda.device_count() else 'cpu'
-    # elif torch_directml.is_available():
-    #     device = torch_directml.device(0)
     else:
         device = 'cpu'   
-    s = f'YOLOv7 🚀 {git_describe() or date_modified()} torch {torch.__version__} '  # string
+    s = f'YOLOv7 🚀 git commit {git_describe() or date_modified()} torch {torch.__version__} '  # string
     cpu = device.lower() == 'cpu'
     if cpu:
         os.environ['CUDA_VISIBLE_DEVICES'] = '-1'  # force torch.cuda.is_available() = False
@@ -93,9 +92,10 @@ def select_device(device='', batch_size=None):
             s += f"{'' if i == 0 else space}CUDA:{d} ({p.name}, {p.total_memory / 1024 ** 2}MB)\n"  # bytes to MB
     else:
         s += 'CPU\n'
-
-    logger.info(s.encode().decode('ascii', 'ignore') if platform.system() == 'Windows' else s)  # emoji-safe
-    return torch.device(f'cuda:{device}' if cuda else 'cpu') #if torch_directml.is_available() is False else torch_directml.device()
+    s = s.encode().decode('ascii', 'ignore') if platform.system() == 'Windows' else s
+    logger.info(s)  # emoji-safe
+    return torch.device(f'cuda:{device}' if cuda else 'cpu'), s
+    #if torch_directml.is_available() is False else torch_directml.device()
 
 
 def time_synchronized():
@@ -230,13 +230,14 @@ def model_info(model, verbose=False, img_size=640):
         img = torch.zeros((1, model.yaml.get('ch', 3), stride, stride), device=next(model.parameters()).device)  # input
         flops = profile(deepcopy(model), inputs=(img,), verbose=False)[0] / 1E9 * 2  # stride GFLOPS
         img_size = img_size if isinstance(img_size, list) else [img_size, img_size]  # expand if int/float
-        fs = ', %.3f GFLOPS' % (flops * img_size[0] / stride * img_size[1] / stride)  # 640x640 GFLOPS
+        fs = '%.3f GFLOPS' % (flops * img_size[0] / stride * img_size[1] / stride)  # 640x640 GFLOPS
+        
     except Exception as ex:
         fs = '? GFLOPS'
-        print(colored(f"pip install thop to compute model'Gflops {ex}",'red'))
-
-    logger.info(f"Model Summary: {len(list(model.modules()))} layers, {n_p} parameters, {n_g} gradients {fs}")
-
+        print(colored(f"{ex}",'red'))
+    fs = f"Model Summary: {len(list(model.modules()))} layers, {n_p} parameters, {n_g} gradients, {fs}"
+    logger.info(fs)
+    return fs
 
 def load_classifier(name='resnet101', n=2):
     """Loads a pretrained model reshaped to n-class output"""

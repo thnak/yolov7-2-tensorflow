@@ -30,6 +30,7 @@ seaborn
 coremltools>=4.1  # CoreML export
 onnx>=1.9.0  # ONNX export
 onnxsim
+onnxmltools
 onnx-simplifier>=0.3.6  # ONNX simplifier
 scikit-learn<=1.1.2  # CoreML quantization
 tensorflow>=2.4.1  # TFLite export

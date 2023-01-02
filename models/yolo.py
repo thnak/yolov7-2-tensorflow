@@ -17,6 +17,7 @@ from utils.torch_utils import time_synchronized, fuse_conv_and_bn, model_info, s
 from utils.loss import SigmoidBin
 from utils.general import check_requirements
 import yaml
+import numpy as np
 try:
     import thop  # for FLOPS computation
 except ImportError:
@@ -738,14 +739,15 @@ class Model(nn.Module):
         return m
 
     def info(self, verbose=False, img_size=640):  # print model information
-        model_info(self, verbose, img_size)
+        return model_info(self, verbose, img_size)
 
 
 class ONNX_Engine(object):
     """ONNX Engine class for inference with onnxruntime"""
-    def __init__(self, ONNX_EnginePath='', mydataset=None, 
+    def __init__(self, ONNX_EnginePath='',  
                  confThres=0.25, iouThres = 0.45, device = torch.device('cpu'), 
-                 classes_nms=None, agnostic_nms=False, multi_label_nms=False,labels=(), max_det_nms = 300, nm = 0, maxWorkSpace=2 * 1024 * 1024 * 1024):
+                 classes_nms=None, agnostic_nms=False, multi_label_nms=False, 
+                 max_det_nms = 300, maxWorkSpace=2 * 1024 * 1024 * 1024):
         """initial an ONNX Engine
 
         Args:
@@ -763,15 +765,12 @@ class ONNX_Engine(object):
             maxWorkSpace (int, optional): _description_. Defaults to 2GB.
         """
         
-        self.names= None
         self.confThres = confThres
         self.iouThres = iouThres
-        self.classes = classes_nms
-        self.agnostic = agnostic_nms
-        self.multi_label = multi_label_nms
-        self.labels = labels
-        self.max_det = max_det_nms
-        self.nm = nm
+        self.classes_nms = classes_nms
+        self.agnostic_nms = agnostic_nms
+        self.multi_label_nms = multi_label_nms
+        self.max_det_nms = max_det_nms
         self.half = True if device.type == 'cuda' else False
         self.device = device
           
@@ -780,14 +779,11 @@ class ONNX_Engine(object):
         nvidia_GPUDevices = torch.cuda.is_available()
         is_x64 = True if '64' in platform.architecture()[0] else False
         
-        my_platform = platform.uname()
         operating_system = platform.system()
-        node_Name = platform.node()
-        release = platform.release()
         amd_GPUdevices = True if 'AMD' in platform.machine() else False
         nvidia_GPUDevices = torch.cuda.is_available()
         intel_Devicess = True if 'Intel' in platform.machine() else False
-        
+        cpu_device = False
         if operating_system == 'Windows':
             if is_x64 and amd_GPUdevices:
                 check_requirements(['onnxruntime-directml'])
@@ -799,6 +795,7 @@ class ONNX_Engine(object):
                 print(f'Onnxruntime for x86 platform require AMD GPU devices')
                 exit()
             elif is_x64 and amd_GPUdevices is False and nvidia_GPUDevices is False:
+                cpu_device = True
                 check_requirements(['onnxruntime'])
             else:
                 print(f'system not ')
@@ -809,6 +806,7 @@ class ONNX_Engine(object):
             elif is_x64 and intel_Devicess:
                 check_requirements(['onnxruntime-openvino'])
             elif is_x64:
+                cpu_device = True
                 check_requirements(['onnxruntime'])
             elif is_x64 is False:
                 print(f'system not ')
@@ -822,12 +820,12 @@ class ONNX_Engine(object):
             import onnx 
             onnx_model = onnx.load(ONNX_EnginePath)  # load onnx model
             onnx.checker.check_model(onnx_model)  # check onnx model
+            del onnx_model
         except onnx.checker.ValidationError as e:
             print(f"The model is invalid: {e}")
             exit()
         else:
             pass
-        a = self.runTime.get_available_providers
         # self.providers = [
         #     ('TensorrtExecutionProvider',
         #      {  
@@ -853,26 +851,26 @@ class ONNX_Engine(object):
         session_opt.enable_profiling = False
         session_opt.enable_mem_pattern = False if 'DmlExecutionProvider' in self.providers else True
         session_opt.graph_optimization_level  = self.runTime.GraphOptimizationLevel.ORT_ENABLE_ALL
-        # session_opt.optimized_model_filepath = ONNX_EnginePath.replace('.onnx', '.onnx')
-        session_opt.add_session_config_entry('session.dynamic_block_base', '4')
-        session_opt.execution_mode = self.runTime.ExecutionMode.ORT_PARALLEL
+        # session_opt.optimized_model_filepath = ONNX_EnginePath.replace('.onnx', '_optimized.onnx')   
+        session_opt.execution_mode = self.runTime.ExecutionMode.ORT_PARALLEL if cpu_device else self.runTime.ExecutionMode.ORT_SEQUENTIAL
+        
         self.session = self.runTime.InferenceSession(ONNX_EnginePath, sess_options=session_opt, providers=self.providers)
+        self.session.enable_fallback()
+        
         self.imgsz = self.session.get_inputs()[0].shape[2:]
         self.imgsz = self.imgsz if isinstance(self.imgsz[0], int) else [640, 640]
         self.output_names = [x.name for x in self.session.get_outputs()]
         self.input_names = [i. name for i in self.session.get_inputs()]
+        
+        self.names, self.nc, self.stride, self.dataloaderAutoScale = None, None, None, False
         meta = self.session.get_modelmeta().custom_metadata_map
         if 'stride' in meta:
             self.stride, self.names = int(meta['stride']), eval(meta['names'])
-            
-        if mydataset is not None:
-            with open(mydataset,errors='ignore') as f:
-                data = yaml.safe_load(f)
-                self.names = data['names']
-                self.nc = data['nc']
-        else:
-            self.nc = 999
-            self.names = [f'object {i}' for i in range(self.nc)]
+            self.nc = len(self.names)
+            self.dataloaderAutoScale = True if meta['stride'] == 'True' else False
+        self.names = self.names if self.names is not None else [i for i in range(999)]
+        self.nc = self.nc if self.nc is not None else 999
+        self.stride = self.stride if self.stride is not None else 32
         
     def infer(self, im, end2end=False):
         """inference an image
@@ -943,12 +941,12 @@ class ONNX_Engine(object):
         prediction = self.prediction
         conf_thres = self.confThres
         iou_thres = self.iouThres
-        classes = self.classes
-        agnostic = self.agnostic
-        multi_label = self.multi_label
-        labels = self.labels
-        max_det = self.max_det
-        nm = self.nm
+        classes = self.classes_nms
+        agnostic = self.agnostic_nms
+        multi_label = self.multi_label_nms
+        # labels = self.labels
+        max_det = self.max_det_nms
+
         
         # Checks
         assert 0 <= conf_thres <= 1, f'Invalid Confidence threshold {conf_thres}, valid values are between 0.0 and 1.0'
@@ -961,7 +959,7 @@ class ONNX_Engine(object):
         if mps:  # MPS not fully supported yet, convert tensors to CPU before NMS
             prediction = prediction.cpu()
         bs = prediction.shape[0]  # batch size
-        nc = prediction.shape[2] - nm - 5  # number of classes
+        nc = prediction.shape[2] - 5  # number of classes
         xc = prediction[..., 4] > conf_thres  # candidates
 
         # Settings
@@ -974,19 +972,9 @@ class ONNX_Engine(object):
 
         t = time.time()
         mi = 5 + nc  # mask start index
-        output = [torch.zeros((0, 6 + nm), device=prediction.device)] * bs
+        output = [torch.zeros((0, 6), device=prediction.device)] * bs
         for xi, x in enumerate(prediction):  # image index, image inference
             x = x[xc[xi]]  # confidence
-
-            # Cat apriori labels if autolabelling
-            if labels and len(labels[xi]):
-                lb = labels[xi]
-                v = torch.zeros((len(lb), nc + nm + 5), device=x.device)
-                v[:, :4] = lb[:, 1:5]  # box
-                v[:, 4] = 1.0  # conf
-                v[range(len(lb)), lb[:, 0].long() + 5] = 1.0  # cls
-                x = torch.cat((x, v), 0)
-
             # If none remain process next image
             if not x.shape[0]:
                 continue
@@ -1036,7 +1024,6 @@ class ONNX_Engine(object):
                 break  # time limit exceeded
 
         return output
-        
     def stop():
         pass
 
@@ -1044,7 +1031,7 @@ class TensorRT_Engine(object):
     """TensorRT using for TensorRT inference
     only available on Nvidia's devices
     """
-    def __init__(self, TensorRT_EnginePath='', names='/yam.yaml', confThres=0.5, iouThres = 0.45):
+    def __init__(self, TensorRT_EnginePath: str, confThres=0.5, iouThres = 0.45):
         """initial a TensorRT Engine
 
         Args:
@@ -1070,8 +1057,6 @@ class TensorRT_Engine(object):
         self.os = os
         self.time = time
         self.prefix = colorstr(f'TensorRT engine:')
-        self.mean = None
-        self.std = None
         self.confThres = confThres
         self.iouThes = iouThres
         logger = self.trt.Logger(self.trt.Logger.WARNING)
@@ -1079,19 +1064,16 @@ class TensorRT_Engine(object):
         runtime = self.trt.Runtime(logger)
         self.trt.init_libnvinfer_plugins(logger,'') # initialize TensorRT plugins  
         try:
-            if os.path.exists(names):
-                with open(names,'r') as dataset_cls_name:
-                    data_ = self.yaml.load(dataset_cls_name, Loader=self.yaml.SafeLoader)
-                    self.n_classes = data_['nc']
-                    self.class_names = data_['names']
-            else:
-                self.n_classes = 999
-                self.class_names = [i for i in range(self.n_classes)]
             with open(TensorRT_EnginePath, "rb") as f:
-                serialized_engine = f.read()
+                serialized_engine = np.load(f)
+                metadata = np.load(f)
         except IOError:
             print(f'Error: {IOError}, the item is required')
             exit()
+        self.names = metadata["names"]
+        self.stride = metadata["stride"]
+        self.nc = metadata["nc"]
+        self.dataloaderAutoScale = metadata['dataloaderAutoScale']
         engine = runtime.deserialize_cuda_engine(serialized_engine)
         self.imgsz = engine.get_binding_shape(0)[2:]
         self.context = engine.create_execution_context()
@@ -1153,7 +1135,7 @@ class TensorRT_Engine(object):
             ret, frame = cap.read()
             if not ret:
                 break
-            blob, ratio = self.preproc(frame, self.imgsz, self.mean, self.std)
+            blob, ratio = self.preproc(frame, self.imgsz)
             t1 = self.time.time()
             data = self.infer(blob)
             fps = (fps + (1. / (self.time.time() - t1))) / 2
@@ -1170,7 +1152,7 @@ class TensorRT_Engine(object):
             print(f'{self.prefix} FPS: {round(fps,3)}, '+f'nms: {round(self.time.time() - t2,3)}' if end2end else 'postprocess:'+f' {round(self.time.time() - t2,3)}')
             if dets is not None:
                 final_boxes, final_scores, final_cls_inds = dets[:,:4], dets[:, 4], dets[:, 5]
-                frame = self.vis(frame, final_boxes, final_scores, final_cls_inds, class_names=self.class_names)
+                frame = self.vis(frame, final_boxes, final_scores, final_cls_inds, names=self.names)
             if not noSave:
                 ffmpeg.writeFrame(frame)
         if not noSave:
@@ -1183,7 +1165,7 @@ class TensorRT_Engine(object):
         """ detect single image
             Return: image
         """
-        img, ratio = self.preproc(origin_img, self.imgsz, self.mean, self.std)
+        img, ratio = self.preproc(origin_img, self.imgsz)
         t1 = self.time.time()
         data = self.infer(img)
         print(f'speed: {self.time.time() - t1}s')
@@ -1197,7 +1179,7 @@ class TensorRT_Engine(object):
 
         if dets is not None:
             final_boxes, final_scores, final_cls_inds = dets[:,:4], dets[:, 4], dets[:, 5]
-            origin_img = self.vis(origin_img, final_boxes, final_scores, final_cls_inds, class_names=self.class_names)
+            origin_img = self.vis(origin_img, final_boxes, final_scores, final_cls_inds, names=self.names)
         return origin_img
 
     @staticmethod
@@ -1274,7 +1256,7 @@ class TensorRT_Engine(object):
         return np.concatenate(final_dets, 0)
 
 
-    def preproc(self,image, input_size, mean, std, swap=(2, 0, 1)):
+    def preproc(self,image, input_size, swap=(2, 0, 1)):
         if len(image.shape) == 3:
             padded_img = np.ones((input_size[0], input_size[1], 3)) * 114.0
         else:
@@ -1285,15 +1267,12 @@ class TensorRT_Engine(object):
         padded_img[: int(img.shape[0] * r), : int(img.shape[1] * r)] = resized_img
         padded_img = padded_img[:, :, ::-1]
         padded_img /= 255.0
-        if mean is not None:
-            padded_img -= mean
-        if std is not None:
-            padded_img /= std
+
         padded_img = padded_img.transpose(swap)
         padded_img = np.ascontiguousarray(padded_img, dtype=np.float32)
         return padded_img, r
 
-    def vis(self, img, boxes, scores, cls_ids, class_names=None):
+    def vis(self, img, boxes, scores, cls_ids, names=None):
         for i in range(len(boxes)):
             box = boxes[i]
             cls_id = int(cls_ids[i])
@@ -1304,7 +1283,7 @@ class TensorRT_Engine(object):
             y0 = int(box[1])
             x1 = int(box[2])
             y1 = int(box[3])
-            text = '{}:{:.2f}'.format(class_names[cls_id], score)
+            text = '{}:{:.2f}'.format(names[cls_id], score)
             txt_color,txt_bk_color = self.Colorselector.getval(cls_id)
             txt_size = self.cv2.getTextSize(text, self.cv2.FONT_HERSHEY_SIMPLEX, 0.4, 1)[0]
             self.cv2.rectangle(img, (x0, y0), (x1, y1), txt_bk_color, 2)
@@ -1421,7 +1400,7 @@ if __name__ == '__main__':
     opt = parser.parse_args()
     opt.cfg = check_file(opt.cfg)  # check file
     set_logging()
-    device = select_device(opt.device)
+    device = select_device(opt.device)[0]
 
     # Create model
     model = Model(opt.cfg).to(device)

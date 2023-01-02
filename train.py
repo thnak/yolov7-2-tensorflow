@@ -71,7 +71,6 @@ def train(hyp, opt, device, tb_writer=None, evo_num=[0, 0]):
     is_coco = opt.data.endswith('coco.yaml')
 
     map_device = 'cpu' if device.type=='privateuseone' else device
-    print(f'map_device: {map_device}')
     # Logging- Doing this before checking the dataset. Might update data_dict
     loggers = {'wandb': None}  # loggers dict
     if rank in [-1, 0]:
@@ -673,7 +672,7 @@ if __name__ == '__main__':
 
     # DDP mode
     opt.total_batch_size = opt.batch_size
-    device = select_device(opt.device, batch_size=opt.batch_size)
+    device = select_device(opt.device, batch_size=opt.batch_size)[0]
     if opt.local_rank != -1:
         assert torch.cuda.device_count() > opt.local_rank
         torch.cuda.set_device(opt.local_rank)
