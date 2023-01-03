@@ -10,7 +10,7 @@ requests>=2.23.0
 scipy>=1.4.1
 torch==1.13
 torchvision==0.14.0
-torch-directml
+# torch-directml
 tqdm>=4.41.0
 protobuf<4.21.3
 pycuda
@@ -33,7 +33,7 @@ onnxsim
 onnxmltools
 onnx-simplifier>=0.3.6  # ONNX simplifier
 scikit-learn<=1.1.2  # CoreML quantization
-tensorflow>=2.4.1  # TFLite export
+tensorflow==2.11.0  # TFLite export
 tensorflowjs>=3.9.0  # TF.js export
 openvino-dev  # OpenVINO export
 

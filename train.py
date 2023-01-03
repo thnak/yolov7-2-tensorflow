@@ -574,7 +574,7 @@ def train(hyp, opt, device, tb_writer=None, evo_num=[0, 0]):
         for f in last, best:
             if f.exists():
                 strip_optimizer(f)
-                strip_optimizer(f, f.replace('best.pt','striped.pt'),halfModel=True)
+                strip_optimizer(f, str(f).replace('best.pt','striped.pt'),halfModel=True)
                 if 'best.pt' in str(f)  :
                     path_cfg = opt.cfg
                     path_cfg = path_cfg.replace('training', 'deploy')
