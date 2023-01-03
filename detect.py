@@ -177,9 +177,9 @@ def detectTensorRT(tensorrtEngine,opt=None,save=''):
     nc = pred.nc
     
     if webcam:
-        dataset = LoadStreams(source, img_size=imgsz, stride=stride, auto=None)
+        dataset = LoadStreams(source, img_size=imgsz, stride=stride, auto= not model.rectangle)
     else:
-        dataset = LoadImages(source, img_size=imgsz, stride=stride, auto=None)
+        dataset = LoadImages(source, img_size=imgsz, stride=stride, auto= not model.rectangle)
     
     count = 0
     
@@ -251,11 +251,11 @@ if __name__ == '__main__':
             model = ONNX_Engine(ONNX_EnginePath=_
                                 ,confThres=opt.conf_thres, 
                                 iouThres=opt.iou_thres,device=device)
-            imgsz = model.imgsz         
+            imgsz = model.imgsz
             if webcam:
-                dataset = LoadStreams(opt.source, img_size=max(imgsz), auto=False)
+                dataset = LoadStreams(opt.source, img_size=max(imgsz), auto= False if model.rectangle else True)
             else:
-                dataset = LoadImages(opt.source, img_size=max(imgsz), auto=False)
+                dataset = LoadImages(opt.source, img_size=max(imgsz), auto= False if model.rectangle else True)
                 
             names, vid_path = model.names, None
             prefix = colorstr('ONNX_Engine')

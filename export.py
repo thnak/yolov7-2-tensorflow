@@ -186,34 +186,6 @@ if __name__ == '__main__':
 
             onnx_model = onnx.load(f)  # load onnx model
             onnx.checker.check_model(onnx_model)  # check onnx model
-            metadata = onnx_model.metadata_props.add()
-            metadata.key = 'gitstatus'
-            metadata.value = gitstatus       
-            metadata = onnx_model.metadata_props.add()
-            metadata.key = 'stride'
-            metadata.value = str(gs)
-            metadata = onnx_model.metadata_props.add()
-            metadata.key = 'nc'
-            metadata.value = str(len(labels))
-            metadata = onnx_model.metadata_props.add()
-            metadata.key = 'names'
-            metadata.value = str(labels)
-            metadata = onnx_model.metadata_props.add()
-            metadata.key = 'dataloaderAutoScale'
-            metadata.value = 'False'
-            metadata = onnx_model.metadata_props.add()
-            metadata.key = 'date'
-            metadata.value = str(datetime.datetime.now())
-            metadata = onnx_model.metadata_props.add()
-            metadata.key = 'createtor'
-            metadata.value = opt.createtor
-            metadata = onnx_model.metadata_props.add()
-            metadata.key = 'optional export'
-            metadata.value = str(opt)
-            metadata = onnx_model.metadata_props.add()
-            metadata.key = "pytorch model info"
-            metadata.value = str(model_Gflop)
-            print(f'\n{prefix} metadata: {onnx_model.metadata_props}\n')
             
             if opt.end2end and opt.max_wh is None:
                 for i in onnx_model.graph.output:
@@ -229,6 +201,38 @@ if __name__ == '__main__':
                 except Exception as e:
                     print(f'{prefix} Simplifier failure🐛🪲: {e}')
                     
+            onnx.save(onnx_model,f=f)
+            
+            onnx_model = onnx.load(f)  # load onnx model
+            onnx.checker.check_model(onnx_model)  # check onnx model            
+            metadata = onnx_model.metadata_props.add()
+            metadata.key = 'gitstatus'
+            metadata.value = gitstatus       
+            metadata = onnx_model.metadata_props.add()
+            metadata.key = 'stride'
+            metadata.value = str(gs)
+            metadata = onnx_model.metadata_props.add()
+            metadata.key = 'nc'
+            metadata.value = str(len(labels))
+            metadata = onnx_model.metadata_props.add()
+            metadata.key = 'names'
+            metadata.value = str(labels)
+            metadata = onnx_model.metadata_props.add()
+            metadata.key = 'rectangle'
+            metadata.value = 'True'
+            metadata = onnx_model.metadata_props.add()
+            metadata.key = 'date'
+            metadata.value = str(datetime.datetime.now())
+            metadata = onnx_model.metadata_props.add()
+            metadata.key = 'createtor'
+            metadata.value = opt.createtor
+            metadata = onnx_model.metadata_props.add()
+            metadata.key = 'optional export'
+            metadata.value = str(opt)
+            metadata = onnx_model.metadata_props.add()
+            metadata.key = "pytorch model info"
+            metadata.value = str(model_Gflop)
+            print(f'\n{prefix} metadata: {onnx_model.metadata_props}\n')
             onnxmltools.utils.save_model(onnx_model,f)
             print(f'{prefix} export success✅, saved as {f}')
 

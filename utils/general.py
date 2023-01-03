@@ -91,7 +91,9 @@ def check_git_status():
 
 
 def check_requirements(requirements='requirements.txt', exclude=()):
-    """Check installed dependencies meet requirements (pass *.txt file or list of packages)"""
+    """Check installed dependencies meet requirements (pass *.txt file or list of packages)
+        requirements: string file path or tuple/list of modul
+    """
     import pkg_resources as pkg
     prefix = colorstr('red', 'bold', 'requirements:')
     if isinstance(requirements, (str, Path)):  # requirements.txt file
@@ -100,6 +102,8 @@ def check_requirements(requirements='requirements.txt', exclude=()):
             print(f"{prefix} {file.resolve()} not found, check failed.")
             return
         requirements = [f'{x.name}{x.specifier}' for x in pkg.parse_requirements(file.open()) if x.name not in exclude]
+    elif isinstance(requirements, (tuple, list)):
+        pass
     else:  # list or tuple of packages
         requirements = [x for x in requirements if x not in exclude]
 

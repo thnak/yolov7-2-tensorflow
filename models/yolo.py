@@ -862,12 +862,12 @@ class ONNX_Engine(object):
         self.output_names = [x.name for x in self.session.get_outputs()]
         self.input_names = [i. name for i in self.session.get_inputs()]
         
-        self.names, self.nc, self.stride, self.dataloaderAutoScale = None, None, None, False
+        self.names, self.nc, self.stride, self.rectangle = None, None, None, False
         meta = self.session.get_modelmeta().custom_metadata_map
         if 'stride' in meta:
             self.stride, self.names = int(meta['stride']), eval(meta['names'])
-            self.nc = len(self.names)
-            self.dataloaderAutoScale = True if meta['stride'] == 'True' else False
+            self.nc = int(meta['nc'])
+            self.rectangle = True if meta['rectangle'] == 'True' else False
         self.names = self.names if self.names is not None else [i for i in range(999)]
         self.nc = self.nc if self.nc is not None else 999
         self.stride = self.stride if self.stride is not None else 32
@@ -927,7 +927,7 @@ class ONNX_Engine(object):
         No return
         """
         im = torch.empty(*imgsz, dtype=torch.half if self.half else torch.float, device=self.device)
-        if self.device.type != 'cpu':
+        if self.device.type == 'cuda':
             for _ in range(1):
                 print(f'\nWarming up: \n')
                 self.infer(im)               
@@ -947,7 +947,6 @@ class ONNX_Engine(object):
         # labels = self.labels
         max_det = self.max_det_nms
 
-        
         # Checks
         assert 0 <= conf_thres <= 1, f'Invalid Confidence threshold {conf_thres}, valid values are between 0.0 and 1.0'
         assert 0 <= iou_thres <= 1, f'Invalid IoU {iou_thres}, valid values are between 0.0 and 1.0'
@@ -1073,7 +1072,7 @@ class TensorRT_Engine(object):
         self.names = metadata["names"]
         self.stride = metadata["stride"]
         self.nc = metadata["nc"]
-        self.dataloaderAutoScale = metadata['dataloaderAutoScale']
+        self.rectangle = metadata['rectangle']
         engine = runtime.deserialize_cuda_engine(serialized_engine)
         self.imgsz = engine.get_binding_shape(0)[2:]
         self.context = engine.create_execution_context()
