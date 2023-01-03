@@ -745,7 +745,7 @@ class Model(nn.Module):
 class ONNX_Engine(object):
     """ONNX Engine class for inference with onnxruntime"""
     def __init__(self, ONNX_EnginePath='',  
-                 confThres=0.25, iouThres = 0.45, device = torch.device('cpu'), 
+                 confThres=0.25, iouThres = 0.45, device = None, 
                  classes_nms=None, agnostic_nms=False, multi_label_nms=False, 
                  max_det_nms = 300, maxWorkSpace=2 * 1024 * 1024 * 1024):
         """initial an ONNX Engine
@@ -771,11 +771,12 @@ class ONNX_Engine(object):
         self.agnostic_nms = agnostic_nms
         self.multi_label_nms = multi_label_nms
         self.max_det_nms = max_det_nms
-        self.half = True if device.type == 'cuda' else False
-        self.device = device
+        
           
         import platform
         import torch
+        
+        self.device = torch.device('cpu') if device is None else device
         nvidia_GPUDevices = torch.cuda.is_available()
         is_x64 = True if '64' in platform.architecture()[0] else False
         
@@ -838,13 +839,13 @@ class ONNX_Engine(object):
         #      {
         #         'device_id': 0,
         #         'arena_extend_strategy': 'kNextPowerOfTwo',
-        #         'cudnn_conv1d_pad_to_nc1d: True,
-                    # 'cudnn_conv_use_max_workspace': 2,
+        #         'cudnn_conv1d_pad_to_nc1d': True,
+                # 'cudnn_conv_use_max_workspace': '2',
         #         'gpu_mem_limit': self.GB,
         #         'cudnn_conv_algo_search': 'EXHAUSTIVE',
         #         'do_copy_in_default_stream': True,
         #         'enable_cuda_graph': True}),
-        #     'CPUExecutionProvider'] if self.half else ['DmlExecutionProvider']
+        #     'CPUExecutionProvider'] if torch.cuda.is_available() else self.runTime.get_available_providers()
         self.providers = self.runTime.get_available_providers()
         
         session_opt = self.runTime.SessionOptions()
@@ -859,6 +860,7 @@ class ONNX_Engine(object):
         
         self.imgsz = self.session.get_inputs()[0].shape[2:]
         self.imgsz = self.imgsz if isinstance(self.imgsz[0], int) else [640, 640]
+        self.half = True if self.session.get_inputs()[0].type != "tensor(float)" else False
         self.output_names = [x.name for x in self.session.get_outputs()]
         self.input_names = [i. name for i in self.session.get_inputs()]
         
@@ -1062,17 +1064,31 @@ class TensorRT_Engine(object):
         logger.min_severity  = self.trt.Logger.Severity.ERROR
         runtime = self.trt.Runtime(logger)
         self.trt.init_libnvinfer_plugins(logger,'') # initialize TensorRT plugins  
+        # try:
+        #     with open(TensorRT_EnginePath, "rb") as f:
+        #         serialized_engine = np.load(f)
+        #         metadata = np.load(f)
+        # except IOError:
+        #     print(f'Error: {IOError}, the item is required')
+        #     exit()
+        # self.names = metadata["names"]
+        # self.stride = metadata["stride"]
+        # self.nc = metadata["nc"]
+        # self.rectangle = metadata['rectangle']
         try:
-            with open(TensorRT_EnginePath, "rb") as f:
-                serialized_engine = np.load(f)
-                metadata = np.load(f)
+            if os.path.exists('mydataset.yaml'):
+                with open('mydataset.yaml','r') as dataset_cls_name:
+                    data_ = self.yaml.load(dataset_cls_name, Loader=self.yaml.SafeLoader)
+                    self.n_classes = data_['nc']
+                    self.class_names = data_['names']
+            else:
+                self.n_classes = 999
+                self.class_names = [i for i in range(self.n_classes)]
+            with open(TensorRT_Engine, "rb") as f:
+                serialized_engine = f.read()
         except IOError:
             print(f'Error: {IOError}, the item is required')
-            exit()
-        self.names = metadata["names"]
-        self.stride = metadata["stride"]
-        self.nc = metadata["nc"]
-        self.rectangle = metadata['rectangle']
+            exit()        
         engine = runtime.deserialize_cuda_engine(serialized_engine)
         self.imgsz = engine.get_binding_shape(0)[2:]
         self.context = engine.create_execution_context()

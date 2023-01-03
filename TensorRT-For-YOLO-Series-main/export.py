@@ -12,7 +12,7 @@ from image_batch import ImageBatcher
 logging.basicConfig(level=logging.INFO)
 logging.getLogger("EngineBuilder").setLevel(logging.INFO)
 log = logging.getLogger("EngineBuilder")
-
+metadata = None
 class EngineCalibrator(trt.IInt8EntropyCalibrator2):
     """
     Implements the INT8 Entropy Calibrator 2.
@@ -109,7 +109,6 @@ class EngineBuilder:
         self.batch_size = None
         self.network = None
         self.parser = None
-        self.metadata = None
 
     def create_network(self, onnx_path, end2end, conf_thres, iou_thres, max_det):
         """
@@ -128,12 +127,12 @@ class EngineBuilder:
                 for error in range(self.parser.num_errors):
                     print(self.parser.get_error(error))
                 sys.exit(1)
-        from models.yolo import ONNX_Engine
-        
-        onnx_engine = ONNX_Engine(onnx_path)
-        self.metadata = {"stride:": onnx_engine.stride, "names": onnx_engine.names, "nc": onnx_engine.nc, "dataloaderAutoScale": onnx_engine.dataloaderAutoScale}
-        print(f'Loaded metadata from ONNX model: {self.metadata}')
-        del onnx_engine        
+                
+        # from models.yolo import ONNX_Engine
+        # onnx_engine = ONNX_Engine(onnx_path)
+        # metadata = {"stride:": onnx_engine.stride, "names": onnx_engine.names, "nc": onnx_engine.nc, "rectangle": onnx_engine.rectangle}
+        # print(f'Loaded metadata from ONNX model: {metadata}')
+        # del onnx_engine        
         
         inputs = [self.network.get_input(i) for i in range(self.network.num_inputs)]
         outputs = [self.network.get_output(i) for i in range(self.network.num_outputs)]
@@ -245,14 +244,16 @@ class EngineBuilder:
                         ImageBatcher(calib_input, calib_shape, calib_dtype, max_num_images=calib_num_images,
                                      exact_batches=True))
                 
-
         with self.builder.build_serialized_network(self.network, self.config) as engine, open(engine_path, "wb") as f:
             print("Serializing engine to file: {:}".format(engine_path))
-            # f.write(engine)
-            np.save(f, engine)
-            np.save(f, self.metadata)
-            
+            f.write(engine)
         print('Finished convertion\nConfig:',self.config)
+        
+        # with open(engine_path, 'rb') as f, open(engine_path.replace('.trt', '_meta.trt'), 'wb') as x:
+        #   a = f.read()
+        #   np.save(x, a)
+        #   np.save(x, metadata)
+        # print('Finished add metadata\n')
 
 def main(args):
     builder = EngineBuilder(args.verbose, args.workspace)
