@@ -852,7 +852,7 @@ class ONNX_Engine(object):
         session_opt.enable_profiling = False
         session_opt.enable_mem_pattern = False if 'DmlExecutionProvider' in self.providers else True
         session_opt.graph_optimization_level  = self.runTime.GraphOptimizationLevel.ORT_ENABLE_ALL
-        # session_opt.optimized_model_filepath = ONNX_EnginePath.replace('.onnx', '_optimized.onnx')   
+        session_opt.optimized_model_filepath = ONNX_EnginePath.replace('.onnx', '_optimized.onnx')   
         session_opt.execution_mode = self.runTime.ExecutionMode.ORT_PARALLEL if cpu_device else self.runTime.ExecutionMode.ORT_SEQUENTIAL
         
         self.session = self.runTime.InferenceSession(ONNX_EnginePath, sess_options=session_opt, providers=self.providers)
@@ -1032,7 +1032,7 @@ class TensorRT_Engine(object):
     """TensorRT using for TensorRT inference
     only available on Nvidia's devices
     """
-    def __init__(self, TensorRT_EnginePath: str, confThres=0.5, iouThres = 0.45):
+    def __init__(self, TensorRT_EnginePath, confThres=0.5, iouThres = 0.45):
         """initial a TensorRT Engine
 
         Args:
@@ -1052,7 +1052,7 @@ class TensorRT_Engine(object):
         import time
         self.cuda = cuda
         self.trt = trt
-        self.Colorselector = BackgroundForegroundColors()
+        
         self.yaml = yaml
         self.cv2 = cv2
         self.os = os
@@ -1079,16 +1079,17 @@ class TensorRT_Engine(object):
             if os.path.exists('mydataset.yaml'):
                 with open('mydataset.yaml','r') as dataset_cls_name:
                     data_ = self.yaml.load(dataset_cls_name, Loader=self.yaml.SafeLoader)
-                    self.n_classes = data_['nc']
-                    self.class_names = data_['names']
+                    self.nc = data_['nc']
+                    self.names = data_['names']
             else:
-                self.n_classes = 999
-                self.class_names = [i for i in range(self.n_classes)]
-            with open(TensorRT_Engine, "rb") as f:
+                self.nc = 999
+                self.names = [i for i in range(self.nc)]
+            with open(TensorRT_EnginePath, "rb") as f:
                 serialized_engine = f.read()
         except IOError:
             print(f'Error: {IOError}, the item is required')
             exit()        
+        self.Colorselector = BackgroundForegroundColors(self.names)
         engine = runtime.deserialize_cuda_engine(serialized_engine)
         self.imgsz = engine.get_binding_shape(0)[2:]
         self.context = engine.create_execution_context()

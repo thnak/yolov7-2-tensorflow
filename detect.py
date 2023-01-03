@@ -172,14 +172,14 @@ def detectTensorRT(tensorrtEngine,opt=None,save=''):
     
     pred = TensorRT_Engine(TensorRT_EnginePath=tensorrtEngine, confThres=opt.conf_thres, iouThres=opt.iou_thres)
     imgsz = pred.imgsz
-    stride = pred.stride
+    stride = 32
     names = pred.names
     nc = pred.nc
     
     if webcam:
-        dataset = LoadStreams(source, img_size=imgsz, stride=stride, auto= not model.rectangle)
+        dataset = LoadStreams(source, img_size=imgsz, stride=stride, auto= False)
     else:
-        dataset = LoadImages(source, img_size=imgsz, stride=stride, auto= not model.rectangle)
+        dataset = LoadImages(source, img_size=imgsz, stride=stride, auto= False)
     
     count = 0
     
