@@ -67,12 +67,17 @@ def plot_one_box(x, img, color=None, label=None, line_thickness=3):
 
 def plot_one_box_with_return(x, img, txtColor=None, bboxColor=None, label=None, line_thickness=3, frameinfo = ['FPS: ', 'Total Object: ']):
     tl = int(line_thickness) or round(0.002 * (img.shape[0] + img.shape[1]) / 2) + 1  # line/font thickness
-    c1, c2 = (int(x[0]), int(x[1])), (int(x[2]), int(x[3]))
-    img0 = cv2.rectangle(img, c1, c2, bboxColor, thickness=tl, lineType=cv2.LINE_AA)
-    img0 = cv2.putText(img0,frameinfo[0],org= (20, 20), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale= tl/3, color= txtColor, thickness=1, lineType=cv2.LINE_AA)
-    img0 = cv2.putText(img0,frameinfo[1],org= (20, 50), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale= tl/3, color= txtColor, thickness=1, lineType=cv2.LINE_AA)
+    img0 = img.copy()
+    tf = max(tl - 1, 1)  # font thickness
+    t_size = max(max(cv2.getTextSize(frameinfo[1], 0, fontScale=tl / 3, thickness=tf)[0]), max(cv2.getTextSize(frameinfo[0], 0, fontScale=tl / 3, thickness=tf)[0]))
+    t_size2 = max(min(cv2.getTextSize(frameinfo[1], 0, fontScale=tl / 3, thickness=tf)[0]), min(cv2.getTextSize(frameinfo[0], 0, fontScale=tl / 3, thickness=tf)[0]))
+    img0 = cv2.rectangle(img0, (0, 0), (t_size+40, (t_size2+25)*len(frameinfo)), bboxColor, -1,  cv2.LINE_AA)
+    img0 = cv2.putText(img0,frameinfo[0],org= (20, 40), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale= tl/3, color= txtColor, thickness=1, lineType=cv2.LINE_AA)
+    img0 = cv2.putText(img0,frameinfo[1],org= (20, 70), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale= tl/3, color= txtColor, thickness=1, lineType=cv2.LINE_AA)
+    
     if label:
-        tf = max(tl - 1, 1)  # font thickness
+        c1, c2 = (int(x[0]), int(x[1])), (int(x[2]), int(x[3]))
+        img0 = cv2.rectangle(img0, c1, c2, bboxColor, thickness=tl, lineType=cv2.LINE_AA)
         t_size = cv2.getTextSize(label, 0, fontScale=tl / 3, thickness=tf)[0]
         c2 = c1[0] + t_size[0], c1[1] - t_size[1] - 3
         img0 = cv2.rectangle(img0, c1, c2, bboxColor, -1, cv2.LINE_AA)  # filled

@@ -18,11 +18,12 @@ from utils.loss import SigmoidBin
 from utils.general import check_requirements
 import yaml
 import numpy as np
+import cv2
 try:
     import thop  # for FLOPS computation
 except ImportError:
     thop = None
-
+from utils.plots import plot_one_box_with_return
 
 class Detect(nn.Module):
     stride = None  # strides computed during build
@@ -747,7 +748,7 @@ class ONNX_Engine(object):
     def __init__(self, ONNX_EnginePath='',  
                  confThres=0.25, iouThres = 0.45, device = None, 
                  classes_nms=None, agnostic_nms=False, multi_label_nms=False, 
-                 max_det_nms = 300, maxWorkSpace=2 * 1024 * 1024 * 1024):
+                 max_det_nms = 300, maxWorkSpace=2, prefix= ''):
         """initial an ONNX Engine
 
         Args:
@@ -793,13 +794,13 @@ class ONNX_Engine(object):
             elif is_x64 and intel_Devicess:
                 check_requirements(['onnxruntime-openvino'])
             elif is_x64 is False and amd_GPUdevices is False:
-                print(f'Onnxruntime for x86 platform require AMD GPU devices')
+                logging.warning(f'{prefix} Onnxruntime for x86 platform require AMD GPU devices')
                 exit()
             elif is_x64 and amd_GPUdevices is False and nvidia_GPUDevices is False:
                 cpu_device = True
                 check_requirements(['onnxruntime'])
             else:
-                print(f'system not ')
+                logging.warning(f'{prefix} system not ')
                 exit()
         elif operating_system == 'Linux':
             if is_x64 and nvidia_GPUDevices:
@@ -810,12 +811,12 @@ class ONNX_Engine(object):
                 cpu_device = True
                 check_requirements(['onnxruntime'])
             elif is_x64 is False:
-                print(f'system not ')
+                logging.warning(f'{prefix} system not ')
                 exit()                
         
         import onnxruntime as onnxrt  
         self.runTime = onnxrt
-        self.GB = maxWorkSpace
+        self.GB = maxWorkSpace * 1024 * 1024 * 1024
 
         try:
             import onnx 
@@ -823,7 +824,7 @@ class ONNX_Engine(object):
             onnx.checker.check_model(onnx_model)  # check onnx model
             del onnx_model
         except onnx.checker.ValidationError as e:
-            print(f"The model is invalid: {e}")
+            logging.error(f"{prefix} The model is invalid: {e}")
             exit()
         else:
             pass
@@ -852,7 +853,6 @@ class ONNX_Engine(object):
         session_opt.enable_profiling = False
         session_opt.enable_mem_pattern = False if 'DmlExecutionProvider' in self.providers else True
         session_opt.graph_optimization_level  = self.runTime.GraphOptimizationLevel.ORT_ENABLE_ALL
-        session_opt.optimized_model_filepath = ONNX_EnginePath.replace('.onnx', '_optimized.onnx')   
         session_opt.execution_mode = self.runTime.ExecutionMode.ORT_PARALLEL if cpu_device else self.runTime.ExecutionMode.ORT_SEQUENTIAL
         
         self.session = self.runTime.InferenceSession(ONNX_EnginePath, sess_options=session_opt, providers=self.providers)
@@ -860,6 +860,7 @@ class ONNX_Engine(object):
         
         self.imgsz = self.session.get_inputs()[0].shape[2:]
         self.imgsz = self.imgsz if isinstance(self.imgsz[0], int) else [640, 640]
+        self.batch_size = self.session.get_inputs()[0].shape[0]
         self.half = True if self.session.get_inputs()[0].type != "tensor(float)" else False
         self.output_names = [x.name for x in self.session.get_outputs()]
         self.input_names = [i. name for i in self.session.get_inputs()]
@@ -869,7 +870,12 @@ class ONNX_Engine(object):
         if 'stride' in meta:
             self.stride, self.names = int(meta['stride']), eval(meta['names'])
             self.nc = int(meta['nc'])
-            self.rectangle = True if meta['rectangle'] == 'True' else False
+            self.rectangle = meta['rectangle'] == 'True'
+            self.rectangle = self.imgsz[0] == self.imgsz[1]
+            self.opset = int(meta['opset version'])
+            if self.opset > 11:
+                logging.warning(f'{prefix} onnx opset tested for version 11, newer version may have poor performance for ONNXRUNTIME')
+
         self.names = self.names if self.names is not None else [i for i in range(999)]
         self.nc = self.nc if self.nc is not None else 999
         self.stride = self.stride if self.stride is not None else 32
@@ -907,20 +913,39 @@ class ONNX_Engine(object):
     def from_numpy(self, x):
         return torch.from_numpy(x).to(self.device) if isinstance(x, np.ndarray) else x
     
-    def end2end(self, outputs, ori_images, dwdh,ratio):
+    def end2end(self, outputs, ori_images, dwdh,ratio, fps, bfc):
+        """ONNX nms
+        support for dynamic batch
+
+        Args:
+            outputs (_type_): _description_
+            ori_images (_type_): _description_
+            dwdh (_type_): _description_
+            ratio (_type_): _description_
+            txtcolor (_type_): _description_
+            bboxcolor (_type_): _description_
+            fps (_type_): _description_
+
+        Returns:
+            _type_: _description_
+        """
+        image = [None] * len(ori_images)
         for i,(batch_id,x0,y0,x1,y1,cls_id,score) in enumerate(outputs):
-            image = ori_images[int(batch_id)]
+            image[int(batch_id)] = ori_images[int(batch_id)] if image[int(batch_id)] is None else image[int(batch_id)]
             box = np.array([x0,y0,x1,y1])
             box -= np.array(dwdh*2)
             box /= ratio[0]
             box = box.round().astype(np.int32).tolist()
             cls_id = int(cls_id)
-            score = round(float(score),3)
+            score = round(float(score),2)
             name = self.names[cls_id]
             name += ' '+str(score)
-            # ims = cv2.rectangle(image,box[:2],box[2:],color,1)
-            # ims = cv2.putText(ims,name,(box[0], box[1] - 2),cv2.FONT_HERSHEY_SIMPLEX,0.75,[225, 255, 255],thickness=1)  
-        pass
+            txtcolor, bboxcolor = bfc.getval(index=cls_id)
+            image[int(batch_id)] = plot_one_box_with_return(box, image[int(batch_id)], txtColor=txtcolor,
+                                                            bboxColor=bboxcolor, label=name,
+                                                            frameinfo=[f'FPS: {fps}',f'Total object: {len(outputs)}'])
+        return image
+            
     def warmup(self, imgsz=(1, 3, 640, 640)):
         """Warming up...
 
@@ -931,7 +956,7 @@ class ONNX_Engine(object):
         im = torch.empty(*imgsz, dtype=torch.half if self.half else torch.float, device=self.device)
         if self.device.type == 'cuda':
             for _ in range(1):
-                print(f'\nWarming up: \n')
+                logging.info(f'\nWarming up: \n')
                 self.infer(im)               
                 
     def non_max_suppression(self):
@@ -1021,7 +1046,7 @@ class ONNX_Engine(object):
             if mps:
                 output[xi] = output[xi].to(device)
             if (time.time() - t) > time_limit:
-                print(f'WARNING ⚠️ NMS time limit {time_limit:.3f}s exceeded')
+                logging.warning(f'WARNING ⚠️ NMS time limit {time_limit:.3f}s exceeded')
                 break  # time limit exceeded
 
         return output
@@ -1032,7 +1057,7 @@ class TensorRT_Engine(object):
     """TensorRT using for TensorRT inference
     only available on Nvidia's devices
     """
-    def __init__(self, TensorRT_EnginePath, confThres=0.5, iouThres = 0.45):
+    def __init__(self, TensorRT_EnginePath, confThres=0.5, iouThres = 0.45, prefix= ''):
         """initial a TensorRT Engine
 
         Args:
@@ -1069,7 +1094,7 @@ class TensorRT_Engine(object):
         #         serialized_engine = np.load(f)
         #         metadata = np.load(f)
         # except IOError:
-        #     print(f'Error: {IOError}, the item is required')
+        #     logging.warning(f'Error: {IOError}, the item is required')
         #     exit()
         # self.names = metadata["names"]
         # self.stride = metadata["stride"]
@@ -1087,7 +1112,7 @@ class TensorRT_Engine(object):
             with open(TensorRT_EnginePath, "rb") as f:
                 serialized_engine = f.read()
         except IOError:
-            print(f'Error: {IOError}, the item is required')
+            logging.warning(f'Error: {IOError}, the item is required')
             exit()        
         self.Colorselector = BackgroundForegroundColors(self.names)
         engine = runtime.deserialize_cuda_engine(serialized_engine)
@@ -1135,7 +1160,7 @@ class TensorRT_Engine(object):
         video_outputPath = self.os.path.join(video_outputPath,'results.mp4')
         from utils.ffmpeg_ import FFMPEG_recorder
         if not self.os.path.exists(video_path):
-            print(f'{self.prefix} video not found, exiting')
+            logging.info(f'{self.prefix} video not found, exiting')
             exit()
         cap = self.cv2.VideoCapture(video_path)
         fps = int(round(cap.get(self.cv2.CAP_PROP_FPS)))
@@ -1143,7 +1168,7 @@ class TensorRT_Engine(object):
         height = int(cap.get(self.cv2.CAP_PROP_FRAME_HEIGHT))
         
         if not noSave:
-            print(f'{self.prefix} Save video at: {video_outputPath}')
+            logging.info(f'{self.prefix} Save video at: {video_outputPath}')
             ffmpeg = FFMPEG_recorder(video_outputPath,(width, height), fps)
         fps, avg = 0, []
         timeStart = self.time.time()
@@ -1165,7 +1190,7 @@ class TensorRT_Engine(object):
             else:
                 predictions = np.reshape(data, (1, -1, int(5+self.n_classes)))[0]
                 dets = self.postprocess(predictions,ratio)
-            print(f'{self.prefix} FPS: {round(fps,3)}, '+f'nms: {round(self.time.time() - t2,3)}' if end2end else 'postprocess:'+f' {round(self.time.time() - t2,3)}')
+            logging.info(f'{self.prefix} FPS: {round(fps,3)}, '+f'nms: {round(self.time.time() - t2,3)}' if end2end else 'postprocess:'+f' {round(self.time.time() - t2,3)}')
             if dets is not None:
                 final_boxes, final_scores, final_cls_inds = dets[:,:4], dets[:, 4], dets[:, 5]
                 frame = self.vis(frame, final_boxes, final_scores, final_cls_inds, names=self.names)
@@ -1175,7 +1200,7 @@ class TensorRT_Engine(object):
             ffmpeg.stopRecorder()
         cap.release()
         
-        print(f'{self.prefix} Finished! '+f'save at {video_outputPath} ' if not noSave else ''+f'total {round(self.time.time() - timeStart, 2)} second, avg FPS: {round(sum(avg)/len(avg),3)}')
+        logging.info(f'{self.prefix} Finished! '+f'save at {video_outputPath} ' if not noSave else ''+f'total {round(self.time.time() - timeStart, 2)} second, avg FPS: {round(sum(avg)/len(avg),3)}')
 
     def inference(self, origin_img, end2end=False):
         """ detect single image
@@ -1184,7 +1209,7 @@ class TensorRT_Engine(object):
         img, ratio = self.preproc(origin_img, self.imgsz)
         t1 = self.time.time()
         data = self.infer(img)
-        print(f'speed: {self.time.time() - t1}s')
+        logging.info(f'speed: {self.time.time() - t1}s')
         if end2end:
             num, final_boxes, final_scores, final_cls_inds = data
             final_boxes = np.reshape(final_boxes/ratio, (-1, 4))
@@ -1221,7 +1246,7 @@ class TensorRT_Engine(object):
             _ = self.infer(img)
             t1 = self.time.perf_counter() - t1
             avgT.append(t1)
-        print(f'{self.prefix} Warming up with {(sum(avgT)/len(avgT)/10)}FPS (etc)')
+        logging.info(f'{self.prefix} Warming up with {(sum(avgT)/len(avgT)/10)}FPS (etc)')
 
 
     def nms(self,boxes, scores):

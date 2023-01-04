@@ -226,12 +226,12 @@ class LoadImages:
             s = f'image {self.count}/{self.nf} {path}: '
 
         if self.auto is not None:
-            im = letterbox(im0, self.img_size, stride=self.stride, auto=self.auto)[0]  # padded resize
+            im, ratio, dwdh = letterbox(im0, self.img_size, stride=self.stride, auto=self.auto)  # padded resize
             im = im.transpose((2, 0, 1))[::-1]  # HWC to CHW, BGR to RGB
             im = np.ascontiguousarray(im)  # contiguous
         else:
             im = None
-        return path, im, im0, self.cap, s
+        return path, im, im0, self.cap, s, ratio, dwdh
 
     def _new_video(self, path):
         # Create a new video capture object
@@ -313,7 +313,9 @@ class LoadStreams:
         self.count += 1
         img0 = self.imgs.copy()
         # Letterbox
-        img = [letterbox(x, self.img_size, auto=self.auto, stride=self.stride)[0] for x in img0]
+        img, ratio, dwdh = [letterbox(x, self.img_size, auto=self.auto, stride=self.stride)[0] for x in img0],\
+                                        [letterbox(x, self.img_size, auto=self.auto, stride=self.stride)[1] for x in img0],\
+                                        [letterbox(x, self.img_size, auto=self.auto, stride=self.stride)[2] for x in img0], 
 
         # Stack
         img = np.stack(img, 0)
@@ -321,7 +323,7 @@ class LoadStreams:
         # Convert
         img = img[:, :, :, ::-1].transpose(0, 3, 1, 2)  # BGR to RGB, to bsx3x416x416
         img = np.ascontiguousarray(img)            
-        return self.sources, img, img0, None, None
+        return self.sources, img, img0, None, None, ratio, dwdh
 
     def __len__(self):
         return 0  # 1E12 frames = 32 streams at 30 FPS for 30 years

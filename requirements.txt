@@ -31,6 +31,7 @@ coremltools>=4.1  # CoreML export
 onnx>=1.9.0  # ONNX export
 onnxsim
 onnxmltools
+onnx_tf
 onnx-simplifier>=0.3.6  # ONNX simplifier
 scikit-learn<=1.1.2  # CoreML quantization
 tensorflow==2.11.0  # TFLite export
