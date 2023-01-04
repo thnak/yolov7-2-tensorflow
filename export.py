@@ -270,12 +270,12 @@ if __name__ == '__main__':
         prefix = colorstr('Pytorch2TensorFlow:')
         try:
             from tools.pytorch2tensorflow import _onnx_to_tf, _tf_to_tflite
-            outputpath = weight.replace('.pt', '.pb') 
+            outputpath = weight.replace('.pt', '01.pb') 
             _onnx_to_tf(onnx_model_path=weight.replace('.pt', '.onnx'), output_path=outputpath)
             print(f'{prefix} export success: {outputpath}')
             filenames.append(outputpath)
             inputpath = outputpath
-            outputpath = weight.replace('.pb', '.tflite') 
+            outputpath = outputpath.replace('.pb', '.tflite') 
             
             _tf_to_tflite(tf_model_path=inputpath, output_path=outputpath)
             print(f'{prefix} export success, saved as: {outputpath}')
