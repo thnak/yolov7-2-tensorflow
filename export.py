@@ -87,7 +87,7 @@ if __name__ == '__main__':
         if opt.include_nms:
             model.model[-1].include_nms = True
             y = None
-        filenames = [None] *10
+        filenames = []
         # TorchScript export
         try:
             prefix = colorstr('TorchScript:')
@@ -118,7 +118,7 @@ if __name__ == '__main__':
             f = weight.replace('.pt', '.mlmodel')  # filename
             ct_model.save(f)
             print(f'{prefix} CoreML export success✅, saved as %s' % f)
-            filenames[1] = f
+            filenames.append(f)
         except Exception as e:
             print(f'{prefix} CoreML export failure🐛🪲: {e}')
                         
@@ -130,7 +130,7 @@ if __name__ == '__main__':
             tsl = optimize_for_mobile(tsl)
             tsl._save_for_lite_interpreter(f)
             print(f'{prefix} TorchScript-Lite export success✅, saved as {f}')
-            filenames[2] = f
+            filenames.append(f)
         except Exception as e:
             print(f'{prefix} export failure🐛🪲: {e}')
 
@@ -167,7 +167,7 @@ if __name__ == '__main__':
             if opt.grid:
                 if opt.end2end:
                     x = 'TensorRT' if opt.max_wh is None else 'ONNXRUNTIME'
-                    print(f'\n{prefix}Starting export end2end onnx model for {colorstr(x)}\n')
+                    print(f'\n{prefix} Starting export end2end onnx model for {colorstr(x)}\n')
                     model = End2End(model,opt.topk_all,opt.iou_thres,opt.conf_thres,opt.max_wh,device,len(labels))
                     if opt.end2end and opt.max_wh is None:
                         output_names = ['num_dets', 'det_boxes', 'det_scores', 'det_classes']
@@ -195,8 +195,9 @@ if __name__ == '__main__':
             if opt.simplify:
                 try:
                     import onnxsim
-                    print(f'{prefix}Starting to simplify ONNX...')
-                    onnx_model, check = onnxsim.simplify(onnx_model)
+                    print(f'{prefix} Starting to simplify ONNX...')
+                    onnx_model, check = onnxsim.simplify(onnx_model, dynamic_input_shape=opt.dynamic,
+                                                         input_shapes={'images': list(img.shape) if opt.dynamic else None})
                     assert check, 'assert check failed'
                 except Exception as e:
                     print(f'{prefix} Simplifier failure🐛🪲: {e}')
@@ -242,17 +243,17 @@ if __name__ == '__main__':
                 mo.register_nms()
                 mo.save(f)
                 print(f'{prefix} registering NMS plugin for ONNX success✅ {f}')
-            filenames[3] = f
+            filenames.append(f)
             
         except Exception as e:
             print(f'{prefix} export failure🐛🪲: {e}')
         prefix = colorstr('Quantize ONNX Models:')
         try:
-            saveas = filenames[3].replace('.onnx','_quantize_dynamic.onnx')
+            saveas = weight.replace('.pt', '.onnx').replace('.onnx','_quantize_dynamic.onnx')
             from onnxruntime.quantization import quantize_dynamic, QuantType, quantize, QuantizationMode, StaticQuantConfig, quantize_static, CalibrationDataReader
-            quantize_static(filenames[3], filenames[3].replace('.onnx', '_quantize_static.onnx'), weight_type=QuantType.QUInt8)
-            quantize_dynamic(filenames[3], saveas,weight_type=QuantType.QUInt8, reduce_range=True)
-            print(f'{prefix} export success✅, saved as {saveas}')
+            # quantize_static(weight.replace('.pt', '.onnx'), filenames[3].replace('.onnx', '_quantize_static.onnx'), weight_type=QuantType.QUInt8)
+            quantize_dynamic(weight.replace('.pt', '.onnx'), saveas,weight_type=QuantType.QUInt8, reduce_range=True)
+            print(f'{prefix} export success✅, saved as: {saveas}')
         except Exception as e:
             print(f'{prefix} export failure🐛🪲: {e}')
         
@@ -260,15 +261,32 @@ if __name__ == '__main__':
         prefix = colorstr('OpenVINO:')
         try:
             from tools.auxexport import export_openvino
-            filenames[4], _ = export_openvino(file_=weight,metadata=meta, half=True,prefix=prefix)
-            print(f'{prefix} export success✅, saved as {filenames[4]}')
+            outputpath, _ = export_openvino(file_=weight,metadata=meta, half=True,prefix=prefix)
+            print(f'{prefix} export success✅, saved as: {outputpath}')
+            filenames.append(outputpath)
         except Exception as e:
             print(f'{prefix} export failure🐛🪲: {e}')
+            
+        prefix = colorstr('Pytorch2TensorFlow:')
+        try:
+            from tools.pytorch2tensorflow import _onnx_to_tf, _tf_to_tflite
+            outputpath = weight.replace('.pt', '.pb') 
+            _onnx_to_tf(onnx_model_path=weight.replace('.pt', '.onnx'), output_path=outputpath)
+            print(f'{prefix} export success: {outputpath}')
+            filenames.append(outputpath)
+            inputpath = outputpath
+            outputpath = weight.replace('.pb', '.tflite') 
+            
+            _tf_to_tflite(tf_model_path=inputpath, output_path=outputpath)
+            print(f'{prefix} export success, saved as: {outputpath}')
+            filenames.append(outputpath)
+        except Exception as ex:
+            print(f'{prefix} export failure: {ex}')
             
         prefix = colorstr('TensorFlow SavedModel:')
         try:
             from tools.auxexport import export_saved_model
-            filenames[5], s_models = export_saved_model(modelss.cpu(),
+            outputpath, s_models = export_saved_model(modelss.cpu(),
                                             img,
                                             weight,
                                             False,
@@ -279,42 +297,46 @@ if __name__ == '__main__':
                                             iou_thres=opt.iou_thres,
                                             conf_thres=opt.conf_thres,
                                             keras=False,prefix=prefix)
-            print(f'{prefix} export success✅, saved as {filenames[5]}')
+            print(f'{prefix} export success✅, saved as {outputpath}')
+            filenames.append(outputpath)
         except Exception as e:
             print(f'{prefix} export failure🐛🪲: {e}')
             
         prefix = colorstr('TensorFlow GraphDef:')
         try:
             from tools.auxexport import export_pb
-            filenames[6], _ = export_pb(s_models,weight, prefix=prefix)
-            print(f'{prefix} export success✅, saved as {filenames[6]}')
+            outputpath, _ = export_pb(s_models,weight, prefix=prefix)
+            print(f'{prefix} export success✅, saved as {outputpath}')
+            filenames.append(outputpath)
         except Exception as e:
             print(f'{prefix} export failure🐛🪲: {e}')
             
         prefix = colorstr('TensorFlow.js:')
         try:
             from tools.auxexport import export_tfjs
-            filenames[7], _ = export_tfjs(file_=weight, prefix=prefix)
-            print(f'{prefix} {filenames[2]} is finished')
+            outputpath, _ = export_tfjs(file_=weight, prefix=prefix)
+            print(f'{prefix} {outputpath} is finished')
+            filenames.append(outputpath)
         except Exception as e:
             print(f'{prefix} export failure🐛🪲: {e}')
             
-            
-        prefix = colorstr('Tensorflow lite')
+        prefix = colorstr('Tensorflow lite:')
         try:
             import tensorflow as tf
             f = weight.replace('.pt','.pb')
             fo = weight.replace('.pt', '.tflite')
-            converter = tf.lite.TFLiteConverter.from_saved_model(f'{f}')
-            tf_lite = converter.convert()
-            with open(fo, 'wb') as fi:
-                fi.write(tf_lite)
-            print(f'{prefix} export finished: {e}')
+            if os.path.exists(fo):
+                
+                converter = tf.lite.TFLiteConverter.from_saved_model(f'{f}')
+                tf_lite = converter.convert()
+                with open(fo, 'wb') as fi:
+                    fi.write(tf_lite)
+                filenames.append(fo)
+            print(f'{prefix} export finished, save as:  {fo}')
         except Exception as e:
             print(f'{prefix} export failure🐛🪲: {e}')
             
         prefix = colorstr('Export:')
         for i in filenames:
-            if i is not None:
-                print(f'{prefix} {i} is exported.')
+            print(f'{prefix} {i} is exported.')
         print(f'\n{prefix} complete (%.2fs). Visualize with https://netron.app/.' % (time.time() - t))

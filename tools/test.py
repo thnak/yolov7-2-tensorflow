@@ -63,7 +63,7 @@ def test(data,
             model = TracedModel(model, device, imgsz)
 
     # Half
-    half = device.type != 'cpu' and half_precision  # half precision only supported on CUDA
+    half = device.type == 'cuda' and half_precision  # half precision only supported on CUDA
     if half:
         model.half()
 
@@ -84,7 +84,7 @@ def test(data,
         log_imgs = min(wandb_logger.log_imgs, 100)
     # Dataloader
     if not training:
-        if device.type != 'cpu':
+        if device.type == 'cuda':
             model(torch.zeros(1, 3, imgsz, imgsz).to(device).type_as(next(model.parameters())))  # run once
         task = opt.task if opt.task in ('train', 'val', 'test') else 'val'  # path to train/val/test images
         dataloader = create_dataloader(data[task], imgsz, batch_size, gs, opt, pad=0.5, rect=True,

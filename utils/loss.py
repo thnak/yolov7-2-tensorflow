@@ -660,7 +660,9 @@ class ComputeLossOTA:
             if this_target.shape[0] == 0:
                 continue
                 
-            txywh = this_target[:, 2:6] * imgs[batch_idx].shape[1]
+            txywh = torch.clone(this_target[:, 2:6])
+            txywh[:, [0,2]] *= imgs[batch_idx].shape[2] # x, w * img width
+            txywh[:, [1,3]] *= imgs[batch_idx].shape[1]            
             txyxy = xywh2xyxy(txywh)
 
             pxyxys = []
@@ -740,7 +742,7 @@ class ComputeLossOTA:
                 + 3.0 * pair_wise_iou_loss
             )
             try:
-                matching_matrix = torch.zeros_like(cost)
+                matching_matrix = torch.zeros_like(cost, device=device)
             except Exception as e:
                 matching_matrix = torch.zeros_like(cost,device='cpu')
                 print(e,'\nError. Switching cpu')

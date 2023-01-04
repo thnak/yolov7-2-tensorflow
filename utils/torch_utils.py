@@ -296,7 +296,7 @@ class ModelEMA:
     def __init__(self, model, decay=0.9999, updates=0):
         # Create EMA
         self.ema = deepcopy(model.module if is_parallel(model) else model).eval()  # FP32 EMA
-        # if next(model.parameters()).device.type != 'cpu':
+        # if next(model.parameters()).device.type == 'cuda':
         #     self.ema.half()  # FP16 EMA
         self.updates = updates  # number of EMA updates
         self.decay = lambda x: decay * (1 - math.exp(-x / 2000))  # decay exponential ramp (to help early epochs)

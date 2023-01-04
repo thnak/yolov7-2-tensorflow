@@ -28,7 +28,7 @@ def detect(opt=None):
     # Initialize
     set_logging()
     device = select_device(opt.device)[0]
-    half = device.type != 'cpu'  # half precision only supported on CUDA
+    half = device.type == 'cuda'  # half precision only supported on CUDA
 
     # Load model
     model = attempt_load(weights, map_location='cpu').to(device)  # load FP32 model
@@ -54,7 +54,7 @@ def detect(opt=None):
     names = model.module.names if hasattr(model, 'module') else model.names
     BFC = BackgroundForegroundColors(names=names)
     # Run inference
-    if device.type != 'cpu':
+    if device.type == 'cuda':
         model(torch.zeros(1, 3, imgsz, imgsz).to(device).type_as(next(model.parameters())))  # run once
     old_img_w = old_img_h = imgsz
     old_img_b = 1
@@ -70,7 +70,7 @@ def detect(opt=None):
         if img.ndimension() == 3:
             img = img.unsqueeze(0)
         # Warmup
-        if device.type != 'cpu' and (old_img_b != img.shape[0] or old_img_h != img.shape[2] or old_img_w != img.shape[3]):
+        if device.type == 'cuda' and (old_img_b != img.shape[0] or old_img_h != img.shape[2] or old_img_w != img.shape[3]):
             twrm = time.time()
             old_img_b = img.shape[0]
             old_img_h = img.shape[2]
@@ -261,7 +261,7 @@ if __name__ == '__main__':
             prefix = colorstr('ONNX_Engine')
             print(f'{prefix}: {vars(model)}\n')
             BFC = BackgroundForegroundColors(names= names)
-            half = device.type != 'cpu'
+            half = device.type == 'cuda'
             seen, hide_conf, hide_labels, avgSpeed, end2end = 0 , False, False, [], False
             for path, img, im0s, vid_cap, s in dataset:
                 model.warmup()
