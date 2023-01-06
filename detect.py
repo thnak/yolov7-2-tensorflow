@@ -64,7 +64,7 @@ def detect(opt=None):
     avgTime = [[], []]
     if opt.datacollection:
         save_txt = True
-    for path, img, im0s, vid_cap, s in dataset:
+    for path, img, im0s, vid_cap, s, ratio, dwdh in dataset:
         img = torch.from_numpy(img).to(device)
         img = img.half() if half else img.float()
         img /= 255.0
@@ -202,13 +202,70 @@ def detectTensorRT(tensorrtEngine,opt=None,save=''):
     if view_img > -1:
         cv2.destroyAllWindows()
 
-
+def inferWithDynamicBatch(enginePath,opt, save=''):
+    source, weights, view_img, save_txt, imgsz, trace = opt.source, opt.weights, opt.view_img, opt.save_txt, opt.img_size, not opt.no_trace
+    save_img = not opt.nosave and not source.endswith('.txt') 
+    webcam = is_stream_or_webcam(source)
+    prefix = colorstr('ONNX: ')
+    from models.yolo import ONNX_Engine
+    model = ONNX_Engine(ONNX_EnginePath=enginePath, prefix=prefix)
+    
+    if webcam:
+        dataset = LoadStreams(source, img_size=imgsz, stride=model.stride, auto= model.rectangle)
+    else:
+        dataset = LoadImages(source, img_size=imgsz, stride=model.stride, auto= model.rectangle)
+    BFC = BackgroundForegroundColors(names= model.names)
+    model.batch_size = opt.batch_size if model.batch_size == 0 else model.batch_size
+    print(f'{prefix}: {vars(model)}\n')
+    imgs = [] 
+    img0s = []
+    seen = 0
+    t3 = time.time()
+    for path, img, im0s, vid_cap, s, ratio, dwdh in dataset:
+        if len(imgs) < model.batch_size:
+            img0s.append(im0s)
+            imgs.append(model.preproc_for_infer(img).copy())
+        else:
+            seen += 1
+            t1 = time.time()
+            pred, img = model.infer(imgs)
+            t2 = time.time() - t1
+            img = model.end2end(pred[0], img0s, dwdh, ratio, int(1/(t2/model.batch_size)), BFC)
+            for im in img:
+                cv2.namedWindow(path, cv2.WINDOW_NORMAL)
+                cv2.imshow(path, im)
+                if cv2.waitKey(opt.view_img) == 27 and opt.view_img > -1:
+                    exit()
+            imgs = []
+            img0s = []
+            
+            
+def inferWithDynamicBatch2(enginePath,opt, save=''):
+    source, weights, view_img, save_txt, imgsz, trace = opt.source, opt.weights, opt.view_img, opt.save_txt, opt.img_size, not opt.no_trace
+    save_img = not opt.nosave and not source.endswith('.txt') 
+    webcam = is_stream_or_webcam(source)
+    prefix = colorstr('ONNX: ')
+    from models.yolo import ONNX_Engine
+    model = ONNX_Engine(ONNX_EnginePath=enginePath, prefix=prefix)
+    
+    if webcam:
+        dataset = LoadStreams(source, img_size=imgsz, stride=model.stride, auto= model.rectangle)
+    else:
+        dataset = LoadImages(source, img_size=imgsz, stride=model.stride, auto= model.rectangle)
+    BFC = BackgroundForegroundColors(names= model.names)
+    model.batch_size = opt.batch_size if model.batch_size == 0 else model.batch_size
+    print(f'debug: {model.batch_size}')
+    model.run(dataset=dataset)
+    
+            
+            
         
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--weights', nargs='+', type=str,default=['./models/yolov7.pt'], help='model.pt path(s)')
     parser.add_argument('--source', type=str,default='inference/images/', help='source file/folder, 0 for webcam')
     parser.add_argument('--img-size', type=int, default=640,help='inference size (pixels)')
+    parser.add_argument('--batch-size', type=int, default=1,help='inference batch (images)')
     parser.add_argument('--conf-thres', type=float,default=0.25, help='object confidence threshold')
     parser.add_argument('--iou-thres', type=float,default=0.45, help='IOU threshold for NMS')
     parser.add_argument('--device', default='cpu',help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
@@ -226,6 +283,7 @@ if __name__ == '__main__':
     parser.add_argument('--exist-ok', action='store_true', help='existing project/name ok, do not increment')
     parser.add_argument('--no-trace', action='store_true', help='don`t trace model')
     parser.add_argument('--no-check', action='store_true', help='don`t check requirements')
+    
     opt = parser.parse_args()
     if not opt.no_check:
         check_requirements()
@@ -246,121 +304,129 @@ if __name__ == '__main__':
                     detect(opt)
                     
         elif file_extention in ['.onnx']:
-            from models.yolo import ONNX_Engine
-            device = select_device(opt.device)[0]
-            webcam = is_stream_or_webcam(opt.source)
-            prefix = colorstr('ONNX_Engine')
-            model = ONNX_Engine(ONNX_EnginePath=_
-                                ,confThres=opt.conf_thres, 
-                                iouThres=opt.iou_thres,device=device,prefix= prefix)
-            imgsz = model.imgsz
-            if webcam:
-                dataset = LoadStreams(opt.source, img_size=max(imgsz), auto= False if model.rectangle else True)
-            else:
-                dataset = LoadImages(opt.source, img_size=max(imgsz), auto= False if model.rectangle else True)
+            inferWithDynamicBatch(_, opt, save_dir)
+            # from models.yolo import ONNX_Engine
+            # device = select_device(opt.device)[0]
+            # webcam = is_stream_or_webcam(opt.source)
+            # prefix = colorstr('ONNX_Engine')
+            # model = ONNX_Engine(ONNX_EnginePath=_
+            #                     ,confThres=opt.conf_thres, 
+            #                     iouThres=opt.iou_thres,device=device,prefix= prefix)
+            # imgsz = model.imgsz
+            # if webcam:
+            #     dataset = LoadStreams(opt.source, img_size=max(imgsz), auto= False if model.rectangle else True)
+            # else:
+            #     dataset = LoadImages(opt.source, img_size=max(imgsz), auto= False if model.rectangle else True)
                 
-            names, vid_path = model.names, None
+            # names, vid_path = model.names, None
             
-            print(f'{prefix}: {vars(model)}\n')
-            BFC = BackgroundForegroundColors(names= names)
-            txtColorD, bboxColorD = BFC.getval(index=0)
-            half = device.type == 'cuda'
-            seen, hide_conf, hide_labels, avgSpeed, end2end = 0 , False, False, [], True
-            for path, img, im0s, vid_cap, s, ratio, dwdh in dataset:
-                model.warmup()
-                t1 = time.time()
-                pred, img = model.infer(img, end2end=end2end)                    
-                t2 = time.time() - t1
-                img_h, img_w = img.shape[2:]
-                if not end2end:
-                    for i, det in enumerate(pred):
-                        seen += 1
-                        if webcam:
-                            p, s,  im0, frame = path[i], '%g: ' % i, im0s[i].copy(), dataset.count
-                        else:
-                            p, im0, frame = path, im0s.copy(), getattr(dataset, 'frame', 0)
+            # print(f'{prefix}: {vars(model)}\n')
+            # BFC = BackgroundForegroundColors(names= names)
+            # txtColorD, bboxColorD = BFC.getval(index=0)
+            # half = device.type == 'cuda'
+            # seen, hide_conf, hide_labels, avgSpeed, end2end = 0 , False, False, [], model.is_end3end
+            # model.batch_size = opt.batch_size if model.batch_size == 0 else model.batch_size
+            # imgs, img0s = [], []
+            # for path, img, im0s, vid_cap, s, ratio, dwdh in dataset:
+            #     model.warmup()
+            #     t1 = time.time()
+            #     pred, img = model.infer(img, end2end=end2end)                    
+            #     t2 = time.time() - t1
+            #     img_h, img_w = img.shape[2:]
+                
+            #     if not end2end:
+            #         for i, det in enumerate(pred):
+            #             seen += 1
+            #             if webcam:
+            #                 p, s,  im0, frame = path[i], '%g: ' % i, im0s[i].copy(), dataset.count
+            #             else:
+            #                 p, im0, frame = path, im0s.copy(), getattr(dataset, 'frame', 0)
 
-                        p = Path(p)
-                        save_path = str(save_dir / p.name)
-                        txt_path = str(save_dir / 'labels' / p.stem) + ('' if dataset.mode == 'image' else f'_{frame}')  # im.txt
-                        if frame_count_ == 0:
-                            fps_rate = round(1000/(t2*1000),2)
-                            avgSpeed.append(fps_rate)
-                            fps_rate = sum(avgSpeed)/len(avgSpeed)
-                            avgSpeed = []
-                            frame_count_ += 1
-                        elif frame_count_ == 30:
-                            frame_count_ = 0
-                        else:
-                            frame_count_ += 1
-                        s += f'{img_h}x{img_w} '
-                        s += f'speed: {round(t2*1000,3)}ms '
-                        gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh
+            #             p = Path(p)
+            #             save_path = str(save_dir / p.name)
+            #             txt_path = str(save_dir / 'labels' / p.stem) + ('' if dataset.mode == 'image' else f'_{frame}')  # im.txt
+            #             if frame_count_ == 0:
+            #                 fps_rate = round(1000/(t2*1000),2)
+            #                 avgSpeed.append(fps_rate)
+            #                 fps_rate = sum(avgSpeed)/len(avgSpeed)
+            #                 avgSpeed = []
+            #                 frame_count_ += 1
+            #             elif frame_count_ == 30:
+            #                 frame_count_ = 0
+            #             else:
+            #                 frame_count_ += 1
+            #             s += f'{img_h}x{img_w} '
+            #             s += f'speed: {round(t2*1000,3)}ms '
+            #             gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh
                         
-                        if len(det):
-                            det[:, :4] = scale_coords((img_h, img_w), det[:, :4], im0.shape).round()
+            #             if len(det):
+            #                 det[:, :4] = scale_coords((img_h, img_w), det[:, :4], im0.shape).round()
 
-                            for c in det[:, 5].unique():
-                                n = (det[:, 5] == c).sum()
-                                s += f"{n} {names[int(c)]}{'s' * (n > 1)} "
+            #                 for c in det[:, 5].unique():
+            #                     n = (det[:, 5] == c).sum()
+            #                     s += f"{n} {names[int(c)]}{'s' * (n > 1)} "
 
-                            for *xyxy, conf, cls in reversed(det):
-                                if opt.save_txt:
-                                    xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
-                                    line = (cls, *xywh, conf) if opt.save_conf else (cls, *xywh)  # label format
-                                    with open(f'{txt_path}.txt', 'a') as f:
-                                        f.write(('%g ' * len(line)).rstrip() % line + '\n')
+            #                 for *xyxy, conf, cls in reversed(det):
+            #                     if opt.save_txt:
+            #                         xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
+            #                         line = (cls, *xywh, conf) if opt.save_conf else (cls, *xywh)  # label format
+            #                         with open(f'{txt_path}.txt', 'a') as f:
+            #                             f.write(('%g ' * len(line)).rstrip() % line + '\n')
 
-                                if not opt.nosave or opt.view_img:  # Add bbox to image
-                                    c = int(cls)
-                                    label = None if hide_labels else (names[c] if hide_conf else f'{names[c]} {conf:.2f}')
-                                    txtColor, bboxColor = BFC.getval(index=int(cls))
-                                    im0 = plot_one_box_with_return(xyxy, im0, label=label, txtColor=txtColor,
-                                                                bboxColor=bboxColor, line_thickness=3,
-                                                                frameinfo=[f'avgFPS: {fps_rate}',f'Total objects: {n}'])                                              
-                        else:
-                            im0 = plot_one_box_with_return(None, im0, label=None, txtColor=txtColorD, bboxColor=bboxColorD,
-                                                        line_thickness=3, frameinfo=[f'avgFPS: {fps_rate}', f'Total objects: {0}'])                                
-                        print(f'{s}')
-                        if opt.view_img > -1:
-                            cv2.namedWindow(f'{dataset.mode} {path}', cv2.WINDOW_NORMAL)
-                            cv2.imshow(f'{dataset.mode} {path}', im0)
-                            if cv2.waitKey(opt.view_img) == 27:
-                                print(colorstr(f'User keyboard interupt, exiting...'))
-                                exit()
-                        if not opt.nosave:
-                            if dataset.mode == 'image':
-                                pass
-                            else:
-                                if vid_path != save_path:
-                                    vid_path = save_path
-                                    if vid_cap:
-                                        fps = vid_cap.get(cv2.CAP_PROP_FPS)
-                                        w = vid_cap.get(cv2.CAP_PROP_FRAME_WIDTH)
-                                        h = vid_cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
-                                    else:
-                                        fps = 30
-                                        h, w = im0.shape[:2]
-                                    ffmpeg = FFMPEG_recorder(savePath=vid_path, videoDimensions=(int(w),int(h)), fps=fps)
+            #                     if not opt.nosave or opt.view_img:  # Add bbox to image
+            #                         c = int(cls)
+            #                         label = None if hide_labels else (names[c] if hide_conf else f'{names[c]} {conf:.2f}')
+            #                         txtColor, bboxColor = BFC.getval(index=int(cls))
+            #                         im0 = plot_one_box_with_return(xyxy, im0, label=label, txtColor=txtColor,
+            #                                                     bboxColor=bboxColor, line_thickness=3,
+            #                                                     frameinfo=[f'avgFPS: {fps_rate}',f'Total objects: {n}'])                                              
+            #             else:
+            #                 im0 = plot_one_box_with_return(None, im0, label=None, txtColor=txtColorD, bboxColor=bboxColorD,
+            #                                             line_thickness=3, frameinfo=[f'avgFPS: {fps_rate}', f'Total objects: {0}'])                                
+            #             print(f'{s}')
+            #             if opt.view_img > -1:
+            #                 cv2.namedWindow(f'{dataset.mode} {path}', cv2.WINDOW_NORMAL)
+            #                 cv2.imshow(f'{dataset.mode} {path}', im0)
+            #                 if cv2.waitKey(opt.view_img) == 27:
+            #                     print(colorstr(f'User keyboard interupt, exiting...'))
+            #                     exit()
+            #             if not opt.nosave:
+            #                 if dataset.mode == 'image':
+            #                     pass
+            #                 else:
+            #                     if vid_path != save_path:
+            #                         vid_path = save_path
+            #                         if vid_cap:
+            #                             fps = vid_cap.get(cv2.CAP_PROP_FPS)
+            #                             w = vid_cap.get(cv2.CAP_PROP_FRAME_WIDTH)
+            #                             h = vid_cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
+            #                         else:
+            #                             fps = 30
+            #                             h, w = im0.shape[:2]
+            #                         ffmpeg = FFMPEG_recorder(savePath=vid_path, videoDimensions=(int(w),int(h)), fps=fps)
                                     
-                                ffmpeg.writeFrame(image=im0)
-                                ffmpeg.writeSubtitle(title=s,fps=fps)
-                else:
-                    img = [im0s.copy()]
-                    img = model.end2end(pred[0], img, dwdh, ratio, int(1/t2), BFC)
-                    if opt.view_img > -1:
-                        for im in img:
-                            cv2.namedWindow(f'{dataset.mode} {path}', cv2.WINDOW_NORMAL)
-                            cv2.imshow(f'{dataset.mode} {path}', im)
-                            if cv2.waitKey(opt.view_img) == 27:
-                                print(colorstr(f'User keyboard interupt, exiting...'))
-                                exit()
-            if not opt.nosave and dataset.mode != 'image':          
-                ffmpeg.stopRecorder()
-                ffmpeg.addSubtitle()
-                del ffmpeg
-            del model, dataset
-            cv2.destroyAllWindows()
+            #                     ffmpeg.writeFrame(image=im0)
+            #                     ffmpeg.writeSubtitle(title=s,fps=fps)
+            #     else:
+            #         pass
+            #         if len(imgs) < model.batch_size:
+            #             imgs.append(im0.copy())
+            #             img0s.append(im0s.copy())
+                    
+            #         imgs = model.end2end(pred[0], img0s, dwdh, ratio, int(1/t2), BFC)
+            #         if opt.view_imgs > -1:
+            #             for im in imgs:
+            #                 cv2.namedWindow(f'{dataset.mode} {path}', cv2.WINDOW_NORMAL)
+            #                 cv2.imshow(f'{dataset.mode} {path}', im)
+            #                 if cv2.waitKey(opt.view_img) == 27:
+            #                     print(colorstr(f'User keyboard interupt, exiting...'))
+            #                     exit()
+            # if not opt.nosave and dataset.mode != 'image':          
+            #     ffmpeg.stopRecorder()
+            #     ffmpeg.addSubtitle()
+            #     del ffmpeg
+            # del model, dataset
+            # cv2.destroyAllWindows()
                 
         elif file_extention in ['.trt', '.engine']:
             detectTensorRT(_,opt, save=save_dir)

@@ -1,49 +1,49 @@
 # Usage: pip install -r requirements.txt
 
 # Base ----------------------------------------
-matplotlib>=3.2.2
-numpy>=1.18.5
-opencv-python>=4.1.1
-Pillow>=7.1.2
-PyYAML>=5.3.1
-requests>=2.23.0
-scipy>=1.4.1
+matplotlib==3.6.2
+numpy==1.23.4
+opencv-python==4.7.0.68
+Pillow==9.4.0
+PyYAML==6.0
+requests==2.28.0
+scipy==1.10.0
 torch==1.13
 torchvision==0.14.0
 # torch-directml
-tqdm>=4.41.0
+tqdm==4.64.0
 protobuf<4.21.3
 pycuda
 nvidia-pyindex
 nvidia-tensorrt
 youtube_dl
 # Logging -------------------------------------
-tensorboard>=2.4.1
+tensorboard==2.11.0
 wandb
 termcolor
 # Plotting ------------------------------------
-pandas>=1.1.4
-seaborn
+pandas==1.3.5
+seaborn==0.12.2
 
 # Export --------------------------------------
 
-coremltools>=4.1  # CoreML export
-onnx>=1.9.0  # ONNX export
-onnxsim
-onnxmltools
-onnx_tf
-onnx-simplifier>=0.3.6  # ONNX simplifier
+coremltools==6.1  # CoreML export
+onnx==1.12.0  # ONNX export
+onnxsim==0.4.13
+onnxmltools==1.11.1
+onnx_tf==1.10.0
+onnx-simplifier==0.4.13 # ONNX simplifier
 scikit-learn<=1.1.2  # CoreML quantization
 tensorflow==2.11.0  # TFLite export
 tensorflowjs>=3.9.0  # TF.js export
-openvino-dev  # OpenVINO export
+openvino-dev==2022.3.0 # OpenVINO export
 
 # Extras --------------------------------------
-pyadl
-ipython  # interactive notebook
-psutil  # system utilization
-thop # FLOPs computation
-albumentations
+pyadl==0.1
+ipython==8.8.0  # interactive notebook
+psutil==5.9.4  # system utilization
+thop==1.1.1
+albumentations==1.3.0
 onnx-graphsurgeon
 # pycocotools>=2.0  # COCO mAP
 # roboflow

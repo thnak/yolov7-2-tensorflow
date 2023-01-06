@@ -1170,11 +1170,10 @@ def pastein(image, labels, sample_labels, sample_images, sample_masks):
 class Albumentations:
     """Data augmentation with Albumentations library"""
     def __init__(self, hyp=None, rect = True):
-        self.transform = None
         import albumentations as A
         self.transform = A.Compose([
             A.CLAHE(p=hyp['CLAHE'], 
-                    clip_limit=hyp['CLAHE_clip_limit'], 
+                    clip_limit=hyp['CLAHE_clip_limit'],
                     tile_grid_size=(32,32)),
             A.RandomBrightnessContrast(brightness_limit=hyp['brightness_limit'], 
                                        contrast_limit=hyp['contrast_limit'], 
@@ -1194,10 +1193,6 @@ class Albumentations:
             A.HorizontalFlip(p=hyp['HorizontalFlip']),
             A.VerticalFlip(p=hyp['VerticalFlip']),
             A.ChannelDropout(p=hyp['ChannelDropout']),
-            # A.Cutout(p=hyp['Cutout'],
-            #          max_h_size=hyp['Cutout_max_h_w_size'],
-            #          max_w_size=hyp['Cutout_max_h_w_size'],
-            #          num_holes=hyp['Cutout_num_holes']),
             A.PixelDropout(p=hyp['PixelDropout'])],
             
             bbox_params=A.BboxParams(format='pascal_voc', label_fields=['class_labels']))

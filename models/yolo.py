@@ -19,6 +19,9 @@ from utils.general import check_requirements
 import yaml
 import numpy as np
 import cv2
+import threading
+
+
 try:
     import thop  # for FLOPS computation
 except ImportError:
@@ -44,7 +47,7 @@ class Detect(nn.Module):
         self.register_buffer('anchors', a)  # shape(nl,na,2)
         self.register_buffer('anchor_grid', a.clone().view(self.nl, 1, -1, 1, 1, 2))  # shape(nl,1,na,1,1,2)
         self.m = nn.ModuleList(nn.Conv2d(x, self.no * self.na, 1) for x in ch)  # output conv
-        self.dynamic = False
+        
     def forward(self, x):
         # x = x.copy()  # for profiling
         z = []  # inference output
@@ -122,7 +125,7 @@ class IDetect(nn.Module):
         
         self.ia = nn.ModuleList(ImplicitA(x) for x in ch)
         self.im = nn.ModuleList(ImplicitM(self.no * self.na) for _ in ch)
-        self.dynamic = False
+
     def forward(self, x):
         # x = x.copy()  # for profiling
         z = []  # inference output
@@ -156,7 +159,6 @@ class IDetect(nn.Module):
             if not self.training:  # inference
                 if self.grid[i].shape[2:4] != x[i].shape[2:4]:
                     self.grid[i] = self._make_grid(nx, ny).to(x[i].device)
-
                 y = x[i].sigmoid()
                 if not torch.onnx.is_in_onnx_export():
                     y[..., 0:2] = (y[..., 0:2] * 2. - 0.5 + self.grid[i]) * self.stride[i]  # xy
@@ -238,7 +240,6 @@ class IKeypoint(nn.Module):
         
         self.ia = nn.ModuleList(ImplicitA(x) for x in ch)
         self.im = nn.ModuleList(ImplicitM(self.no_det * self.na) for _ in ch)
-        self.dynamic = False
         if self.nkpt is not None:
             if self.dw_conv_kpt: #keypoint head is slightly more complex
                 self.m_kpt = nn.ModuleList(
@@ -339,7 +340,7 @@ class IAuxDetect(nn.Module):
         
         self.ia = nn.ModuleList(ImplicitA(x) for x in ch[:self.nl])
         self.im = nn.ModuleList(ImplicitM(self.no * self.na) for _ in ch[:self.nl])
-        self.dynamic = False
+
     def forward(self, x):
         # x = x.copy()  # for profiling
         z = []  # inference output
@@ -466,7 +467,7 @@ class IBin(nn.Module):
         
         self.ia = nn.ModuleList(ImplicitA(x) for x in ch)
         self.im = nn.ModuleList(ImplicitM(self.no * self.na) for _ in ch)
-        self.dynamic = False
+
     def forward(self, x):
 
         #self.x_bin_sigmoid.use_fw_regression = True
@@ -773,7 +774,7 @@ class ONNX_Engine(object):
         self.multi_label_nms = multi_label_nms
         self.max_det_nms = max_det_nms
         
-          
+        
         import platform
         import torch
         
@@ -861,7 +862,10 @@ class ONNX_Engine(object):
         self.imgsz = self.session.get_inputs()[0].shape[2:]
         self.imgsz = self.imgsz if isinstance(self.imgsz[0], int) else [640, 640]
         self.batch_size = self.session.get_inputs()[0].shape[0]
-        self.half = True if self.session.get_inputs()[0].type != "tensor(float)" else False
+        self.batch_size = 0 if self.batch_size == 'batch' else self.batch_size
+        self.dynamic_batch = True if self.batch_size == 0 else False
+        self.half = self.session.get_inputs()[0].type != "tensor(float)"
+        
         self.output_names = [x.name for x in self.session.get_outputs()]
         self.input_names = [i. name for i in self.session.get_inputs()]
         
@@ -870,26 +874,21 @@ class ONNX_Engine(object):
         if 'stride' in meta:
             self.stride, self.names = int(meta['stride']), eval(meta['names'])
             self.nc = int(meta['nc'])
-            self.rectangle = meta['rectangle'] == 'True'
-            self.rectangle = self.imgsz[0] == self.imgsz[1]
+            self.rectangle = self.imgsz[0] != self.imgsz[1]
             self.opset = int(meta['opset version'])
+            self.is_end2end =  meta['ort-nms'] == 'True'
             if self.opset > 11:
-                logging.warning(f'{prefix} onnx opset tested for version 11, newer version may have poor performance for ONNXRUNTIME')
+                logging.warning(f'{prefix} onnx opset tested for version 11, newer version may have poor performance for ONNXRUNTIME in DmlExecutionProvider')
+        else:
+            logging.error(f'{prefix} The model engine was exported with wrong format, please re-export the model')
+            exit()
 
-        self.names = self.names if self.names is not None else [i for i in range(999)]
-        self.nc = self.nc if self.nc is not None else 999
-        self.stride = self.stride if self.stride is not None else 32
+        self.thread1 = None
+        self.thread2 = None
+        self.thread3 = None
         
-    def infer(self, im, end2end=False):
-        """inference an image
-
-        Args:
-            im (_type_): _description_
-
-        Returns:
-            _type_: _description_
-        """
-        # print(f'debug: {self.device}')
+            
+    def preproc_for_infer(self, im):
         im = torch.from_numpy(im).to(self.device)
         im = im.half() if self.half else im.float()  # uint8 to fp16/32
         im /= 255.0  # 0 - 255 to 0.0 - 1.0
@@ -898,9 +897,15 @@ class ONNX_Engine(object):
         if len(im.shape) == 3:
             im = im[None]  # expand for batch dim
         im = im.cpu().numpy()
+        return im   
+    
+    def infer(self, im):
+        if len(im) >1:
+            im = np.concatenate(im)
+        else:
+            im = im[0]
         y = self.session.run(self.output_names, {self.input_names[0]: im})
-        # print(f'debug: {y}')
-        if end2end:
+        if self.is_end2end:
             return y, im
         else:
             if isinstance(y, (list, tuple)):
@@ -913,24 +918,9 @@ class ONNX_Engine(object):
     def from_numpy(self, x):
         return torch.from_numpy(x).to(self.device) if isinstance(x, np.ndarray) else x
     
-    def end2end(self, outputs, ori_images, dwdh,ratio, fps, bfc):
-        """ONNX nms
-        support for dynamic batch
-
-        Args:
-            outputs (_type_): _description_
-            ori_images (_type_): _description_
-            dwdh (_type_): _description_
-            ratio (_type_): _description_
-            txtcolor (_type_): _description_
-            bboxcolor (_type_): _description_
-            fps (_type_): _description_
-
-        Returns:
-            _type_: _description_
-        """
+    def end2end(self, outputs, ori_images, dwdh,ratio, fps, bfc=None):
         image = [None] * len(ori_images)
-        for i,(batch_id,x0,y0,x1,y1,cls_id,score) in enumerate(outputs):
+        for index, (batch_id,x0,y0,x1,y1,cls_id,score) in enumerate(outputs):
             image[int(batch_id)] = ori_images[int(batch_id)] if image[int(batch_id)] is None else image[int(batch_id)]
             box = np.array([x0,y0,x1,y1])
             box -= np.array(dwdh*2)
@@ -938,68 +928,62 @@ class ONNX_Engine(object):
             box = box.round().astype(np.int32).tolist()
             cls_id = int(cls_id)
             score = round(float(score),2)
+            if score < self.confThres:
+                continue
             name = self.names[cls_id]
             name += ' '+str(score)
-            txtcolor, bboxcolor = bfc.getval(index=cls_id)
-            image[int(batch_id)] = plot_one_box_with_return(box, image[int(batch_id)], txtColor=txtcolor,
+            if bfc is not None:
+                txtcolor, bboxcolor = bfc.getval(index=cls_id)
+            else:
+                txtcolor, bboxcolor = (255, 255, 255), (0, 0, )
+            image[int(batch_id)] = plot_one_box_with_return(box, image[int(batch_id)],
+                                                            txtColor=txtcolor,
                                                             bboxColor=bboxcolor, label=name,
-                                                            frameinfo=[f'FPS: {fps}',f'Total object: {len(outputs)}'])
+                                                            frameinfo=[f'FPS: {fps}',f'Total object: {int(len(outputs)/ len(ori_images))}'])
         return image
             
-    def warmup(self, imgsz=(1, 3, 640, 640)):
-        """Warming up...
-
-        Args:
-            imgsz (tuple, optional): _description_. Defaults to (1, 3, 640, 640).
-        No return
-        """
-        im = torch.empty(*imgsz, dtype=torch.half if self.half else torch.float, device=self.device)
+    def warmup(self):
+        imgsz=(self.batch_size, 3, self.imgsz[0], self.imgsz[1])
+        im = [torch.empty(*imgsz, dtype=torch.half if self.half else torch.float, device=self.device)]
         if self.device.type == 'cuda':
             for _ in range(1):
                 logging.info(f'\nWarming up: \n')
-                self.infer(im)               
+                self.infer(im)          
                 
     def non_max_suppression(self):
-        """Non-Maximum Suppression (NMS) on inference results to reject overlapping detections
-
-        Returns:
-            
-        """
-        prediction = self.prediction
-        conf_thres = self.confThres
-        iou_thres = self.iouThres
-        classes = self.classes_nms
-        agnostic = self.agnostic_nms
-        multi_label = self.multi_label_nms
-        # labels = self.labels
-        max_det = self.max_det_nms
+        # prediction = self.prediction
+        # conf_thres = self.confThres
+        # classes = self.classes_nms
+        # agnostic = self.agnostic_nms
+        # multi_label = self.multi_label_nms
+        # max_det = self.max_det_nms
 
         # Checks
-        assert 0 <= conf_thres <= 1, f'Invalid Confidence threshold {conf_thres}, valid values are between 0.0 and 1.0'
-        assert 0 <= iou_thres <= 1, f'Invalid IoU {iou_thres}, valid values are between 0.0 and 1.0'
-        if isinstance(prediction, (list, tuple)):  # YOLOv5 model in validation model, output = (inference_out, loss_out)
-            prediction = prediction[0]  # select only inference output
+        assert 0 <= self.confThres <= 1, f'Invalid Confidence threshold {self.confThres}, valid values are between 0.0 and 1.0'
+        assert 0 <= self.iouThres <= 1, f'Invalid IoU {self.iouThres}, valid values are between 0.0 and 1.0'
+        if isinstance(self.prediction, (list, tuple)):  # YOLOv5 model in validation model, output = (inference_out, loss_out)
+            self.prediction = self.prediction[0]  # select only inference output
 
-        device = prediction.device
+        device = self.prediction.device
         mps = 'mps' in device.type  # Apple MPS
         if mps:  # MPS not fully supported yet, convert tensors to CPU before NMS
-            prediction = prediction.cpu()
-        bs = prediction.shape[0]  # batch size
-        nc = prediction.shape[2] - 5  # number of classes
-        xc = prediction[..., 4] > conf_thres  # candidates
+            self.prediction = self.prediction.cpu()
+        bs = self.prediction.shape[0]  # batch size
+        nc = self.prediction.shape[2] - 5  # number of self.classes_nms
+        xc = self.prediction[..., 4] > self.confThres  # candidates
 
         # Settings
         max_wh = 7680  # (pixels) maximum box width and height
         max_nms = 30000  # maximum number of boxes into torchvision.ops.nms()
         time_limit = 0.5 + 0.05 * bs  # seconds to quit after
         redundant = True  # require redundant detections
-        multi_label &= nc > 1  # multiple labels per box (adds 0.5ms/img)
+        self.multi_label_nms &= nc > 1  # multiple labels per box (adds 0.5ms/img)
         merge = False  # use merge-NMS
 
         t = time.time()
         mi = 5 + nc  # mask start index
-        output = [torch.zeros((0, 6), device=prediction.device)] * bs
-        for xi, x in enumerate(prediction):  # image index, image inference
+        output = [torch.zeros((0, 6), device=self.prediction.device)] * bs
+        for xi, x in enumerate(self.prediction):  # image index, image inference
             x = x[xc[xi]]  # confidence
             # If none remain process next image
             if not x.shape[0]:
@@ -1013,16 +997,16 @@ class ONNX_Engine(object):
             mask = x[:, mi:]  # zero columns if no masks
 
             # Detections matrix nx6 (xyxy, conf, cls)
-            if multi_label:
-                i, j = (x[:, 5:mi] > conf_thres).nonzero(as_tuple=False).T
+            if self.multi_label_nms:
+                i, j = (x[:, 5:mi] > self.confThres).nonzero(as_tuple=False).T
                 x = torch.cat((box[i], x[i, 5 + j, None], j[:, None].float(), mask[i]), 1)
             else:  # best class only
                 conf, j = x[:, 5:mi].max(1, keepdim=True)
-                x = torch.cat((box, conf, j.float(), mask), 1)[conf.view(-1) > conf_thres]
+                x = torch.cat((box, conf, j.float(), mask), 1)[conf.view(-1) > self.confThres]
 
             # Filter by class
-            if classes is not None:
-                x = x[(x[:, 5:6] == torch.tensor(classes, device=x.device)).any(1)]
+            if self.classes_nms is not None:
+                x = x[(x[:, 5:6] == torch.tensor(self.classes_nms, device=x.device)).any(1)]
             # Check shape
             n = x.shape[0]  # number of boxes
             if not n:  # no boxes
@@ -1030,13 +1014,13 @@ class ONNX_Engine(object):
             x = x[x[:, 4].argsort(descending=True)[:max_nms]]  # sort by confidence and remove excess boxes
 
             # Batched NMS
-            c = x[:, 5:6] * (0 if agnostic else max_wh)  # classes
+            c = x[:, 5:6] * (0 if self.agnostic_nms else max_wh)  # classes
             boxes, scores = x[:, :4] + c, x[:, 4]  # boxes (offset by class), scores
-            i = torchvision.ops.nms(boxes, scores, iou_thres)  # NMS
-            i = i[:max_det]  # limit detections
+            i = torchvision.ops.nms(boxes, scores, self.iouThres)  # NMS
+            i = i[:self.max_det_nms]  # limit detections
             if merge and (1 < n < 3E3):  # Merge NMS (boxes merged using weighted mean)
                 # update boxes as boxes(i,4) = weights(i,n) * boxes(n,4)
-                iou = box_iou(boxes[i], boxes) > iou_thres  # iou matrix
+                iou = box_iou(boxes[i], boxes) > self.iouThres  # iou matrix
                 weights = iou * scores[None]  # box weights
                 x[i, :4] = torch.mm(weights, x[:, :4]).float() / weights.sum(1, keepdim=True)  # merged boxes
                 if redundant:
@@ -1050,6 +1034,91 @@ class ONNX_Engine(object):
                 break  # time limit exceeded
 
         return output
+
+    def Thread1(self, dataset):
+        for path, ims, im0s, vid_cap, s, ratio, dwdh in dataset:
+            if len(self.datablock) < self.batch_size:
+                ims = self.preproc_for_infer(ims.copy())
+                self.datablock.append([path, ims, im0s.copy(), s, ratio, dwdh])
+            else:
+                self.t1_2_t2.set()
+                self.t2_2_t1.wait()
+                self.datablock = []
+                print(f'end 1')
+                self.t2_2_t1.clear()
+                
+        if self.datablock:
+            if len(self.datablock) < self.batch_size:
+                if self.dynamic_batch:
+                    self.t1_2_t2.set()
+                    self.t2_2_t1.wait()
+                    self.t2_2_t1.clear
+        
+        self.datablock = None
+        self.t1_2_t2.set()
+        self.t2_2_t1.wait()
+        print(f'end thread1')
+        self.t2_2_t1.clear()
+        
+        
+        
+    def Thread2(self):
+        while True:
+            self.t1_2_t2.wait()
+            localdata = self.datablock
+            self.t1_2_t2.clear()
+            self.t2_2_t1.set()
+            if localdata is None:
+                self.datablock2 = None
+                self.t2_2_t3.set()
+                self.t2_2_t1.set()
+                print(f'end thread2')
+                break
+            
+            imgs = [x[1] for x in localdata]
+            self.pred, im = self.infer(im=imgs)
+            self.datablock2 = localdata
+            self.t2_2_t3.set()
+                    
+        
+    def Thread3(self):
+        while True:
+            self.t2_2_t3.wait()
+            localdata = self.datablock2
+            self.t2_2_t3.clear()
+            if localdata is None:
+                print(f'finish vis')
+                break
+            img0s = [x for x in localdata[2]]
+            img = self.end2end(self.pred, img0s, localdata[5], localdata[4])
+            for im in img:
+                cv2.namedWindow('das', cv2.WINDOW_NORMAL)
+                cv2.imshow('das', im)            
+
+
+    def run(self, dataset):
+        if self.batch_size > 1:
+            print('Initial Threads...')   
+            self.t1_2_t2 = threading.Event()
+            self.t2_2_t1 = threading.Event()
+            self.t2_2_t3 = threading.Event()
+            self.datablock = []
+            
+            
+            self.thread1 = threading.Thread(target= self.Thread1, args=(dataset))
+            self.thread2 = threading.Thread(target= self.Thread2)
+            self.thread3 = threading.Thread(target= self.Thread3)
+            
+        print('Starting Threads...')         
+        self.thread1.start()
+        self.thread2.start()
+        self.thread3.start()
+        print('Start Threads success...') 
+        self.thread1.join()
+        self.thread2.join()
+        self.thread3.join()
+        print('Success...')
+
     def stop():
         pass
 

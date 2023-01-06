@@ -34,14 +34,14 @@ if __name__ == '__main__':
     parser.add_argument('--topk-all', type=int, default=100, help='topk objects for every images')
     parser.add_argument('--iou-thres', type=float, default=0.45, help='iou threshold for NMS')
     parser.add_argument('--conf-thres', type=float, default=0.25, help='conf threshold for NMS')
-    parser.add_argument('--onnx-opset', type=int, default=17, help='onnx opset version')
+    parser.add_argument('--onnx-opset', type=int, default=17, help='onnx opset version, 11 for DmlExecutionProvider')
     parser.add_argument('--device', default='cpu', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     parser.add_argument('--simplify', action='store_true', help='simplify onnx model')
     parser.add_argument('--include-nms', action='store_true', help='registering EfficientNMS_TRT plugin to export TensorRT engine')
     parser.add_argument('--fp16', action='store_true', help='CoreML FP16 half-precision export')
     parser.add_argument('--int8', action='store_true', help='CoreML INT8 quantization')
     parser.add_argument('--v', action='store_true', help='Verbose log')
-    parser.add_argument('--createtor', type=str, default='Nguyễn Văn Thạnh', help="Createtor's name")
+    parser.add_argument('--author', type=str, default='Nguyễn Văn Thạnh', help="author's name")
     opt = parser.parse_args()
     opt.img_size *= 2 if len(opt.img_size) == 1 else 1  # expand
     opt.dynamic = opt.dynamic and not opt.end2end
@@ -56,8 +56,8 @@ if __name__ == '__main__':
         logging.info(f'# Load PyTorch model')
         device, gitstatus = select_device(opt.device)
         model = attempt_load(weight, map_location=device)  # load FP32 model
-        modelss = model
         labels = model.names
+        model_ori = model
         model_Gflop = model.info()
 
         # Checks
@@ -114,7 +114,6 @@ if __name__ == '__main__':
                         ct_model = ct.models.neural_network.quantization_utils.quantize_weights(ct_model, bits, mode)
                 else:
                     logging.info(f'{prefix} quantization only supported on macOS, skipping...')
-
             f = weight.replace('.pt', '.mlmodel')  # filename
             ct_model.save(f)
             logging.info(f'{prefix} CoreML export success✅, saved as %s' % f)
@@ -157,12 +156,9 @@ if __name__ == '__main__':
                         'num_dets': {0: 'batch'},
                         'det_boxes': {0: 'batch'},
                         'det_scores': {0: 'batch'},
-                        'det_classes': {0: 'batch'},
-                    }
+                        'det_classes': {0: 'batch'},}
                 else:
-                    output_axes = {
-                        'output': {0: 'batch'},
-                    }
+                    output_axes = {'output': {0: 'batch'},}
                 dynamic_axes.update(output_axes)
             if opt.grid:
                 if opt.end2end:
@@ -180,10 +176,12 @@ if __name__ == '__main__':
             if opt.onnx_opset < 11 and opt.onnx_opset > 17:
                 opt.onnx_opset = 11
             if opt.onnx_opset > 11:
-                logging.info(f'{prefix} onnx opset tested for version 11, newer version may have poor performance for ONNXRUNTIME')
-            torch.onnx.export(model, img, f, verbose=opt.v, opset_version=opt.onnx_opset, input_names=['images'],
-                            output_names=output_names,
-                            dynamic_axes=dynamic_axes)
+                logging.info(f'{prefix} onnx opset tested for version 11, newer version may have poor performance for ONNXRUNTIME in DmlExecutionProvider')
+            torch.onnx.export(model, img, f, verbose=opt.v,
+                              opset_version=opt.onnx_opset,
+                              input_names=['images'],
+                              output_names=output_names,
+                              dynamic_axes=dynamic_axes)
             # Checks
 
             onnx_model = onnx.load(f)  # load onnx model
@@ -206,14 +204,15 @@ if __name__ == '__main__':
             onnx.save(onnx_model,f=f)
             
             onnx_model = onnx.load(f)  # load onnx model
-            onnx.checker.check_model(onnx_model)  # check onnx model                       
+            onnx.checker.check_model(onnx_model)  # check onnx model     
+                              
             metadata = onnx_model.metadata_props.add()
             metadata.key = 'gitstatus'
-            metadata.value = gitstatus      
+            metadata.value = gitstatus
              
             metadata = onnx_model.metadata_props.add()
             metadata.key = 'opset version'
-            metadata.value = str(opt.onnx_opset) 
+            metadata.value = str(opt.onnx_opset)
             
             metadata = onnx_model.metadata_props.add()      
             metadata.key = 'stride'
@@ -226,18 +225,18 @@ if __name__ == '__main__':
             metadata = onnx_model.metadata_props.add()
             metadata.key = 'names'
             metadata.value = str(labels)
-            
+
             metadata = onnx_model.metadata_props.add()
-            metadata.key = 'rectangle'
-            metadata.value = 'True'
+            metadata.key = 'ort-nms'
+            metadata.value = 'True' if opt.end2end and opt.max_wh else 'False'            
             
             metadata = onnx_model.metadata_props.add()
             metadata.key = 'date'
             metadata.value = str(datetime.datetime.now())
             
             metadata = onnx_model.metadata_props.add()
-            metadata.key = 'createtor'
-            metadata.value = opt.createtor
+            metadata.key = 'author'
+            metadata.value = opt.author
             
             metadata = onnx_model.metadata_props.add()
             metadata.key = 'optional export'
@@ -258,9 +257,10 @@ if __name__ == '__main__':
                 mo.save(f)
                 logging.info(f'{prefix} registering NMS plugin for ONNX success✅ {f}')
             filenames.append(f)
-            
         except Exception as e:
             logging.info(f'{prefix} export failure🐛🪲: {e}')
+            
+            
         prefix = colorstr('Quantize ONNX Models:')
         try:
             saveas = weight.replace('.pt', '.onnx').replace('.onnx','_quantize_dynamic.onnx')
@@ -271,9 +271,10 @@ if __name__ == '__main__':
         except Exception as e:
             logging.info(f'{prefix} export failure🐛🪲: {e}')
         
-        meta = {'stride': int(max(modelss.stride)), 'names': modelss.names}
+        
         prefix = colorstr('OpenVINO:')
         try:
+            meta = {'stride': int(max(model_ori.stride)), 'names': model_ori.names}
             from tools.auxexport import export_openvino
             logging.info(f'{prefix} Starting export...')
             outputpath, _ = export_openvino(file_=weight,metadata=meta, half=True,prefix=prefix)
@@ -303,7 +304,7 @@ if __name__ == '__main__':
         prefix = colorstr('TensorFlow SavedModel:')
         try:
             from tools.auxexport import export_saved_model
-            outputpath, s_models = export_saved_model(modelss.cpu(),
+            outputpath, s_models = export_saved_model(model.cpu(),
                                             img,
                                             weight,
                                             False,
@@ -346,13 +347,17 @@ if __name__ == '__main__':
                 
                 converter = tf.lite.TFLiteConverter.from_saved_model(f'{f}')
                 tf_lite = converter.convert()
-                with open(fo, 'wb') as fi:
-                    fi.write(tf_lite)
-                filenames.append(fo)
-            logging.info(f'{prefix} export finished, save as:  {fo}')
+                if tf_lite:
+                    with open(fo, 'wb') as fi:
+                        fi.write(tf_lite)
+                    filenames.append(fo)
+                    logging.info(f'{prefix} export finished, save as:  {fo}')
+                else:
+                    logging.info(f'{prefix} export failure🐛🪲: {fo}')
         except Exception as e:
             logging.info(f'{prefix} export failure🐛🪲: {e}')
-            
+        
+        print('')
         prefix = colorstr('Export:')
         for i in filenames:
             logging.info(f'{prefix} {i} is exported.')
