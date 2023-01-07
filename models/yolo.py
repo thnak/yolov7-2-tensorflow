@@ -920,19 +920,24 @@ class ONNX_Engine(object):
     
     def end2end(self, outputs, ori_images, dwdh,ratio, fps, bfc):
         image = [None] * len(ori_images)
+        txtcolor2, bboxcolor2 = bfc.getval(index=0)
+        if isinstance(dwdh, (list)):
+            dwdhs = dwdh
+            ratios = ratio
+        else:
+            dwdhs = [dwdh]
+            ratios = [ratio]
+        if len(dwdhs) < self.batch_size:
+            pass
         for index, (batch_id,x0,y0,x1,y1,cls_id,score) in enumerate(outputs):
             image[int(batch_id)] = ori_images[int(batch_id)] if image[int(batch_id)] is None else image[int(batch_id)]
             box = np.array([x0,y0,x1,y1])
-            box -= np.array(dwdh*2)
-            box /= ratio[0]
+            box -= np.array(dwdhs[int(batch_id)]*2)
+            box /= ratios[int(batch_id)][0]
             box = box.round().astype(np.int32).tolist()
             cls_id = int(cls_id)
             score = round(float(score),2)
             if score < self.confThres:
-                image[int(batch_id)] = plot_one_box_with_return(None, image[int(batch_id)],
-                                                                txtColor=txtcolor,
-                                                                bboxColor=bboxcolor, label=None,
-                                                                frameinfo=[f'FPS: {fps}',f'Total object: {0}'])
                 continue
             name = self.names[cls_id]
             name += ' '+str(score)
@@ -941,12 +946,12 @@ class ONNX_Engine(object):
                                                             txtColor=txtcolor,
                                                             bboxColor=bboxcolor, label=name,
                                                             frameinfo=[f'FPS: {fps}',f'Total object: {int(len(outputs)/ len(ori_images))}'])
-        txtcolor, bboxcolor = bfc.getval(index=0)
+        
         for index in range(len(image)):
             if image[index] is None:
                 image[index] = plot_one_box_with_return(None, ori_images[index],
-                                                                txtColor=txtcolor,
-                                                                bboxColor=bboxcolor, label=None,
+                                                                txtColor=txtcolor2,
+                                                                bboxColor=bboxcolor2, label=None,
                                                                 frameinfo=[f'FPS: {fps}',f'Total object: {0}'])
                 
         return image
@@ -1041,95 +1046,7 @@ class ONNX_Engine(object):
             if (time.time() - t) > time_limit:
                 logging.warning(f'WARNING ⚠️ NMS time limit {time_limit:.3f}s exceeded')
                 break  # time limit exceeded
-
         return output
-
-    def Thread1(self, dataset):
-        for path, ims, im0s, vid_cap, s, ratio, dwdh in dataset:
-            if len(self.datablock) < self.batch_size:
-                ims = self.preproc_for_infer(ims.copy())
-                self.datablock.append([path, ims, im0s.copy(), s, ratio, dwdh])
-            else:
-                self.t1_2_t2.set()
-                self.t2_2_t1.wait()
-                self.datablock = []
-                print(f'end 1')
-                self.t2_2_t1.clear()
-                
-        if self.datablock:
-            if len(self.datablock) < self.batch_size:
-                if self.dynamic_batch:
-                    self.t1_2_t2.set()
-                    self.t2_2_t1.wait()
-                    self.t2_2_t1.clear
-        
-        self.datablock = None
-        self.t1_2_t2.set()
-        self.t2_2_t1.wait()
-        print(f'end thread1')
-        self.t2_2_t1.clear()
-        
-        
-        
-    def Thread2(self):
-        while True:
-            self.t1_2_t2.wait()
-            localdata = self.datablock
-            self.t1_2_t2.clear()
-            self.t2_2_t1.set()
-            if localdata is None:
-                self.datablock2 = None
-                self.t2_2_t3.set()
-                self.t2_2_t1.set()
-                print(f'end thread2')
-                break
-            
-            imgs = [x[1] for x in localdata]
-            self.pred, im = self.infer(im=imgs)
-            self.datablock2 = localdata
-            self.t2_2_t3.set()
-                    
-        
-    def Thread3(self):
-        while True:
-            self.t2_2_t3.wait()
-            localdata = self.datablock2
-            self.t2_2_t3.clear()
-            if localdata is None:
-                print(f'finish vis')
-                break
-            img0s = [x for x in localdata[2]]
-            img = self.end2end(self.pred, img0s, localdata[5], localdata[4])
-            for im in img:
-                cv2.namedWindow('das', cv2.WINDOW_NORMAL)
-                cv2.imshow('das', im)            
-
-
-    def run(self, dataset):
-        if self.batch_size > 1:
-            print('Initial Threads...')   
-            self.t1_2_t2 = threading.Event()
-            self.t2_2_t1 = threading.Event()
-            self.t2_2_t3 = threading.Event()
-            self.datablock = []
-            
-            
-            self.thread1 = threading.Thread(target= self.Thread1, args=(dataset))
-            self.thread2 = threading.Thread(target= self.Thread2)
-            self.thread3 = threading.Thread(target= self.Thread3)
-            
-        print('Starting Threads...')         
-        self.thread1.start()
-        self.thread2.start()
-        self.thread3.start()
-        print('Start Threads success...') 
-        self.thread1.join()
-        self.thread2.join()
-        self.thread3.join()
-        print('Success...')
-
-    def stop():
-        pass
 
 class TensorRT_Engine(object):
     """TensorRT using for TensorRT inference

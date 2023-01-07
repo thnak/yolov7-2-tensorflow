@@ -14,6 +14,8 @@ from utils.plots import plot_one_box_with_return
 from utils.torch_utils import select_device, time_synchronized, TracedModel
 import os
 import numpy as np
+import threading
+
 from utils.ffmpeg_ import  FFMPEG_recorder
 
 def detect(opt=None):
@@ -201,6 +203,12 @@ def detectTensorRT(tensorrtEngine,opt=None,save=''):
     del pred, dataset
     if view_img > -1:
         cv2.destroyAllWindows()
+        
+        
+imgs, img0s, dwdhs, ratios, avgTimeRate, avgFps = [], [],[], [], [], 0
+pred, img_pred = None, None
+thread2_img, thread2_img0s, thread2_dwdhs, thread2_ratios, thread2_avgTimeRate, thread2_avgFps = [], [],[], [], [], 0
+stopThread = False
 
 def inferWithDynamicBatch(enginePath,opt, save=''):
     source, weights, view_img, save_txt, imgsz, trace = opt.source, opt.weights, opt.view_img, opt.save_txt, opt.img_size, not opt.no_trace
@@ -208,8 +216,9 @@ def inferWithDynamicBatch(enginePath,opt, save=''):
     webcam = is_stream_or_webcam(source)
     prefix = colorstr('ONNX: ')
     from models.yolo import ONNX_Engine
-    model = ONNX_Engine(ONNX_EnginePath=enginePath, prefix=prefix)
-    
+    model = None
+    model = ONNX_Engine(ONNX_EnginePath=enginePath, prefix=prefix, confThres=opt.conf_thres)
+    imgsz = model.imgsz
     if webcam:
         dataset = LoadStreams(source, img_size=imgsz, stride=model.stride, auto= model.rectangle)
     else:
@@ -217,51 +226,108 @@ def inferWithDynamicBatch(enginePath,opt, save=''):
     BFC = BackgroundForegroundColors(names= model.names)
     model.batch_size = opt.batch_size if model.batch_size == 0 else model.batch_size
     print(f'{prefix}: {vars(model)}\n')
-    imgs = [] 
-    img0s = []
-    seen = 0
-    avgFps = []
-    avgFps_ = 0
-    for path, img, im0s, vid_cap, s, ratio, dwdh in dataset:
-        if len(imgs) < model.batch_size:
-            img0s.append(im0s)
-            imgs.append(model.preproc_for_infer(img).copy())
-        else:
-            seen += 1
-            t1 = time.time()
-            pred, img = model.infer(imgs)
-            t2 = time.time() - t1
-            avgFps.append(t2)
-            if seen > 30:
-                avgFps_ = int(1/(sum(avgFps)/len(avgFps)))
-                avgFps = []
-                seen = 0
-            img = model.end2end(pred[0], img0s, dwdh, ratio, avgFps_, BFC)
-            for im in img:
-                cv2.namedWindow(path, cv2.WINDOW_NORMAL)
-                cv2.imshow(path, im)
-                if cv2.waitKey(opt.view_img) == 27 and opt.view_img > -1:
-                    exit()
-            imgs = []
-            img0s = []
-            
-            
-def inferWithDynamicBatch2(enginePath,opt, save=''):
-    source, weights, view_img, save_txt, imgsz, trace = opt.source, opt.weights, opt.view_img, opt.save_txt, opt.img_size, not opt.no_trace
-    save_img = not opt.nosave and not source.endswith('.txt') 
-    webcam = is_stream_or_webcam(source)
-    prefix = colorstr('ONNX: ')
-    from models.yolo import ONNX_Engine
-    model = ONNX_Engine(ONNX_EnginePath=enginePath, prefix=prefix)
+    t1_2_t2 = threading.Event()
+    t2_2_t1 = threading.Event()
+    t2_2_t3 = threading.Event()
     
-    if webcam:
-        dataset = LoadStreams(source, img_size=imgsz, stride=model.stride, auto= model.rectangle)
-    else:
-        dataset = LoadImages(source, img_size=imgsz, stride=model.stride, auto= model.rectangle)
-    BFC = BackgroundForegroundColors(names= model.names)
-    model.batch_size = opt.batch_size if model.batch_size == 0 else model.batch_size
-    print(f'debug: {model.batch_size}')
-    model.run(dataset=dataset)
+    def Thread1():
+        global imgs, img0s, dwdhs, ratios, seen, avgFps
+        for path, img, im0s, vid_cap, s, ratio, dwdh in dataset:
+            if stopThread:
+                break
+            if len(imgs) < model.batch_size:
+                if webcam:
+                    path = str(path[0])
+                    for i in range(len(im0s)):
+                        img0s.append(im0s[i])
+                        imgs.append(model.preproc_for_infer(img[i]).copy())
+                        dwdhs.append(dwdh[i])
+                        ratios.append(ratio[i])
+                else:
+                    dwdhs = [dwdh] * model.batch_size
+                    ratios = [ratio] * model.batch_size
+                    img0s.append(im0s.copy())
+                    imgs.append(model.preproc_for_infer(img).copy())
+                    
+            if len(imgs) >= model.batch_size:           
+                t1_2_t2.set()
+                t2_2_t1.wait()
+                t2_2_t1.clear()
+                imgs, img0s, dwdhs, ratios, seen, avgFps = [], [],[], [], 0, 0
+            print(f'debug: thread1 {s}, {im0s.shape}')
+            
+        imgs, img0s, dwdhs, ratios, seen, avgFps = [], [],[], [], 0, 0
+        t1_2_t2.set()
+        t2_2_t1.wait()
+        t2_2_t1.clear()
+        print(f'end: thread 1')
+    
+    def Thread2():
+        global imgs, img0s, dwdhs, ratios, avgTimeRate
+        global thread2_img, thread2_img0s, thread2_dwdhs, thread2_ratios, thread2_avgTimeRate, thread2_avgFps
+        global pred, img_pred
+        global stopThread
+        seenn = 0
+        avgTimeRate = []
+        com = max(1, (64/model.batch_size))
+        while True:
+            t1_2_t2.wait()
+            thread2_img, thread2_img0s, thread2_dwdhs, thread2_ratios, thread2_avgTimeRate = imgs, img0s, dwdhs, ratios, avgTimeRate
+            t1_2_t2.clear()
+            t2_2_t1.set()
+            
+            if len(thread2_img):
+                t1 = time.time()
+                pred, img_pred = model.infer(thread2_img)
+                t2 = time.time() - t1
+                avgTimeRate.append(t2)
+                if seenn > com:
+                    seenn = 0
+                    thread2_avgFps = int(1/((sum(avgTimeRate) / len(avgTimeRate))/model.batch_size))
+                    avgTimeRate = []
+                seenn += 1
+            else:
+                print('------------------------------------------------------------------------------------------------')
+                break
+            t2_2_t3.set()
+        print(f'end: thread2')
+        
+    def Thread3():
+        global thread2_img, thread2_img0s, thread2_dwdhs, thread2_ratios, thread2_avgTimeRate, thread2_avgFps
+        global stopThread
+        seen = 0
+        if not opt.nosave:
+            ffmpeg = FFMPEG_recorder(f'{save_dir}/a.mp4', videoDimensions=(2560, 1440), fps=25)
+        while True:
+            t2_2_t3.wait()
+            imgs, img0s, dwdhs, ratios, avgTimeRate, avgFps = thread2_img, thread2_img0s, thread2_dwdhs, thread2_ratios, thread2_avgTimeRate, thread2_avgFps
+            global pred
+            t2_2_t3.clear()
+            img = model.end2end(pred[0], img0s, dwdhs, ratios, thread2_avgFps, BFC)
+            for im in img:
+                cv2.namedWindow(f'Show {0}', cv2.WINDOW_NORMAL)
+                cv2.imshow(f'Show {0}', im)
+                seen += 1
+                if not opt.nosave:
+                    ffmpeg.writeFrame(im)
+                if cv2.waitKey(opt.view_img) == 27 and opt.view_img > -1:
+                    stopThread = True
+                    print(f'end: thread3 {seen}')
+                    exit()
+                    
+    
+    thread1 = threading.Thread(target= Thread1)
+    thread2 = threading.Thread(target= Thread2)
+    thread3 = threading.Thread(target= Thread3)
+    print(f'starting')
+    thread1.start()
+    thread2.start()
+    thread3.start()
+    print('waiting')
+    thread1.join()
+    thread2.join()
+    thread3.join()    
+            
     
             
             

@@ -247,7 +247,7 @@ class LoadStreams:
     """multiple IP streaming, RTSP cameras or webcam
     press q key to quite  
     """
-    def __init__(self, sources='streams.txt', img_size=640, stride=32, auto=True):
+    def __init__(self, sources='streams.txt', img_size=(640, 640), stride=32, auto=True):
         """_summary_
 
         Args:
@@ -314,9 +314,8 @@ class LoadStreams:
         img0 = self.imgs.copy()
         # Letterbox
         img, ratio, dwdh = [letterbox(x, self.img_size, auto=self.auto, stride=self.stride)[0] for x in img0],\
-                                        [letterbox(x, self.img_size, auto=self.auto, stride=self.stride)[1] for x in img0],\
-                                        [letterbox(x, self.img_size, auto=self.auto, stride=self.stride)[2] for x in img0], 
-
+                            [letterbox(x, self.img_size, auto=self.auto, stride=self.stride)[1] for x in img0],\
+                            [letterbox(x, self.img_size, auto=self.auto, stride=self.stride)[2] for x in img0], 
         # Stack
         img = np.stack(img, 0)
 

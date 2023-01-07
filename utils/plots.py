@@ -75,7 +75,7 @@ def plot_one_box_with_return(x, img, txtColor=None, bboxColor=None, label=None, 
     img0 = cv2.putText(img0,frameinfo[0],org= (20, 40), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale= tl/3, color= txtColor, thickness=1, lineType=cv2.LINE_AA)
     img0 = cv2.putText(img0,frameinfo[1],org= (20, 70), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale= tl/3, color= txtColor, thickness=1, lineType=cv2.LINE_AA)
     
-    if label:
+    if label and x:
         c1, c2 = (int(x[0]), int(x[1])), (int(x[2]), int(x[3]))
         img0 = cv2.rectangle(img0, c1, c2, bboxColor, thickness=tl, lineType=cv2.LINE_AA)
         t_size = cv2.getTextSize(label, 0, fontScale=tl / 3, thickness=tf)[0]
