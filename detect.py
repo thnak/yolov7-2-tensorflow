@@ -220,7 +220,8 @@ def inferWithDynamicBatch(enginePath,opt, save=''):
     imgs = [] 
     img0s = []
     seen = 0
-    t3 = time.time()
+    avgFps = []
+    avgFps_ = 0
     for path, img, im0s, vid_cap, s, ratio, dwdh in dataset:
         if len(imgs) < model.batch_size:
             img0s.append(im0s)
@@ -230,7 +231,12 @@ def inferWithDynamicBatch(enginePath,opt, save=''):
             t1 = time.time()
             pred, img = model.infer(imgs)
             t2 = time.time() - t1
-            img = model.end2end(pred[0], img0s, dwdh, ratio, int(1/(t2/model.batch_size)), BFC)
+            avgFps.append(t2)
+            if seen > 30:
+                avgFps_ = int(1/(sum(avgFps)/len(avgFps)))
+                avgFps = []
+                seen = 0
+            img = model.end2end(pred[0], img0s, dwdh, ratio, avgFps_, BFC)
             for im in img:
                 cv2.namedWindow(path, cv2.WINDOW_NORMAL)
                 cv2.imshow(path, im)

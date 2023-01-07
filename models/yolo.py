@@ -918,7 +918,7 @@ class ONNX_Engine(object):
     def from_numpy(self, x):
         return torch.from_numpy(x).to(self.device) if isinstance(x, np.ndarray) else x
     
-    def end2end(self, outputs, ori_images, dwdh,ratio, fps, bfc=None):
+    def end2end(self, outputs, ori_images, dwdh,ratio, fps, bfc):
         image = [None] * len(ori_images)
         for index, (batch_id,x0,y0,x1,y1,cls_id,score) in enumerate(outputs):
             image[int(batch_id)] = ori_images[int(batch_id)] if image[int(batch_id)] is None else image[int(batch_id)]
@@ -929,17 +929,26 @@ class ONNX_Engine(object):
             cls_id = int(cls_id)
             score = round(float(score),2)
             if score < self.confThres:
+                image[int(batch_id)] = plot_one_box_with_return(None, image[int(batch_id)],
+                                                                txtColor=txtcolor,
+                                                                bboxColor=bboxcolor, label=None,
+                                                                frameinfo=[f'FPS: {fps}',f'Total object: {0}'])
                 continue
             name = self.names[cls_id]
             name += ' '+str(score)
-            if bfc is not None:
-                txtcolor, bboxcolor = bfc.getval(index=cls_id)
-            else:
-                txtcolor, bboxcolor = (255, 255, 255), (0, 0, )
+            txtcolor, bboxcolor = bfc.getval(index=cls_id)
             image[int(batch_id)] = plot_one_box_with_return(box, image[int(batch_id)],
                                                             txtColor=txtcolor,
                                                             bboxColor=bboxcolor, label=name,
                                                             frameinfo=[f'FPS: {fps}',f'Total object: {int(len(outputs)/ len(ori_images))}'])
+        txtcolor, bboxcolor = bfc.getval(index=0)
+        for index in range(len(image)):
+            if image[index] is None:
+                image[index] = plot_one_box_with_return(None, ori_images[index],
+                                                                txtColor=txtcolor,
+                                                                bboxColor=bboxcolor, label=None,
+                                                                frameinfo=[f'FPS: {fps}',f'Total object: {0}'])
+                
         return image
             
     def warmup(self):
