@@ -31,6 +31,7 @@
   <li><a href='https://medium.com/augmented-startups/how-hyperparameters-of-yolov5-works-ec4d25f311a2'>How do Hyperparameters of YOLOv5 Work?❓</a></li>
   <li><a href="https://da2so.tistory.com/">da2so</a></li>
   <li><a href="https://onnxruntime.ai/docs/performance/tune-performance.html#using-different-execution-providers">ONNX Runtime Performance Tuning</a></li>
+  <li><a href="https://medium.com/@jalajagr/mean-average-precision-map-explained-in-object-detection-fb61adf67ef4">Mean Average Precision (mAP) Explained in Object Detection</a></li>
 
 </ul>
 </details>

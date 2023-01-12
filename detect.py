@@ -229,9 +229,14 @@ def inferWithDynamicBatch(enginePath,opt, save=''):
     t1_2_t2 = threading.Event()
     t2_2_t1 = threading.Event()
     t2_2_t3 = threading.Event()
-    
+    #t3_2_t2 = threading.Event()
+    global thread2_avgFps
+    thread2_avgFps = 1/model.warmup(10)
+    print(f'speed: {thread2_avgFps}FPS')
+       
     def Thread1():
         global imgs, img0s, dwdhs, ratios, seen, avgFps
+        
         for path, img, im0s, vid_cap, s, ratio, dwdh in dataset:
             if stopThread:
                 break
@@ -249,12 +254,13 @@ def inferWithDynamicBatch(enginePath,opt, save=''):
                     img0s.append(im0s.copy())
                     imgs.append(model.preproc_for_infer(img).copy())
                     
-            if len(imgs) >= model.batch_size:           
+            if len(imgs) >= model.batch_size:
+                imgs = model.concat(imgs)        
                 t1_2_t2.set()
                 t2_2_t1.wait()
                 t2_2_t1.clear()
                 imgs, img0s, dwdhs, ratios, seen, avgFps = [], [],[], [], 0, 0
-            print(f'debug: thread1 {s}, {im0s.shape}')
+            print(f'debug: thread1 {s}, {im0s[0].shape}')
             
         imgs, img0s, dwdhs, ratios, seen, avgFps = [], [],[], [], 0, 0
         t1_2_t2.set()
@@ -263,8 +269,8 @@ def inferWithDynamicBatch(enginePath,opt, save=''):
         print(f'end: thread 1')
     
     def Thread2():
-        global imgs, img0s, dwdhs, ratios, avgTimeRate
-        global thread2_img, thread2_img0s, thread2_dwdhs, thread2_ratios, thread2_avgTimeRate, thread2_avgFps
+        global imgs, img0s, dwdhs, ratios
+        global thread2_img, thread2_img0s, thread2_dwdhs, thread2_ratios, thread2_avgFps
         global pred, img_pred
         global stopThread
         seenn = 0
@@ -272,8 +278,9 @@ def inferWithDynamicBatch(enginePath,opt, save=''):
         com = max(1, (64/model.batch_size))
         while True:
             t1_2_t2.wait()
-            thread2_img, thread2_img0s, thread2_dwdhs, thread2_ratios, thread2_avgTimeRate = imgs, img0s, dwdhs, ratios, avgTimeRate
+            thread2_img, thread2_img0s, thread2_dwdhs, thread2_ratios = imgs, img0s, dwdhs, ratios
             t1_2_t2.clear()
+
             t2_2_t1.set()
             
             if len(thread2_img):
@@ -290,32 +297,42 @@ def inferWithDynamicBatch(enginePath,opt, save=''):
                 print('------------------------------------------------------------------------------------------------')
                 break
             t2_2_t3.set()
+            #t3_2_t2.wait()
+            #t3_2_t2.clear()
         print(f'end: thread2')
         
     def Thread3():
-        global thread2_img, thread2_img0s, thread2_dwdhs, thread2_ratios, thread2_avgTimeRate, thread2_avgFps
+        global thread2_img, thread2_img0s, thread2_dwdhs, thread2_ratios, thread2_avgFps
         global stopThread
         seen = 0
         if not opt.nosave:
             ffmpeg = FFMPEG_recorder(f'{save_dir}/a.mp4', videoDimensions=(2560, 1440), fps=25)
         while True:
             t2_2_t3.wait()
-            imgs, img0s, dwdhs, ratios, avgTimeRate, avgFps = thread2_img, thread2_img0s, thread2_dwdhs, thread2_ratios, thread2_avgTimeRate, thread2_avgFps
+            imgs, img0s, dwdhs, ratios, avgFps = thread2_img, thread2_img0s, thread2_dwdhs, thread2_ratios, thread2_avgFps
             global pred
             t2_2_t3.clear()
-            img = model.end2end(pred[0], img0s, dwdhs, ratios, thread2_avgFps, BFC)
+            img = model.end2end(pred[0], img0s, dwdhs, ratios, avgFps, BFC)
+                        
             for im in img:
                 cv2.namedWindow(f'Show {0}', cv2.WINDOW_NORMAL)
                 cv2.imshow(f'Show {0}', im)
+                avgFps = max(avgFps, 1)
+                
+                time.sleep((1/avgFps)+0.001)
                 seen += 1
                 if not opt.nosave:
                     ffmpeg.writeFrame(im)
+                    
                 if cv2.waitKey(opt.view_img) == 27 and opt.view_img > -1:
                     stopThread = True
                     print(f'end: thread3 {seen}')
-                    exit()
-                    
+                    break
+            if stopThread:
+                break
+            #t3_2_t2.set()
     
+
     thread1 = threading.Thread(target= Thread1)
     thread2 = threading.Thread(target= Thread2)
     thread3 = threading.Thread(target= Thread3)
@@ -327,9 +344,6 @@ def inferWithDynamicBatch(enginePath,opt, save=''):
     thread1.join()
     thread2.join()
     thread3.join()    
-            
-    
-            
             
         
 if __name__ == '__main__':

@@ -259,17 +259,6 @@ if __name__ == '__main__':
             filenames.append(f)
         except Exception as e:
             logging.info(f'{prefix} export failure🐛🪲: {e}')
-            
-            
-        prefix = colorstr('Quantize ONNX Models:')
-        try:
-            saveas = weight.replace('.pt', '.onnx').replace('.onnx','_quantize_dynamic.onnx')
-            from onnxruntime.quantization import quantize_dynamic, QuantType, quantize, QuantizationMode, StaticQuantConfig, quantize_static, CalibrationDataReader
-            # quantize_static(weight.replace('.pt', '.onnx'), filenames[3].replace('.onnx', '_quantize_static.onnx'), weight_type=QuantType.QUInt8)
-            quantize_dynamic(weight.replace('.pt', '.onnx'), saveas,weight_type=QuantType.QUInt8, reduce_range=True)
-            logging.info(f'{prefix} export success✅, saved as: {saveas}')
-        except Exception as e:
-            logging.info(f'{prefix} export failure🐛🪲: {e}')
         
         
         prefix = colorstr('OpenVINO:')
@@ -357,7 +346,7 @@ if __name__ == '__main__':
         except Exception as e:
             logging.info(f'{prefix} export failure🐛🪲: {e}')
         
-        print('')
+        print('\n')
         prefix = colorstr('Export:')
         for i in filenames:
             logging.info(f'{prefix} {i} is exported.')

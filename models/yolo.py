@@ -774,7 +774,6 @@ class ONNX_Engine(object):
         self.multi_label_nms = multi_label_nms
         self.max_det_nms = max_det_nms
         
-        
         import platform
         import torch
         
@@ -882,10 +881,6 @@ class ONNX_Engine(object):
         else:
             logging.error(f'{prefix} The model engine was exported with wrong format, please re-export the model')
             exit()
-
-        self.thread1 = None
-        self.thread2 = None
-        self.thread3 = None
         
             
     def preproc_for_infer(self, im):
@@ -897,13 +892,16 @@ class ONNX_Engine(object):
         if len(im.shape) == 3:
             im = im[None]  # expand for batch dim
         im = im.cpu().numpy()
-        return im   
+        return im
     
-    def infer(self, im):
-        if len(im) >1:
+    def concat(self, im):
+        if len(im) > 1:
             im = np.concatenate(im)
         else:
             im = im[0]
+        return im
+    
+    def infer(self, im):
         y = self.session.run(self.output_names, {self.input_names[0]: im})
         if self.is_end2end:
             return y, im
@@ -919,6 +917,7 @@ class ONNX_Engine(object):
         return torch.from_numpy(x).to(self.device) if isinstance(x, np.ndarray) else x
     
     def end2end(self, outputs, ori_images, dwdh,ratio, fps, bfc):
+        t0 = time.time()
         image = [None] * len(ori_images)
         txtcolor2, bboxcolor2 = bfc.getval(index=0)
         if isinstance(dwdh, (list)):
@@ -927,8 +926,7 @@ class ONNX_Engine(object):
         else:
             dwdhs = [dwdh]
             ratios = [ratio]
-        if len(dwdhs) < self.batch_size:
-            pass
+
         for index, (batch_id,x0,y0,x1,y1,cls_id,score) in enumerate(outputs):
             image[int(batch_id)] = ori_images[int(batch_id)] if image[int(batch_id)] is None else image[int(batch_id)]
             box = np.array([x0,y0,x1,y1])
@@ -956,13 +954,20 @@ class ONNX_Engine(object):
                 
         return image
             
-    def warmup(self):
-        imgsz=(self.batch_size, 3, self.imgsz[0], self.imgsz[1])
-        im = [torch.empty(*imgsz, dtype=torch.half if self.half else torch.float, device=self.device)]
-        if self.device.type == 'cuda':
-            for _ in range(1):
+    def warmup(self, num=10):
+        imgsz=(1, 3, self.imgsz[0], self.imgsz[1])
+        im = torch.empty(*imgsz, dtype=torch.half if self.half else torch.float, device=self.device)
+        im = im.cpu().numpy()
+        if self.batch_size > 1:
+            im = [im for i in range(self.batch_size)]
+            im = np.concatenate(im)
+        
+        if self.session.get_providers()[0] in ['CUDAExecutionProvider', 'TensorrtExecutionProvider', 'DmlExecutionProvider']:
+            t0 = time.time()
+            for _ in range(num):
                 logging.info(f'\nWarming up: \n')
-                self.infer(im)          
+                self.infer(im)
+            return ((time.time() - t0)/num)/self.batch_size
                 
     def non_max_suppression(self):
         # prediction = self.prediction
