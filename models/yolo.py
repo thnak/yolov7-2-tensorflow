@@ -904,14 +904,14 @@ class ONNX_Engine(object):
     def infer(self, im):
         y = self.session.run(self.output_names, {self.input_names[0]: im})
         if self.is_end2end:
-            return y, im
+            return y
         else:
             if isinstance(y, (list, tuple)):
                 self.prediction = self.from_numpy(y[0]) if len(y) == 1 else [self.from_numpy(x) for x in y]     
-                return self.non_max_suppression(), im
+                return self.non_max_suppression()
             else:
                 self.prediction = self.from_numpy(y)
-                return self.non_max_suppression(), im
+                return self.non_max_suppression()
     
     def from_numpy(self, x):
         return torch.from_numpy(x).to(self.device) if isinstance(x, np.ndarray) else x

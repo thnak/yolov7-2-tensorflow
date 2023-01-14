@@ -205,9 +205,6 @@ def detectTensorRT(tensorrtEngine,opt=None,save=''):
         cv2.destroyAllWindows()
         
         
-imgs, img0s, dwdhs, ratios, avgTimeRate, avgFps = [], [],[], [], [], 0
-pred, img_pred = None, None
-thread2_img, thread2_img0s, thread2_dwdhs, thread2_ratios, thread2_avgTimeRate, thread2_avgFps = [], [],[], [], [], 0
 stopThread = False
 
 def inferWithDynamicBatch(enginePath,opt, save=''):
@@ -230,117 +227,151 @@ def inferWithDynamicBatch(enginePath,opt, save=''):
     t2_2_t1 = threading.Event()
     t2_2_t3 = threading.Event()
     #t3_2_t2 = threading.Event()
-    global thread2_avgFps
-    thread2_avgFps = 1/model.warmup(10)
-    print(f'speed: {thread2_avgFps}FPS')
-       
+    print(f'Warming up...')
+    avgFps = int(1/model.warmup(10))
+    print(f'speed: {avgFps}FPS')
+    
+    Data_t1_2_t2 = [[], [], [], [], [], [], []]
+    Data_t2_2_t3 = [None, None, None, None, None, None, None, 0, None]
+    Data_vis = [None, None, None, None, None, None, None, 0, None]
+    
     def Thread1():
-        global imgs, img0s, dwdhs, ratios, seen, avgFps
-        
         for path, img, im0s, vid_cap, s, ratio, dwdh in dataset:
             if stopThread:
                 break
-            if len(imgs) < model.batch_size:
+            if len(Data_t1_2_t2[1]) < model.batch_size:
                 if webcam:
-                    path = str(path[0])
                     for i in range(len(im0s)):
-                        img0s.append(im0s[i])
-                        imgs.append(model.preproc_for_infer(img[i]).copy())
-                        dwdhs.append(dwdh[i])
-                        ratios.append(ratio[i])
+                        if len(Data_t1_2_t2[1]) < model.batch_size:
+                            Data_t1_2_t2[0].append(path[i])
+                            Data_t1_2_t2[1].append(model.preproc_for_infer(img[i]).copy())
+                            Data_t1_2_t2[2].append(im0s[i])
+                            Data_t1_2_t2[3].append(vid_cap[i] if vid_cap else None)
+                            Data_t1_2_t2[4].append(s[i] if s else None)
+                            Data_t1_2_t2[5].append(ratio[i])
+                            Data_t1_2_t2[6].append(dwdh[i])
+                        else:
+                            break
                 else:
-                    dwdhs = [dwdh] * model.batch_size
-                    ratios = [ratio] * model.batch_size
-                    img0s.append(im0s.copy())
-                    imgs.append(model.preproc_for_infer(img).copy())
+                    Data_t1_2_t2[0].append(path)
+                    Data_t1_2_t2[1].append(model.preproc_for_infer(img).copy())
+                    Data_t1_2_t2[2].append(im0s)
+                    Data_t1_2_t2[3].append(vid_cap)
+                    Data_t1_2_t2[4].append(s)
+                    Data_t1_2_t2[5].append(ratio)
+                    Data_t1_2_t2[6].append(dwdh)
                     
-            if len(imgs) >= model.batch_size:
-                imgs = model.concat(imgs)        
+            if len(Data_t1_2_t2[1]) >= model.batch_size:
+                Data_t1_2_t2[1] = model.concat(Data_t1_2_t2[1])        
                 t1_2_t2.set()
                 t2_2_t1.wait()
                 t2_2_t1.clear()
-                imgs, img0s, dwdhs, ratios, seen, avgFps = [], [],[], [], 0, 0
-            print(f'debug: thread1 {s}, {im0s[0].shape}')
-            
-        imgs, img0s, dwdhs, ratios, seen, avgFps = [], [],[], [], 0, 0
+                print(f'{colorstr(dataset.mode)} {Data_t1_2_t2[0][0]}, {Data_t1_2_t2[2][0].shape}, FPS: {Data_t2_2_t3[7]}')
+                Data_t1_2_t2[0] = []
+                Data_t1_2_t2[1] = []
+                Data_t1_2_t2[2] = []
+                Data_t1_2_t2[3] = []
+                Data_t1_2_t2[4] = []
+                Data_t1_2_t2[5] = []
+                Data_t1_2_t2[6] = []
+        Data_t1_2_t2[0] = []
+        Data_t1_2_t2[1] = []
+        Data_t1_2_t2[3] = []
+        Data_t1_2_t2[4] = []
+        Data_t1_2_t2[5] = []
+        Data_t1_2_t2[6] = []        
         t1_2_t2.set()
         t2_2_t1.wait()
         t2_2_t1.clear()
-        print(f'end: thread 1')
+        print(f'end: Thread-1')
+    
     
     def Thread2():
-        global imgs, img0s, dwdhs, ratios
-        global thread2_img, thread2_img0s, thread2_dwdhs, thread2_ratios, thread2_avgFps
-        global pred, img_pred
         global stopThread
         seenn = 0
         avgTimeRate = []
         com = max(1, (64/model.batch_size))
+        Data_t2_2_t3[7] = avgFps
         while True:
             t1_2_t2.wait()
-            thread2_img, thread2_img0s, thread2_dwdhs, thread2_ratios = imgs, img0s, dwdhs, ratios
+            Data_t2_2_t3[0] = Data_t1_2_t2[0]
+            Data_t2_2_t3[1] = Data_t1_2_t2[1]
+            Data_t2_2_t3[2] = Data_t1_2_t2[2]
+            Data_t2_2_t3[3] = Data_t1_2_t2[3]
+            Data_t2_2_t3[4] = Data_t1_2_t2[4]
+            Data_t2_2_t3[5] = Data_t1_2_t2[5]
+            Data_t2_2_t3[6] = Data_t1_2_t2[6]
             t1_2_t2.clear()
-
             t2_2_t1.set()
             
-            if len(thread2_img):
+            if len(Data_t2_2_t3[1]):
                 t1 = time.time()
-                pred, img_pred = model.infer(thread2_img)
+                Data_t2_2_t3[8] = model.infer(Data_t2_2_t3[1])[0]
                 t2 = time.time() - t1
                 avgTimeRate.append(t2)
                 if seenn > com:
                     seenn = 0
-                    thread2_avgFps = int(1/((sum(avgTimeRate) / len(avgTimeRate))/model.batch_size))
+                    Data_t2_2_t3[7] = int(1/((sum(avgTimeRate) / len(avgTimeRate))/model.batch_size))
+                    
                     avgTimeRate = []
                 seenn += 1
             else:
-                print('------------------------------------------------------------------------------------------------')
                 break
             t2_2_t3.set()
             #t3_2_t2.wait()
             #t3_2_t2.clear()
-        print(f'end: thread2')
-        
+        print(f'end: Thread-2')
+    
+    
     def Thread3():
-        global thread2_img, thread2_img0s, thread2_dwdhs, thread2_ratios, thread2_avgFps
         global stopThread
         seen = 0
         if not opt.nosave:
             ffmpeg = FFMPEG_recorder(f'{save_dir}/a.mp4', videoDimensions=(2560, 1440), fps=25)
         while True:
             t2_2_t3.wait()
-            imgs, img0s, dwdhs, ratios, avgFps = thread2_img, thread2_img0s, thread2_dwdhs, thread2_ratios, thread2_avgFps
-            global pred
+            Data_vis[0] = Data_t2_2_t3[0]
+            Data_vis[1] = Data_t2_2_t3[1]
+            Data_vis[2] = Data_t2_2_t3[2]
+            Data_vis[3] = Data_t2_2_t3[3]
+            Data_vis[4] = Data_t2_2_t3[4]
+            Data_vis[5] = Data_t2_2_t3[5]
+            Data_vis[6] = Data_t2_2_t3[6]
+            Data_vis[7] = Data_t2_2_t3[7]
+            Data_vis[8] = Data_t2_2_t3[8]
             t2_2_t3.clear()
-            img = model.end2end(pred[0], img0s, dwdhs, ratios, avgFps, BFC)
+            img = model.end2end(Data_vis[8], Data_vis[2], Data_vis[6], Data_vis[5], Data_vis[7], BFC)
                         
-            for im in img:
-                cv2.namedWindow(f'Show {0}', cv2.WINDOW_NORMAL)
-                cv2.imshow(f'Show {0}', im)
+            for index, (im) in enumerate(img):
+                cv2.namedWindow(f'{Data_vis[0][index]}', cv2.WINDOW_NORMAL)
+                cv2.imshow(f'{Data_vis[0][index]}', im)
+                avgFps = Data_vis[7]
                 avgFps = max(avgFps, 1)
-                
-                time.sleep((1/avgFps)+0.001)
+                time.sleep((1/avgFps)-0.001)
                 seen += 1
                 if not opt.nosave:
                     ffmpeg.writeFrame(im)
                     
                 if cv2.waitKey(opt.view_img) == 27 and opt.view_img > -1:
                     stopThread = True
-                    print(f'end: thread3 {seen}')
+                    print('[----------------------------------------------B-R-E-A-K----------------------------------------------]')
                     break
             if stopThread:
                 break
+            else:
+                for i in range(len(Data_vis)):
+                    Data_vis[i] = None
+        print(f'end: Thread-3 {seen}')
             #t3_2_t2.set()
     
 
-    thread1 = threading.Thread(target= Thread1)
-    thread2 = threading.Thread(target= Thread2)
-    thread3 = threading.Thread(target= Thread3)
-    print(f'starting')
+    thread1 = threading.Thread(target= Thread1, name='Thread-1')
+    thread2 = threading.Thread(target= Thread2, name='Thread-2')
+    thread3 = threading.Thread(target= Thread3, name='Thread-3')
+    print(f'Starting...\n')
     thread1.start()
     thread2.start()
     thread3.start()
-    print('waiting')
     thread1.join()
     thread2.join()
     thread3.join()    
