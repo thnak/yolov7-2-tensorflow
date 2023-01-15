@@ -14,6 +14,7 @@ iou_t: 0.2
 anchor_t: 4.0
 anchors: 3
 fl_gamma: 0.0
+# Data argument
 degrees: 0.0
 translate: 0.2
 scale: 0.1
@@ -45,7 +46,4 @@ HorizontalFlip: 0.5
 VerticalFlip: 0.5
 ChannelDropout: 0.1
 cutout: 0.5
-# Cutout: 0.1
-# Cutout_max_h_w_size: 1
-# Cutout_num_holes: 10
 PixelDropout: 0.1

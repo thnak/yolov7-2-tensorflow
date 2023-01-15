@@ -800,7 +800,7 @@ def strip_optimizer(f='best.pt', s='', halfModel=False):  # from utils.general i
         p.requires_grad = False
     torch.save(x, s or f)
     mb = os.path.getsize(s or f) / 1E6  # filesize
-    print(colorstr('Optimizer:'),f"optimizer stripped from {f},{(' saved as %s,' % s) if s else ''} {mb:.3f}MB")
+    print(colorstr('Optimizer:'),f" stripped from {f},{(' saved as %s,' % s) if s else ''} {mb:.3f}MB")
 
 
 def print_mutation(hyp, results, yaml_file='hyp_evolved.yaml', bucket=''):

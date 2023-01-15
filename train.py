@@ -40,7 +40,7 @@ import utils.Reparameteration as Reparameteration
 logger = logging.getLogger(__name__)
 
 
-def train(hyp, opt, device, tb_writer=None, evo_num=[0, 0]):
+def train(hyp, opt, device, tb_writer=None):
     logger.info(colorstr('hyperparameters: ') +
                 ', '.join(f'{k}={v}' for k, v in hyp.items()))
     save_dir, epochs, batch_size, total_batch_size, weights, rank, freeze = \
@@ -62,7 +62,7 @@ def train(hyp, opt, device, tb_writer=None, evo_num=[0, 0]):
         f.close()
 
     # Configure
-    plots = not opt.evolve  # create plots
+    plots = opt.evolve <= 1  # create plots
     cuda = device.type == 'cuda'
     init_seeds(2 + rank)
     with open(opt.data) as f:
@@ -350,8 +350,8 @@ def train(hyp, opt, device, tb_writer=None, evo_num=[0, 0]):
                 f'Using {dataloader.num_workers} dataloader workers\n'
                 f'Logging results to {save_dir}\n'
                 f'Starting training for {epochs} epochs...\n')
-    if opt.evolve:
-        logger.info(f'Starting training for {evo_num[0]+1}th generation out of {evo_num[1]+1} generations...\n')
+    if opt.evolve > 1:
+        logger.info(f'Starting training for {opt.evolve}th generation out of {opt.evolve} generations...\n')
     torch.save(model, wdir / 'init.pt')
     # epoch ------------------------------------------------------------------
     for epoch in range(start_epoch, epochs):
@@ -511,7 +511,7 @@ def train(hyp, opt, device, tb_writer=None, evo_num=[0, 0]):
             wandb_logger.end_epoch(best_result=best_fitness == fi)
 
             # Save model
-            if (not opt.nosave) or (final_epoch and not opt.evolve):  # if save
+            if (not opt.nosave) or (final_epoch and opt.evolve <= 1):  # if save
                 ckpt = {'epoch': epoch,
                         'best_fitness': best_fitness,
                         'training_results': results_file.read_text(),
@@ -583,12 +583,13 @@ def train(hyp, opt, device, tb_writer=None, evo_num=[0, 0]):
                     output_path = output_path.replace('best.pt','deploy_best.pt')
                     output_path = output_path.replace('last.pt','deploy_best.pt')
                     try:
-                        Reparameteration.Re_parameterization(inputWeightPath=str(f), outputWeightPath=output_path, cfgPath=path_cfg, nc=nc)
+                        if opt.evolve <= 1:
+                            Reparameteration.Re_parameterization(inputWeightPath=str(f), outputWeightPath=output_path, cfgPath=path_cfg, nc=nc)
                     except Exception as ex:
                         print(ex)
         if opt.bucket:
             os.system(f'gsutil cp {final} gs://{opt.bucket}/weights')  # upload
-        if wandb_logger.wandb and not opt.evolve:  # Log the stripped model
+        if wandb_logger.wandb and opt.evolve <= 1:  # Log the stripped model
             wandb_logger.wandb.log_artifact(str(final), type='model',
                                             name='run_' + wandb_logger.wandb_run.id + '_model',
                                             aliases=['last', 'best', 'stripped'])
@@ -615,7 +616,8 @@ if __name__ == '__main__':
     parser.add_argument('--nosave', action='store_true',  help='only save final checkpoint')
     parser.add_argument('--notest', action='store_true', help='only test final epoch')
     parser.add_argument('--noautoanchor', action='store_true', help='disable autoanchor check')
-    parser.add_argument('--evolve', action='store_true', help='evolve hyperparameters')
+    parser.add_argument('--evolve', type=int, default=-1, help='evolve hyperparameters')
+    parser.add_argument('--parent', type=bool, default=True, help='parent selection method: single or weighted, default: True (single)')
     parser.add_argument('--bucket', type=str, default='', help='gsutil bucket')
     parser.add_argument('--cache-images', type=str, default='', help='cache images for faster training')
     parser.add_argument('--image-weights', action='store_true', help='use weighted image selection for training')
@@ -668,8 +670,8 @@ if __name__ == '__main__':
         assert len(opt.cfg) or len(opt.weights), 'either --cfg or --weights must be specified'
         # extend to 2 sizes (train, test)
         opt.img_size.extend([opt.img_size[-1]] * (2 - len(opt.img_size)))
-        opt.name = 'evolve' if opt.evolve else opt.name
-        opt.save_dir = increment_path(Path(opt.project) / opt.name, exist_ok=opt.exist_ok | opt.evolve)  # increment run
+        opt.name = 'evolve' if opt.evolve > 1 else opt.name
+        opt.save_dir = increment_path(Path(opt.project) / opt.name, exist_ok=opt.exist_ok | opt.evolve > 1)  # increment run
 
     # DDP mode
     opt.total_batch_size = opt.batch_size
@@ -689,7 +691,7 @@ if __name__ == '__main__':
         f.close()
     # Train
     logger.info(opt)
-    if not opt.evolve:
+    if opt.evolve <= 1:
         tb_writer = None  # init loggers
         if opt.global_rank in [-1, 0]:
             prefix = colorstr('tensorboard: ')
@@ -697,12 +699,11 @@ if __name__ == '__main__':
                 f"{prefix}Start with 'tensorboard --logdir {opt.project}', view at http://localhost:6006/")
             tb_writer = SummaryWriter(opt.save_dir)  # Tensorboard
         train(hyp, opt, device, tb_writer)
-
     # Evolve hyperparameters (optional)
     else:
-        # Hyperparameter evolution metadata (mutation scale 0-1, lower_limit, upper_limit)
+   # Hyperparameter evolution metadata (mutation scale 0-1, lower_limit, upper_limit)
         meta = {'lr0': (1, 1e-5, 1e-1),  # initial learning rate (SGD=1E-2, Adam=1E-3)
-                'lrf': (1, 0.01, 1.0),
+                'lrf': (1, 0.01, 1.0),  # final OneCycleLR learning rate (lr0 * lrf)
                 'momentum': (0.3, 0.6, 0.98),  # SGD momentum/Adam beta1
                 'weight_decay': (1, 0.0, 0.001),  # optimizer weight decay
                 'warmup_epochs': (1, 0.0, 5.0),  # warmup epochs (fractions ok)
@@ -713,151 +714,63 @@ if __name__ == '__main__':
                 'cls_pw': (1, 0.5, 2.0),  # cls BCELoss positive_weight
                 'obj': (1, 0.2, 4.0),  # obj loss gain (scale with pixels)
                 'obj_pw': (1, 0.5, 2.0),  # obj BCELoss positive_weight
-                'iou_t': (1, 0.1, 0.7),  # IoU training threshold
-                'anchor_t': (1, 2.0, 10.0),  # anchor-multiple threshold
-                'anchors': (2, 2.0, 10.0),
-                'fl_gamma': (1, 0.0, 2.0),
-                'hsv_h': (1, 0.0, 0.9),
-                'hsv_s': (1, 0.0, 0.9),
-                'hsv_v': (1, 0.0, 0.9),
-                'degrees': (1, 0.0, 90.0),  # image rotation (+/- deg)
-                'translate': (1, 0.0, 0.9),  # image translation (+/- fraction)
-                'scale': (1, 0.0, 0.9),  # image scale (+/- gain)
-                'shear': (1, 0.0, 10.0),  # image shear (+/- deg)
-                'perspective': (1, 0.0, 0.001),
-                'flipud': (1, 0.0, 1.0),  # image flip up-down (probability)
-                'fliplr': (1, 0.0, 1.0),  # image flip left-right (probability)
-                'mosaic': (1, 0.0, 1.0),  # image mixup (probability)
-                'mixup': (1, 0.0, 1.0),   # image mixup (probability)
-                'copy_paste': (1, 0.0, 1.0),
-                'paste_in': (1, 0.0, 1.0)}    # segment copy-paste (probability)
-
+                'iou_t': (0, 0.1, 0.7),  # IoU training threshold
+                'anchor_t': (1, 2.0, 8.0),  # anchor-multiple threshold
+                'anchors': (2, 2.0, 10.0),  # anchors per output grid (0 to ignore)
+                'fl_gamma': (0, 0.0, 2.0)}  # focal loss gamma (efficientDet default gamma=1.5)
+        
         with open(opt.hyp, errors='ignore') as f:
             hyp = yaml.safe_load(f)  # load hyps dict
-            for k in list(hyp.keys()):
-                if k not in meta:
-                    hyp.pop(k)
-            f.close()
             if 'anchors' not in hyp:  # anchors commented in hyp.yaml
                 hyp['anchors'] = 3
-        if opt.noautoanchors:
-            del hyp['anchors'], meta['anchors']
+                
         assert opt.local_rank == -1, 'DDP mode not implemented for --evolve'
         opt.notest, opt.nosave = True, True  # only test/save final epoch
-        yaml_file = Path(opt.save_dir) / \
-            'hyp_evolved.yaml'  # save best result here
+        # ei = [isinstance(x, (int, float)) for x in hyp.values()]  # evolvable indices
+        yaml_file = Path(opt.save_dir) / 'hyp_evolved.yaml'  # save best result here
         if opt.bucket:
-            os.system('gsutil cp gs://%s/evolve.txt .' %
-                      opt.bucket)  # download evolve.txt if exists
+            os.system('gsutil cp gs://%s/evolve.txt .' % opt.bucket)  # download evolve.txt if exists
 
-        import tools.craw as craw
-        string_evo_cfg = [['0'], ['299']]
-        start_evo = int(string_evo_cfg[0][0])
-        end_evo = int(string_evo_cfg[1][0])
-        
-        
-        
-        if os.path.exists('./runs/train/evolve/'):
-            if os.path.exists('./runs/train/evolve/evolve_config.txt'):
-                string_evo_cfg = craw.read_txtFile_as_arr(
-                    './runs/train/evolve/evolve_config.txt')
-                start_evo = int(string_evo_cfg[0][0])
-                end_evo = int(string_evo_cfg[1][0])
+        for _ in range(opt.evolve):  # generations to evolve
+            if Path('evolve.txt').exists():  # if evolve.txt exists: select best hyps and mutate
+                # Select parent(s)
+                parent = opt.parent  # parent selection method: 'single' or 'weighted'
+                x = np.loadtxt('evolve.txt', ndmin=2)
+                n = min(5, len(x))  # number of previous results to consider
+                x = x[np.argsort(-fitness(x))][:n]  # top n mutations
+                w = fitness(x) - fitness(x).min()  # weights
+                if parent == 'single' or len(x) == 1:
+                    # x = x[random.randint(0, n - 1)]  # random selection
+                    x = x[random.choices(range(n), weights=w)[0]]  # weighted selection
+                elif parent == 'weighted':
+                    x = (x * w.reshape(n, 1)).sum(0) / w.sum()  # weighted combination
 
-                if start_evo == end_evo:
-                    logger.warning(
-                        'The evolution is over. If you want more, changes the index 1 of this txt file: ./runs/train/evolve/evolve_config.txt')
+                # Mutate
+                mp, s = 0.8, 0.2  # mutation probability, sigma
+                npr = np.random
+                npr.seed(int(time.time()))
+                g = np.array([x[0] for x in meta.values()])  # gains 0-1
+                ng = len(meta)
+                v = np.ones(ng)
+                while all(v == 1):  # mutate until a change occurs (prevent duplicates)
+                    v = (g * (npr.random(ng) < mp) * npr.randn(ng) * npr.random() * s + 1).clip(0.3, 3.0)
+                for i, k in enumerate(hyp.keys()):  # plt.hist(v.ravel(), 300)
+                    if k in meta:
+                        hyp[k] = float(x[i + 7] * v[i])  # mutate
 
-                elif start_evo == 0:
-                    directory = "weights"
-                    directory_parent = './runs/train/evolve'
-                    path_rm = os.path.join(directory_parent, directory)
-                    if os.path.exists('evolve.txt'):
-                        os.remove('evolve.txt')
-                    try:
-                        os.rmdir(path_rm)
-                    except OSError as er:
-                        print(er)
+            # Constrain to limits
+            for k, v in meta.items():
+                hyp[k] = max(hyp[k], v[1])  # lower limit
+                hyp[k] = min(hyp[k], v[2])  # upper limit
+                hyp[k] = round(hyp[k], 5)  # significant digits
 
-                else:
-                    logger.info('Starting to develop with the ' + str(start_evo) +
-                                'th generation, the last generation is '+str(end_evo-1)+'th')
-                    if os.path.exists('evolve.png'):
-                        os.remove('evolve.png')
-                    if os.path.exists('./runs/train/evolve/hyp_evolved.yaml'):
-                        os.remove('./runs/train/evolve/hyp_evolved.yaml')
+            # Train mutation
+            results = train(hyp.copy(), opt, device)
 
-            else:
-                f_ = open('./runs/train/evolve/evolve_config.txt', 'x')
-                content_ = string_evo_cfg[0][0]+'\n'+string_evo_cfg[1][0]
-                f_.write(content_)
-                f_.close()
-                
-        else:
-            try:
-                os.makedirs('./runs/train/evolve/',exist_ok=True)
-                logger.debug('created directory ./runs/train/evolve/')
-                f_ = open('./runs/train/evolve/evolve_config.txt', 'x')
-                content_ = string_evo_cfg[0][0]+'\n'+string_evo_cfg[1][0]
-                f_.write(content_)
-                f_.close()                
-                
-            except Exception as e:
-                logger.error(e)
-                
-        count = start_evo
-        if start_evo != end_evo:
-            logger.warning('\nStarting the evolution>>>>>>>>>>>>>>>>>>>>>>>>\nStart at generation: '+str(
-                start_evo)+'th, Total the generation must be evo: '+str(end_evo - start_evo)+'\n')
-            for _ in range(start_evo, end_evo):  # generations to evolve
-                time0 = time.time()
-                if Path('evolve.txt').exists():  # if evolve.txt exists: select best hyps and mutate
-                    # Select parent(s)
-                    parent = 'single'  # parent selection method: 'single' or 'weighted'
-                    x = np.loadtxt('evolve.txt', ndmin=2)
-                    # number of previous results to consider
-                    n = min(5, len(x))
-                    x = x[np.argsort(-fitness(x))][:n]  # top n mutations
-                    w = fitness(x) - fitness(x).min()  # weights
-                    if parent == 'single' or len(x) == 1:
-                        x = x[random.choices(range(n), weights=w)[0]]  # weighted selection
-                    elif parent == 'weighted':
-                        x = (x * w.reshape(n, 1)).sum(0) / w.sum()  # weighted combination
+            # Write mutation results
+            print_mutation(hyp.copy(), results, yaml_file, opt.bucket)
 
-                    # Mutate
-                    mp, s = 0.8, 0.2  # mutation probability, sigma
-                    npr = np.random
-                    npr.seed(int(time.time()))
-                    g = np.array([meta[k][0] for k in hyp.keys()])  # gains 0-1
-                    ng = len(meta)
-                    v = np.ones(ng)
-                    while all(v == 1):  # mutate until a change occurs (prevent duplicates)
-                        v = (g * (npr.random(ng) < mp) * npr.randn(ng)* npr.random() * s + 1).clip(0.3, 3.0)
-                    for i, k in enumerate(meta):  # plt.hist(v.ravel(), 300)
-                            hyp[k] = float(x[i + 7] * v[i])  # mutate
-
-                # Constrain to limits
-                for k, v in meta.items():
-                    hyp[k] = max(hyp[k], v[1])  # lower limit
-                    hyp[k] = min(hyp[k], v[2])  # upper limit
-                    hyp[k] = round(hyp[k], 5)  # significant digits
-
-                # Train mutation
-                results = train(hyp.copy(), opt, device, evo_num=[count, end_evo - start_evo])
-
-                # Write mutation results
-                print_mutation(hyp.copy(), results, yaml_file, opt.bucket)
-                logger.info(f'Gen {str(_)}th evo in: {str(round((time.time() - time0)/3600,3))}hours')
-                count += 1
-                file_ = open('./runs/train/evolve/evolve_config.txt', 'w')
-                string_evo_cfg[0][0] = str(count)
-                file_.write(string_evo_cfg[0][0]+'\n'+string_evo_cfg[1][0])
-                file_.close()
-
-        elif start_evo > end_evo:
-            logger.error('Bad values, the start value to evolution is larger than the end value.')
-        else:
-            logger.warning('The evolution is finished, Total generation: '+str(end_evo-1))
+        # Plot results
         plot_evolution(yaml_file)
         print(f'Hyperparameter evolution complete. Best results saved as: {yaml_file}\n'
               f'Command to train a new model with these hyperparameters: $ python train.py --hyp {yaml_file}')
