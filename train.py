@@ -3,7 +3,6 @@ import logging
 import math
 import os
 import random
-import time
 from copy import deepcopy
 from pathlib import Path
 from threading import Thread
@@ -21,7 +20,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
-import tools.test as test  # import test.py to get mAP after each epoch
+from tools.test import test as tester # import test.py to get mAP after each epoch
 from models.experimental import attempt_load
 from models.yolo import Model
 from utils.autoanchor import check_anchors
@@ -32,10 +31,11 @@ from utils.general import labels_to_class_weights, increment_path, labels_to_ima
 from utils.google_utils import attempt_download
 from utils.loss import ComputeLoss, ComputeLossOTA
 from utils.plots import plot_images, plot_labels, plot_results, plot_evolution
-from utils.torch_utils import ModelEMA, select_device, intersect_dicts, torch_distributed_zero_first, is_parallel
+from utils.torch_utils import ModelEMA, select_device, intersect_dicts, torch_distributed_zero_first, is_parallel, time_synchronized
 from utils.wandb_logging.wandb_utils import WandbLogger, check_wandb_resume
 from utils.autobatch import check_train_batch_size
-import utils.re_parameteration as re_parameteration
+from utils.re_parameteration import Re_parameterization
+
 
 logger = logging.getLogger(__name__)
 
@@ -335,7 +335,7 @@ def train(hyp, opt, device, tb_writer=None):
     model.names = names
 
     # Start training
-    t0 = time.time()
+    t0 = time_synchronized()
     # number of warmup iterations, max(3 epochs, 1k iterations)
     nw = max(round(hyp['warmup_epochs'] * nb), 1000)
     # nw = min(nw, (epochs - start_epoch) / 2 * nb)  # limit warmup to < 1/2 of training
@@ -445,8 +445,7 @@ def train(hyp, opt, device, tb_writer=None):
                 if plots and ni < 10:
                     f = save_dir / f'train_batch{ni}.jpg'  # filename
                     tb_writer.add_image(str(f), np.moveaxis(plot_images(images=imgs, targets=targets, paths=paths, fname=f, names=names), -1, 0), ni)
-                    Thread(target=plot_images, args=(
-                        imgs, targets, paths, f), daemon=True).start()
+                    Thread(target=plot_images, args=(imgs, targets, paths, f), daemon=True).start()
                 elif plots and ni == 10 and wandb_logger.wandb:
                     wandb_logger.log({"Mosaics": [wandb_logger.wandb.Image(str(x), caption=x.name) for x in
                                                   save_dir.glob('train*.jpg') if x.exists()]})
@@ -466,7 +465,7 @@ def train(hyp, opt, device, tb_writer=None):
             final_epoch = epoch + 1 == epochs
             if not opt.notest or final_epoch:  # Calculate mAP
                 wandb_logger.current_epoch = epoch + 1
-                results, maps, times = test.test(data_dict,
+                results, maps, times = tester(data_dict,
                                                  batch_size=batch_size * 2,
                                                  imgsz=imgsz_test,
                                                  model=ema.ema,
@@ -550,11 +549,11 @@ def train(hyp, opt, device, tb_writer=None):
                                               if (save_dir / f).exists()]})
         # Test best.pt
         logger.info('%g epochs completed in %.3f hours.\n' %
-                    (epoch - start_epoch + 1, (time.time() - t0) / 3600))
+                    (epoch - start_epoch + 1, (time_synchronized() - t0) / 3600))
         
         if opt.data.endswith('coco.yaml') and nc == 80:  # if COCO
             for m in (last, best) if best.exists() else (last):  # speed, mAP tests
-                results, _, _ = test.test(opt.data,
+                results, _, _ = tester(opt.data,
                                           batch_size=batch_size * 2,
                                           imgsz=imgsz_test,
                                           conf_thres=0.001,
@@ -582,7 +581,7 @@ def train(hyp, opt, device, tb_writer=None):
                     output_path = output_path.replace('last.pt','deploy_best.pt')
                     try:
                         if opt.evolve <= 1:
-                            re_parameteration.Re_parameterization(inputWeightPath=str(f),
+                            Re_parameterization(inputWeightPath=str(f),
                                                                  outputWeightPath=output_path,
                                                                  cfgPath=path_cfg, nc=nc, device=device)
                     except Exception as ex:
@@ -749,7 +748,7 @@ if __name__ == '__main__':
                 # Mutate
                 mp, s = 0.8, 0.2  # mutation probability, sigma
                 npr = np.random
-                npr.seed(int(time.time()))
+                npr.seed(int(time_synchronized()))
                 g = np.array([x[0] for x in meta.values()])  # gains 0-1
                 ng = len(meta)
                 v = np.ones(ng)

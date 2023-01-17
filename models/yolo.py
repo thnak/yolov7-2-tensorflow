@@ -917,7 +917,6 @@ class ONNX_Engine(object):
         return torch.from_numpy(x).to(self.device) if isinstance(x, np.ndarray) else x
     
     def end2end(self, outputs, ori_images, dwdh,ratio, fps, bfc):
-        t0 = time.time()
         image = [None] * len(ori_images)
         txtcolor2, bboxcolor2 = bfc.getval(index=0)
         if isinstance(dwdh, (list)):
@@ -963,11 +962,11 @@ class ONNX_Engine(object):
             im = np.concatenate(im)
         
         if self.session.get_providers()[0] in ['CUDAExecutionProvider', 'TensorrtExecutionProvider', 'DmlExecutionProvider']:
-            t0 = time.time()
+            t0 = time_synchronized()
             for _ in range(num):
                 logging.info(f'\nWarming up: \n')
                 self.infer(im)
-            return ((time.time() - t0)/num)/self.batch_size
+            return ((time_synchronized() - t0)/num)/self.batch_size
                 
     def non_max_suppression(self):
         # prediction = self.prediction
@@ -999,7 +998,7 @@ class ONNX_Engine(object):
         self.multi_label_nms &= nc > 1  # multiple labels per box (adds 0.5ms/img)
         merge = False  # use merge-NMS
 
-        t = time.time()
+        t = time_synchronized()
         mi = 5 + nc  # mask start index
         output = [torch.zeros((0, 6), device=self.prediction.device)] * bs
         for xi, x in enumerate(self.prediction):  # image index, image inference
@@ -1048,7 +1047,7 @@ class ONNX_Engine(object):
             output[xi] = x[i]
             if mps:
                 output[xi] = output[xi].to(device)
-            if (time.time() - t) > time_limit:
+            if (time_synchronized() - t) > time_limit:
                 logging.warning(f'WARNING ⚠️ NMS time limit {time_limit:.3f}s exceeded')
                 break  # time limit exceeded
         return output
@@ -1074,14 +1073,12 @@ class TensorRT_Engine(object):
         import yaml
         import cv2
         import os
-        import time
         self.cuda = cuda
         self.trt = trt
         
         self.yaml = yaml
         self.cv2 = cv2
         self.os = os
-        self.time = time
         self.prefix = colorstr(f'TensorRT engine:')
         self.confThres = confThres
         self.iouThes = iouThres
@@ -1171,18 +1168,18 @@ class TensorRT_Engine(object):
             logging.info(f'{self.prefix} Save video at: {video_outputPath}')
             ffmpeg = FFMPEG_recorder(video_outputPath,(width, height), fps)
         fps, avg = 0, []
-        timeStart = self.time.time()
+        timeStart = time_synchronized()
         while True:
             ret, frame = cap.read()
             if not ret:
                 break
             blob, ratio = self.preproc(frame, self.imgsz)
-            t1 = self.time.time()
+            t1 = time_synchronized()
             data = self.infer(blob)
-            fps = (fps + (1. / (self.time.time() - t1))) / 2
+            fps = (fps + (1. / (time_synchronized() - t1))) / 2
             avg.append(fps)
             frame = self.cv2.putText(frame, "FPS:%d " %fps, (0, 40), self.cv2.FONT_HERSHEY_SIMPLEX, 1,(0, 0, 255), 2)
-            t2 = self.time.time()
+            t2 = time_synchronized()
             if end2end:
                 num, final_boxes, final_scores, final_cls_inds = data
                 final_boxes = np.reshape(final_boxes/ratio, (-1, 4))
@@ -1190,7 +1187,7 @@ class TensorRT_Engine(object):
             else:
                 predictions = np.reshape(data, (1, -1, int(5+self.n_classes)))[0]
                 dets = self.postprocess(predictions,ratio)
-            logging.info(f'{self.prefix} FPS: {round(fps,3)}, '+f'nms: {round(self.time.time() - t2,3)}' if end2end else 'postprocess:'+f' {round(self.time.time() - t2,3)}')
+            logging.info(f'{self.prefix} FPS: {round(fps,3)}, '+f'nms: {round(time_synchronized() - t2,3)}' if end2end else 'postprocess:'+f' {round(time_synchronized() - t2,3)}')
             if dets is not None:
                 final_boxes, final_scores, final_cls_inds = dets[:,:4], dets[:, 4], dets[:, 5]
                 frame = self.vis(frame, final_boxes, final_scores, final_cls_inds, names=self.names)
@@ -1200,16 +1197,16 @@ class TensorRT_Engine(object):
             ffmpeg.stopRecorder()
         cap.release()
         
-        logging.info(f'{self.prefix} Finished! '+f'save at {video_outputPath} ' if not noSave else ''+f'total {round(self.time.time() - timeStart, 2)} second, avg FPS: {round(sum(avg)/len(avg),3)}')
+        logging.info(f'{self.prefix} Finished! '+f'save at {video_outputPath} ' if not noSave else ''+f'total {round(time_synchronized() - timeStart, 2)} second, avg FPS: {round(sum(avg)/len(avg),3)}')
 
     def inference(self, origin_img, end2end=False):
         """ detect single image
             Return: image
         """
         img, ratio = self.preproc(origin_img, self.imgsz)
-        t1 = self.time.time()
+        t1 = time_synchronized()
         data = self.infer(img)
-        logging.info(f'speed: {self.time.time() - t1}s')
+        logging.info(f'speed: {time_synchronized() - t1}s')
         if end2end:
             num, final_boxes, final_scores, final_cls_inds = data
             final_boxes = np.reshape(final_boxes/ratio, (-1, 4))

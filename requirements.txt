@@ -19,7 +19,7 @@ nvidia-tensorrt
 youtube_dl
 # Logging -------------------------------------
 tensorboard==2.11.0
-wandb
+# wandb
 termcolor
 # Plotting ------------------------------------
 pandas==1.3.5

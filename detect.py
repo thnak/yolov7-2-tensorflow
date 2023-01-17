@@ -62,7 +62,7 @@ def detect(opt=None):
     old_img_w = old_img_h = imgsz
     old_img_b = 1
 
-    t0 = time.time()
+    t0 = time_synchronized()
     avgTime = [[], []]
     if opt.datacollection:
         save_txt = True
@@ -74,13 +74,13 @@ def detect(opt=None):
             img = img.unsqueeze(0)
         # Warmup
         if device.type == 'cuda' and (old_img_b != img.shape[0] or old_img_h != img.shape[2] or old_img_w != img.shape[3]):
-            twrm = time.time()
+            twrm = time_synchronized()
             old_img_b = img.shape[0]
             old_img_h = img.shape[2]
             old_img_w = img.shape[3]
             for i in range(3):
                 model(img, augment=opt.augment)[0]
-            print(f'{time.time() - twrm:0.3f} warm up finished')
+            print(f'{time_synchronized() - twrm:0.3f} warm up finished')
         # Inference
         t1 = time_synchronized()
         
@@ -91,7 +91,7 @@ def detect(opt=None):
         t3 = time_synchronized()
 
         # Process detections
-        t4 = time.time()
+        t4 = time_synchronized()
         for i, det in enumerate(pred):
             if webcam:
                 p, s,  im0, frame = path[i], '%g: ' % i, im0s[i].copy(), dataset.count
@@ -123,7 +123,7 @@ def detect(opt=None):
                     if save_img or view_img > -1:
                         label = f'{names[int(cls)]} {conf:.2f}'
                         textColor, bboxColor = BFC.getval(index=int(cls))
-                        im0 = plot_one_box_with_return(xyxy, im0, label=label, txtColor=textColor, bboxColor=bboxColor, line_thickness=1)
+                        im0 = plot_one_box_with_return(xyxy, im0, label=label, txtColor=textColor, bboxColor=bboxColor)
 
             tmInf, tmNms = round(1E3 * (t2 - t1), 3), round(1E3 * (t3 - t2), 3)
             avgTime[0].append(tmInf)
@@ -156,7 +156,7 @@ def detect(opt=None):
                         ffmpeg = FFMPEG_recorder(savePath=save_path,videoDimensions=(w,h),fps=fps)
                     ffmpeg.writeFrame(im0)
                     ffmpeg.writeSubtitle(title=s,fps=fps)
-        print(f'{s}pre-proc {(time.time() - t4):0.3f}s, infer: {round(tmInf,3)}, nms: {round(tmNms,3)}')
+        print(f'{s}pre-proc {(time_synchronized() - t4):0.3f}s, infer: {round(tmInf,3)}, nms: {round(tmNms,3)}')
     if save_txt or save_img:
         s = f"\n{len(list(save_dir.glob('labels/*.txt')))} labels saved to {save_dir / 'labels'}" if save_txt else ''
         print(f"Results saved to {save_dir}{s}")
@@ -165,7 +165,7 @@ def detect(opt=None):
         ffmpeg.stopRecorder()
         ffmpeg.addSubtitle()
         
-    print(f'Done. ({time.time() - t0:.3f}s), avgInference {round(sum(avgTime[0])/len(avgTime[0]),3)}ms, avgNMS {round(sum(avgTime[1])/len(avgTime[1]),3)}ms')
+    print(f'Done. ({time_synchronized() - t0:.3f}s), avgInference {round(sum(avgTime[0])/len(avgTime[0]),3)}ms, avgNMS {round(sum(avgTime[1])/len(avgTime[1]),3)}ms')
 
 def detectTensorRT(tensorrtEngine,opt=None,save=''):
     source, weights, view_img, save_txt, imgsz, trace = opt.source, opt.weights, opt.view_img, opt.save_txt, opt.img_size, not opt.no_trace
@@ -187,7 +187,7 @@ def detectTensorRT(tensorrtEngine,opt=None,save=''):
     count = 0
     
     for path, img, im0s, vid_cap, s in dataset:
-        t1 = time.time()
+        t1 = time_synchronized()
         img = pred.inference(im0s, end2end=True)
         if view_img > -1:
             cv2.namedWindow('TensortRT Engine', img)
@@ -305,9 +305,9 @@ def inferWithDynamicBatch(enginePath,opt, save=''):
             t2_2_t1.set()
             
             if len(Data_t2_2_t3[1]):
-                t1 = time.time()
+                t1 = time_synchronized()
                 Data_t2_2_t3[8] = model.infer(Data_t2_2_t3[1])[0]
-                t2 = time.time() - t1
+                t2 = time_synchronized() - t1
                 avgTimeRate.append(t2)
                 if seenn > com:
                     seenn = 0
@@ -446,9 +446,9 @@ if __name__ == '__main__':
             # imgs, img0s = [], []
             # for path, img, im0s, vid_cap, s, ratio, dwdh in dataset:
             #     model.warmup()
-            #     t1 = time.time()
+            #     t1 = time_synchronized()
             #     pred, img = model.infer(img, end2end=end2end)                    
-            #     t2 = time.time() - t1
+            #     t2 = time_synchronized() - t1
             #     img_h, img_w = img.shape[2:]
                 
             #     if not end2end:
