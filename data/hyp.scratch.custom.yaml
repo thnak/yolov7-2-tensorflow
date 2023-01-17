@@ -31,14 +31,14 @@ CLAHE_clip_limit: 4
 RandomBrightnessContrast: 0.1
 brightness_limit: 0.2
 contrast_limit: 0.2
-brightness_by_max: True
+brightness_by_max: False
 MedianBlur: 0.1
 MedianBlur_blur_limit: 7
 ISONoise: 0.09
 ImageCompression: 0.09
 ImageCompression_quality_lower: 75
 RandomRotate90: 0.09
-HueSaturationValue: 0.5
+HueSaturationValue: 0.25
 HueSaturationValue_hue_shift_limit: 1
 HueSaturationValue_sat_shift_limit: 70
 HueSaturationValue_val_shift_limit: 30

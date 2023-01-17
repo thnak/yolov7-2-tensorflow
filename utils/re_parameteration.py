@@ -7,7 +7,11 @@ import torch
 import os
 from utils.general import colorstr
 
-def Re_parameterization(inputWeightPath='v7-tiny-training.pt', outputWeightPath = 'cfg/deploy/yolov7.pt', nc = 1, cfgPath='cfg/deploy/yolov7-tiny.yaml'):
+def Re_parameterization(inputWeightPath='v7-tiny-training.pt',
+                        outputWeightPath = 'cfg/deploy/yolov7.pt',
+                        nc = 1,
+                        cfgPath='cfg/deploy/yolov7-tiny.yaml',
+                        device = None):
     yolov7w_idx= [118,122]
     yolov7e6_idx = [140,144]
     yolov7d6_idx = [162,166]
@@ -40,7 +44,7 @@ def Re_parameterization(inputWeightPath='v7-tiny-training.pt', outputWeightPath 
             idx2 = yolov7d6_idx[1]            
             print(colorstr('Re-parameterizing'),'yolov7-d6')   
         
-        device = select_device('0'if torch.cuda.is_available() else 'cpu', batch_size=8)[0]
+        # device = select_device('0'if torch.cuda.is_available() else 'cpu', batch_size=8)[0]
         ckpt = torch.load(inputWeightPath, map_location=device)
         model = Model(cfgPath, ch=3, nc=nc).to(device)
         with open(cfgPath) as f:

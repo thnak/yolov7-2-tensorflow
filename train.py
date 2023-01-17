@@ -35,7 +35,7 @@ from utils.plots import plot_images, plot_labels, plot_results, plot_evolution
 from utils.torch_utils import ModelEMA, select_device, intersect_dicts, torch_distributed_zero_first, is_parallel
 from utils.wandb_logging.wandb_utils import WandbLogger, check_wandb_resume
 from utils.autobatch import check_train_batch_size
-import utils.Reparameteration as Reparameteration
+import utils.re_parameteration as re_parameteration
 
 logger = logging.getLogger(__name__)
 
@@ -350,8 +350,6 @@ def train(hyp, opt, device, tb_writer=None):
                 f'Using {dataloader.num_workers} dataloader workers\n'
                 f'Logging results to {save_dir}\n'
                 f'Starting training for {epochs} epochs...\n')
-    if opt.evolve > 1:
-        logger.info(f'Starting training for {opt.evolve}th generation out of {opt.evolve} generations...\n')
     torch.save(model, wdir / 'init.pt')
     # epoch ------------------------------------------------------------------
     for epoch in range(start_epoch, epochs):
@@ -584,7 +582,9 @@ def train(hyp, opt, device, tb_writer=None):
                     output_path = output_path.replace('last.pt','deploy_best.pt')
                     try:
                         if opt.evolve <= 1:
-                            Reparameteration.Re_parameterization(inputWeightPath=str(f), outputWeightPath=output_path, cfgPath=path_cfg, nc=nc)
+                            re_parameteration.Re_parameterization(inputWeightPath=str(f),
+                                                                 outputWeightPath=output_path,
+                                                                 cfgPath=path_cfg, nc=nc, device=device)
                     except Exception as ex:
                         print(ex)
         if opt.bucket:
@@ -714,10 +714,10 @@ if __name__ == '__main__':
                 'cls_pw': (1, 0.5, 2.0),  # cls BCELoss positive_weight
                 'obj': (1, 0.2, 4.0),  # obj loss gain (scale with pixels)
                 'obj_pw': (1, 0.5, 2.0),  # obj BCELoss positive_weight
-                'iou_t': (0, 0.1, 0.7),  # IoU training threshold
+                'iou_t': (1, 0.1, 0.7),  # IoU training threshold
                 'anchor_t': (1, 2.0, 8.0),  # anchor-multiple threshold
                 'anchors': (2, 2.0, 10.0),  # anchors per output grid (0 to ignore)
-                'fl_gamma': (0, 0.0, 2.0)}  # focal loss gamma (efficientDet default gamma=1.5)
+                'fl_gamma': (1, 0.0, 2.0)}  # focal loss gamma (efficientDet default gamma=1.5)
         
         with open(opt.hyp, errors='ignore') as f:
             hyp = yaml.safe_load(f)  # load hyps dict
@@ -732,6 +732,8 @@ if __name__ == '__main__':
             os.system('gsutil cp gs://%s/evolve.txt .' % opt.bucket)  # download evolve.txt if exists
 
         for _ in range(opt.evolve):  # generations to evolve
+            a = colorstr('Evolving: ')
+            logger.info(f'{a}starting training for {_}th generation out of {opt.evolve} generations...\n')
             if Path('evolve.txt').exists():  # if evolve.txt exists: select best hyps and mutate
                 # Select parent(s)
                 parent = opt.parent  # parent selection method: 'single' or 'weighted'
@@ -739,10 +741,9 @@ if __name__ == '__main__':
                 n = min(5, len(x))  # number of previous results to consider
                 x = x[np.argsort(-fitness(x))][:n]  # top n mutations
                 w = fitness(x) - fitness(x).min()  # weights
-                if parent == 'single' or len(x) == 1:
-                    # x = x[random.randint(0, n - 1)]  # random selection
+                if parent or len(x) == 1:
                     x = x[random.choices(range(n), weights=w)[0]]  # weighted selection
-                elif parent == 'weighted':
+                else:
                     x = (x * w.reshape(n, 1)).sum(0) / w.sum()  # weighted combination
 
                 # Mutate
@@ -757,20 +758,21 @@ if __name__ == '__main__':
                 for i, k in enumerate(hyp.keys()):  # plt.hist(v.ravel(), 300)
                     if k in meta:
                         hyp[k] = float(x[i + 7] * v[i])  # mutate
-
             # Constrain to limits
+            hyp_ = meta.copy()
             for k, v in meta.items():
                 hyp[k] = max(hyp[k], v[1])  # lower limit
                 hyp[k] = min(hyp[k], v[2])  # upper limit
                 hyp[k] = round(hyp[k], 5)  # significant digits
+                hyp_[k] = hyp[k]
 
             # Train mutation
             results = train(hyp.copy(), opt, device)
-
+            
             # Write mutation results
-            print_mutation(hyp.copy(), results, yaml_file, opt.bucket)
+            print_mutation(hyp_.copy(), results, yaml_file, opt.bucket)
 
         # Plot results
         plot_evolution(yaml_file)
-        print(f'Hyperparameter evolution complete. Best results saved as: {yaml_file}\n'
+        logger.info(f'Hyperparameter evolution complete. Best results saved as: {yaml_file}\n'
               f'Command to train a new model with these hyperparameters: $ python train.py --hyp {yaml_file}')

@@ -96,7 +96,7 @@ if __name__ == '__main__':
             ts = torch.jit.trace(model, img, strict=False)
             ts.save(f)
             logging.info(f'{prefix} export success✅, saved as {f}')
-            filenames[0] = f
+            filenames.append(f)
         except Exception as e:
             logging.info(f'{prefix} export failure🐛🪲: {e}')
 

@@ -1192,7 +1192,7 @@ class Albumentations:
             A.HorizontalFlip(p=hyp['HorizontalFlip']),
             A.VerticalFlip(p=hyp['VerticalFlip']),
             A.ChannelDropout(p=hyp['ChannelDropout']),
-            A.PixelDropout(p=hyp['PixelDropout'])],
+            A.PixelDropout(p=hyp['PixelDropout'], drop_value=None)],
             
             bbox_params=A.BboxParams(format='pascal_voc', label_fields=['class_labels']))
         logging.info(colorstr('albumentations: ') + ', '.join(f'{x}' for x in self.transform.transforms if x.p))
