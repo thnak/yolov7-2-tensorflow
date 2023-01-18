@@ -9,3 +9,4 @@ best_openvino_model/
 best_web_model/
 tre.py
 build/
+wandb/

@@ -26,7 +26,7 @@ try:
     import thop  # for FLOPS computation
 except ImportError:
     thop = None
-from utils.plots import plot_one_box_with_return
+from utils.plots import plot_one_box
 
 class Detect(nn.Module):
     stride = None  # strides computed during build
@@ -916,7 +916,7 @@ class ONNX_Engine(object):
     def from_numpy(self, x):
         return torch.from_numpy(x).to(self.device) if isinstance(x, np.ndarray) else x
     
-    def end2end(self, outputs, ori_images, dwdh,ratio, fps, bfc):
+    def end2end(self, outputs, ori_images, dwdh, ratio, fps, bfc):
         image = [None] * len(ori_images)
         txtcolor2, bboxcolor2 = bfc.getval(index=0)
         if isinstance(dwdh, (list)):
@@ -925,9 +925,10 @@ class ONNX_Engine(object):
         else:
             dwdhs = [dwdh]
             ratios = [ratio]
-
+        
         for index, (batch_id,x0,y0,x1,y1,cls_id,score) in enumerate(outputs):
-            image[int(batch_id)] = ori_images[int(batch_id)] if image[int(batch_id)] is None else image[int(batch_id)]
+            if image[int(batch_id)] is None:
+                image[int(batch_id)] = ori_images[int(batch_id)]
             box = np.array([x0,y0,x1,y1])
             box -= np.array(dwdhs[int(batch_id)]*2)
             box /= ratios[int(batch_id)][0]
@@ -939,18 +940,17 @@ class ONNX_Engine(object):
             name = self.names[cls_id]
             name += ' '+str(score)
             txtcolor, bboxcolor = bfc.getval(index=cls_id)
-            image[int(batch_id)] = plot_one_box_with_return(box, image[int(batch_id)],
+            image[int(batch_id)] = plot_one_box(box, image[int(batch_id)],
                                                             txtColor=txtcolor,
                                                             bboxColor=bboxcolor, label=name,
                                                             frameinfo=[f'FPS: {fps}',f'Total object: {int(len(outputs)/ len(ori_images))}'])
         
         for index in range(len(image)):
             if image[index] is None:
-                image[index] = plot_one_box_with_return(None, ori_images[index],
+                image[index] = plot_one_box(None, ori_images[index],
                                                                 txtColor=txtcolor2,
                                                                 bboxColor=bboxcolor2, label=None,
                                                                 frameinfo=[f'FPS: {fps}',f'Total object: {0}'])
-                
         return image
             
     def warmup(self, num=10):
@@ -1360,7 +1360,7 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
                  RepResX, RepResXCSPA, RepResXCSPB, RepResXCSPC, 
                  Ghost, GhostCSPA, GhostCSPB, GhostCSPC,
                  SwinTransformerBlock, STCSPA, STCSPB, STCSPC,
-                 SwinTransformer2Block, ST2CSPA, ST2CSPB, ST2CSPC, C3]:
+                 SwinTransformer2Block, ST2CSPA, ST2CSPB, ST2CSPC, C3, C2f]:
             c1, c2 = ch[f], args[0]
             if c2 != no:  # if not output
                 c2 = make_divisible(c2 * gw, 8)

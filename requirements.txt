@@ -16,7 +16,8 @@ protobuf<4.21.3
 pycuda
 nvidia-pyindex
 nvidia-tensorrt
-youtube_dl
+pafy==0.5.5
+youtube_dl==2021.12.17
 # Logging -------------------------------------
 tensorboard==2.11.0
 # wandb

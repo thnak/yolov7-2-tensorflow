@@ -12,6 +12,7 @@ from multiprocessing.pool import ThreadPool
 from pathlib import Path
 from threading import Thread
 from torch.utils.data import DataLoader, Dataset, dataloader, distributed
+from urllib.parse import urlparse
 
 import cv2
 import numpy as np
@@ -130,16 +131,14 @@ class _RepeatSampler(object):
         while True:
             yield from iter(self.sampler)
             
-def is_stream_or_webcam(source=''):
-    """_summary_
-    Args:
-        source (str, optional): _description_. Defaults to ''. source
-
-    Returns:
-        True if webcam, txt, streaming...
-    """
-    webcam = source.isnumeric() or source.endswith('.txt') or source.lower().startswith(('rtsp://', 'rtmp://', 'http://', 'https://'))
-    return webcam
+def check_data_source(source=''):
+    if source.isnumeric() or source.endswith('.txt') or source.lower().startswith(('rtsp://', 'rtmp://', 'http://', 'https://')):
+        result = 'stream'
+    elif source.lower() in ['screen', 'this', 'monitor']:
+        result = 'screen'
+    else:
+        result = 'media'
+    return result
 
 
 class LoadImages:
@@ -244,10 +243,7 @@ class LoadImages:
         return self.nf  # number of files
 
 class LoadStreams:
-    """multiple IP streaming, RTSP cameras or webcam
-    press q key to quite  
-    """
-    def __init__(self, sources='streams.txt', img_size=(640, 640), stride=32, auto=True):
+    def __init__(self, sources='streams.txt', img_size=(640, 640), stride=32, auto=True, vid_stride=1):
         """_summary_
 
         Args:
@@ -260,6 +256,7 @@ class LoadStreams:
         self.img_size = img_size
         self.stride = stride
         self.auto = auto
+        self.vid_stride = vid_stride
         if os.path.isfile(sources):
             with open(sources, 'r') as f:
                 sources = [x.strip() for x in f.read().strip().splitlines() if len(x.strip())]
@@ -273,8 +270,8 @@ class LoadStreams:
             # Start the thread to read frames from the video stream
             print(f'{i + 1}/{n}: {s}... ', end='')
             url = eval(s) if s.isnumeric() else s
-            if 'youtube.com/' in str(url) or 'youtu.be/' in str(url):  # if source is YouTube video
-                check_requirements(('pafy', 'youtube_dl'))
+            if urlparse(s).hostname in ('www.youtube.com', 'youtube.com', 'youtu.be'):  # if source is YouTube video
+                check_requirements(('pafy', 'youtube_dl==2021.12.17'))
                 import pafy
                 url = pafy.new(url).getbest(preftype="mp4").url
             cap = cv2.VideoCapture(url)
@@ -285,7 +282,7 @@ class LoadStreams:
 
             _, self.imgs[i] = cap.read()  # guarantee first frame
             thread = Thread(target=self.update, args=([i, cap]), daemon=True)
-            print(f' success ({w}x{h} at {self.fps:.2f} FPS).')
+            print(f'success ({w}x{h} at {self.fps:.2f} FPS).')
             thread.start()
         print('')  # newline
 
@@ -294,11 +291,14 @@ class LoadStreams:
         n = 0
         while cap.isOpened():
             n += 1
-            # _, self.imgs[index] = cap.read()
             cap.grab()
-            if n == 4:  # read every 4th frame
+            if n % self.vid_stride == 0:  # read every 4th frame
                 success, im = cap.retrieve()
-                self.imgs[index] = im if success else self.imgs[index] * 0
+                if success:
+                    self.imgs[index] = im
+                else:
+                    self.imgs[index] = self.imgs[index] * 0
+                    print('WARNING ⚠️ Video stream unresponsive, please check your IP camera connection.')
                 n = 0
             if self.fps != 0:
                 time.sleep(1 / self.fps)  # wait time
@@ -322,10 +322,53 @@ class LoadStreams:
         # Convert
         img = img[:, :, :, ::-1].transpose(0, 3, 1, 2)  # BGR to RGB, to bsx3x416x416
         img = np.ascontiguousarray(img)            
-        return self.sources, img, img0, None, None, ratio, dwdh
+        return self.sources, img, img0, None, f'{self.sources}, {self.img_size}', ratio, dwdh
 
     def __len__(self):
-        return 0  # 1E12 frames = 32 streams at 30 FPS for 30 years
+        return len(self.sources)  # 1E12 frames = 32 streams at 30 FPS for 30 years
+
+class LoadScreenshots:
+    def __init__(self, source, img_size=(640, 640), stride=32, auto=True):
+        check_requirements(('mss'))
+        import mss
+
+        source, *params = source.split()
+        self.screen, left, top, width, height = 0, None, None, None, None  # default to full screen 0
+        if len(params) == 1:
+            self.screen = int(params[0])
+        elif len(params) == 4:
+            left, top, width, height = (int(x) for x in params)
+        elif len(params) == 5:
+            self.screen, left, top, width, height = (int(x) for x in params)
+        self.img_size = img_size
+        self.stride = stride
+        self.auto = auto
+        self.mode = 'stream'
+        self.frame = 0
+        self.sct = mss.mss()
+
+        # Parse monitor shape
+        monitor = self.sct.monitors[self.screen]
+        self.top = monitor["top"] if top is None else (monitor["top"] + top)
+        self.left = monitor["left"] if left is None else (monitor["left"] + left)
+        self.width = width or monitor["width"]
+        self.height = height or monitor["height"]
+        self.monitor = {"left": self.left, "top": self.top, "width": self.width, "height": self.height}
+        self.fps = 30
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        # mss screen capture: get raw pixels from the screen as np array
+        img0 = np.array(self.sct.grab(self.monitor))[:, :, :3]  # [:, :, :3] BGRA to BGR
+        s = f"screen {self.screen} (LTWH): {self.left},{self.top},{self.width},{self.height}: "
+        img = letterbox(img0, self.img_size, stride=self.stride, auto=self.auto)[0]  # padded resize
+        ratio = letterbox(img0, self.img_size, stride=self.stride, auto=self.auto)[1]
+        dwdh = letterbox(img0, self.img_size, stride=self.stride, auto=self.auto)[2]
+        img = img.transpose((2, 0, 1))[::-1]  # HWC to CHW, BGR to RGB
+        img = np.ascontiguousarray(img)  # contiguous
+        self.frame += 1
+        return str(self.screen), img, img0, None, s, ratio, dwdh
 
 
 def img2label_paths(img_paths):

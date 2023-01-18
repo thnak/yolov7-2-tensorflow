@@ -4,16 +4,14 @@ from pathlib import Path
 import cv2
 import torch
 import torch.backends.cudnn as cudnn
-from termcolor import colored
 from models.experimental import attempt_load
 from models.yolo import TensorRT_Engine
-from utils.datasets import LoadStreams, LoadImages, is_stream_or_webcam
+from utils.datasets import LoadStreams, LoadImages, LoadScreenshots, check_data_source
 from utils.general import check_img_size, check_requirements, non_max_suppression, \
     scale_coords, xyxy2xywh, strip_optimizer, set_logging, increment_path, check_git_status, BackgroundForegroundColors, colorstr
-from utils.plots import plot_one_box_with_return
+from utils.plots import plot_one_box
 from utils.torch_utils import select_device, time_synchronized, TracedModel
 import os
-import numpy as np
 import threading
 
 from utils.ffmpeg_ import  FFMPEG_recorder
@@ -21,7 +19,7 @@ from utils.ffmpeg_ import  FFMPEG_recorder
 def detect(opt=None):
     source, weights, view_img, save_txt, imgsz, trace = opt.source, opt.weights, opt.view_img, opt.save_txt, opt.img_size, not opt.no_trace
     save_img = not opt.nosave and not source.endswith('.txt')  # save inference images
-    webcam = is_stream_or_webcam(source)
+    webcam = check_data_source(source)
 
     # Directories
     save_dir = Path(increment_path(Path(opt.project) / opt.name,
@@ -123,7 +121,7 @@ def detect(opt=None):
                     if save_img or view_img > -1:
                         label = f'{names[int(cls)]} {conf:.2f}'
                         textColor, bboxColor = BFC.getval(index=int(cls))
-                        im0 = plot_one_box_with_return(xyxy, im0, label=label, txtColor=textColor, bboxColor=bboxColor)
+                        im0 = plot_one_box(xyxy, im0, label=label, txtColor=textColor, bboxColor=bboxColor)
 
             tmInf, tmNms = round(1E3 * (t2 - t1), 3), round(1E3 * (t3 - t2), 3)
             avgTime[0].append(tmInf)
@@ -170,7 +168,7 @@ def detect(opt=None):
 def detectTensorRT(tensorrtEngine,opt=None,save=''):
     source, weights, view_img, save_txt, imgsz, trace = opt.source, opt.weights, opt.view_img, opt.save_txt, opt.img_size, not opt.no_trace
     save_img = not opt.nosave and not source.endswith('.txt') 
-    webcam = is_stream_or_webcam(source=source)
+    webcam = check_data_source(source=source)
     
     
     pred = TensorRT_Engine(TensorRT_EnginePath=tensorrtEngine, confThres=opt.conf_thres, iouThres=opt.iou_thres)
@@ -210,16 +208,19 @@ stopThread = False
 def inferWithDynamicBatch(enginePath,opt, save=''):
     source, weights, view_img, save_txt, imgsz, trace = opt.source, opt.weights, opt.view_img, opt.save_txt, opt.img_size, not opt.no_trace
     save_img = not opt.nosave and not source.endswith('.txt') 
-    webcam = is_stream_or_webcam(source)
+    source_type = check_data_source(source)
     prefix = colorstr('ONNX: ')
     from models.yolo import ONNX_Engine
     model = None
     model = ONNX_Engine(ONNX_EnginePath=enginePath, prefix=prefix, confThres=opt.conf_thres)
     imgsz = model.imgsz
-    if webcam:
+    if source_type == 'stream':
         dataset = LoadStreams(source, img_size=imgsz, stride=model.stride, auto= model.rectangle)
+    elif source_type == 'screen':
+        dataset = LoadScreenshots(source=source, img_size=imgsz, stride=model.stride, auto= model.rectangle)
     else:
         dataset = LoadImages(source, img_size=imgsz, stride=model.stride, auto= model.rectangle)
+        
     BFC = BackgroundForegroundColors(names= model.names)
     model.batch_size = opt.batch_size if model.batch_size == 0 else model.batch_size
     print(f'{prefix}: {vars(model)}\n')
@@ -240,14 +241,14 @@ def inferWithDynamicBatch(enginePath,opt, save=''):
             if stopThread:
                 break
             if len(Data_t1_2_t2[1]) < model.batch_size:
-                if webcam:
+                if source_type == 'stream':
                     for i in range(len(im0s)):
                         if len(Data_t1_2_t2[1]) < model.batch_size:
                             Data_t1_2_t2[0].append(path[i])
                             Data_t1_2_t2[1].append(model.preproc_for_infer(img[i]).copy())
                             Data_t1_2_t2[2].append(im0s[i])
                             Data_t1_2_t2[3].append(vid_cap[i] if vid_cap else None)
-                            Data_t1_2_t2[4].append(s[i] if s else None)
+                            Data_t1_2_t2[4].append(s[i])
                             Data_t1_2_t2[5].append(ratio[i])
                             Data_t1_2_t2[6].append(dwdh[i])
                         else:
@@ -262,11 +263,11 @@ def inferWithDynamicBatch(enginePath,opt, save=''):
                     Data_t1_2_t2[6].append(dwdh)
                     
             if len(Data_t1_2_t2[1]) >= model.batch_size:
-                Data_t1_2_t2[1] = model.concat(Data_t1_2_t2[1])        
+                Data_t1_2_t2[1] = model.concat(Data_t1_2_t2[1])       
                 t1_2_t2.set()
                 t2_2_t1.wait()
                 t2_2_t1.clear()
-                print(f'{colorstr(dataset.mode)} {Data_t1_2_t2[0][0]}, {Data_t1_2_t2[2][0].shape}, FPS: {Data_t2_2_t3[7]}')
+                print(f'{colorstr(source_type)} {Data_t1_2_t2[0][0]}, {Data_t1_2_t2[2][0].shape}, FPS: {Data_t2_2_t3[7]}')
                 Data_t1_2_t2[0] = []
                 Data_t1_2_t2[1] = []
                 Data_t1_2_t2[2] = []
@@ -326,8 +327,7 @@ def inferWithDynamicBatch(enginePath,opt, save=''):
     def Thread3():
         global stopThread
         seen = 0
-        if not opt.nosave:
-            ffmpeg = FFMPEG_recorder(f'{save_dir}/a.mp4', videoDimensions=(2560, 1440), fps=25)
+        demensions = None
         while True:
             t2_2_t3.wait()
             Data_vis[0] = Data_t2_2_t3[0]
@@ -341,7 +341,10 @@ def inferWithDynamicBatch(enginePath,opt, save=''):
             Data_vis[8] = Data_t2_2_t3[8]
             t2_2_t3.clear()
             img = model.end2end(Data_vis[8], Data_vis[2], Data_vis[6], Data_vis[5], Data_vis[7], BFC)
-                        
+            if demensions is None and not opt.nosave:
+                demensions = Data_vis[2][0].shape[:2]
+                ffmpeg = FFMPEG_recorder(f'{save_dir}/detect.mp4', videoDimensions= (demensions[1], demensions[0]), fps= dataset.fps)
+            cv2.destroyAllWindows()
             for index, (im) in enumerate(img):
                 cv2.namedWindow(f'{Data_vis[0][index]}', cv2.WINDOW_NORMAL)
                 cv2.imshow(f'{Data_vis[0][index]}', im)
@@ -364,7 +367,6 @@ def inferWithDynamicBatch(enginePath,opt, save=''):
         print(f'end: Thread-3 {seen}')
             #t3_2_t2.set()
     
-
     thread1 = threading.Thread(target= Thread1, name='Thread-1')
     thread2 = threading.Thread(target= Thread2, name='Thread-2')
     thread3 = threading.Thread(target= Thread3, name='Thread-3')
@@ -374,7 +376,7 @@ def inferWithDynamicBatch(enginePath,opt, save=''):
     thread3.start()
     thread1.join()
     thread2.join()
-    thread3.join()    
+    thread3.join()
             
         
 if __name__ == '__main__':
@@ -424,7 +426,7 @@ if __name__ == '__main__':
             inferWithDynamicBatch(_, opt, save_dir)
             # from models.yolo import ONNX_Engine
             # device = select_device(opt.device)[0]
-            # webcam = is_stream_or_webcam(opt.source)
+            # webcam = check_data_source(opt.source)
             # prefix = colorstr('ONNX_Engine')
             # model = ONNX_Engine(ONNX_EnginePath=_
             #                     ,confThres=opt.conf_thres, 
@@ -494,11 +496,11 @@ if __name__ == '__main__':
             #                         c = int(cls)
             #                         label = None if hide_labels else (names[c] if hide_conf else f'{names[c]} {conf:.2f}')
             #                         txtColor, bboxColor = BFC.getval(index=int(cls))
-            #                         im0 = plot_one_box_with_return(xyxy, im0, label=label, txtColor=txtColor,
+            #                         im0 = plot_one_box(xyxy, im0, label=label, txtColor=txtColor,
             #                                                     bboxColor=bboxColor, line_thickness=3,
             #                                                     frameinfo=[f'avgFPS: {fps_rate}',f'Total objects: {n}'])                                              
             #             else:
-            #                 im0 = plot_one_box_with_return(None, im0, label=None, txtColor=txtColorD, bboxColor=bboxColorD,
+            #                 im0 = plot_one_box(None, im0, label=None, txtColor=txtColorD, bboxColor=bboxColorD,
             #                                             line_thickness=3, frameinfo=[f'avgFPS: {fps_rate}', f'Total objects: {0}'])                                
             #             print(f'{s}')
             #             if opt.view_img > -1:

@@ -7,7 +7,7 @@ import os
 import platform
 import random
 import re
-import subprocess
+from subprocess import check_output
 import time
 from pathlib import Path
 import random
@@ -17,6 +17,7 @@ import pandas as pd
 import torch
 import torchvision
 import yaml
+import pkg_resources as pkg
 
 from utils.google_utils import gsutil_getsize
 from utils.metrics import fitness
@@ -27,7 +28,8 @@ np.set_printoptions(linewidth=320, formatter={'float_kind': '{:11.5g}'.format}) 
 pd.options.display.max_columns = 10
 cv2.setNumThreads(0)  # prevent OpenCV from multithreading (incompatible with PyTorch DataLoader)
 os.environ['NUMEXPR_MAX_THREADS'] = str(os.cpu_count())  # NumExpr max threads
-
+FILE = Path(__file__).resolve()
+ROOT = FILE.parents[1]  # YOLOv5 root directory
 
 def set_logging(rank=-1, filename=None, filemode=None):
     logging.basicConfig(
@@ -78,9 +80,9 @@ def check_git_status():
         assert check_online(), 'skipping check (offline)'
 
         cmd = 'git fetch && git config --get remote.origin.url'
-        url = subprocess.check_output(cmd, shell=True).decode().strip().rstrip('.git')  # github repo url
-        branch = subprocess.check_output('git rev-parse --abbrev-ref HEAD', shell=True).decode().strip()  # checked out
-        n = int(subprocess.check_output(f'git rev-list {branch}..origin/master --count', shell=True))  # commits behind
+        url = check_output(cmd, shell=True).decode().strip().rstrip('.git')  # github repo url
+        branch = check_output('git rev-parse --abbrev-ref HEAD', shell=True).decode().strip()  # checked out
+        n = int(check_output(f'git rev-list {branch}..origin/master --count', shell=True))  # commits behind
         if n > 0:
             s = f"⚠️ WARNING: code is out of date by {n} commit{'s' * (n > 1)}. " \
                 f"Use 'git pull' to update or 'git clone {url}' to download latest."
@@ -90,38 +92,54 @@ def check_git_status():
     except Exception as e:
         print(e)
 
+def check_python(minimum='3.7.0'):
+    # Check current python version vs. required python version
+    check_version(platform.python_version(), minimum, name='Python ', hard=True)
 
-def check_requirements(requirements='requirements.txt', exclude=()):
-    """Check installed dependencies meet requirements (pass *.txt file or list of packages)
-        requirements: string file path or tuple/list of modul
-    """
-    import pkg_resources as pkg
+
+def check_version(current='0.0.0', minimum='0.0.0', name='version ', pinned=False, hard=False, verbose=False):
+    # Check version vs. required version
+    current, minimum = (pkg.parse_version(x) for x in (current, minimum))
+    result = (current == minimum) if pinned else (current >= minimum)  # bool
+    s = f'WARNING ⚠️ {name}{minimum} is required by YOLOv5, but {name}{current} is currently installed'  # string
+    if hard:
+        assert result, emojis(s)  # assert min requirements met
+    if verbose and not result:
+        print(s)
+    return result
+
+def check_requirements(requirements=ROOT / 'requirements.txt', exclude=(), install=True, cmds=''):
+    # Check installed dependencies meet YOLOv5 requirements (pass *.txt file or list of packages or single package str)
     prefix = colorstr('red', 'bold', 'requirements:')
-    if isinstance(requirements, (str, Path)):  # requirements.txt file
-        file = Path(requirements)
-        if not file.exists():
-            print(f"{prefix} {file.resolve()} not found, check failed.")
-            return
-        requirements = [f'{x.name}{x.specifier}' for x in pkg.parse_requirements(file.open()) if x.name not in exclude]
-    elif isinstance(requirements, (tuple, list)):
-        pass
-    else:  # list or tuple of packages
-        requirements = [x for x in requirements if x not in exclude]
+    check_python()  # check python version
+    if isinstance(requirements, Path):  # requirements.txt file
+        file = requirements.resolve()
+        assert file.exists(), f"{prefix} {file} not found, check failed."
+        with file.open() as f:
+            requirements = [f'{x.name}{x.specifier}' for x in pkg.parse_requirements(f) if x.name not in exclude]
+    elif isinstance(requirements, str):
+        requirements = [requirements]
 
-    n = 0  # number of packages updates
+    s = ''
+    n = 0
     for r in requirements:
         try:
             pkg.require(r)
-        except Exception as e:  # DistributionNotFound or VersionConflict if requirements not met
+        except (pkg.VersionConflict, pkg.DistributionNotFound):  # exception if requirements not met
+            s += f'"{r}" '
             n += 1
-            print(f"{prefix} {e.req} not found and is required by YOLOv7, attempting auto-update...")
-            print(subprocess.check_output(f"pip install '{e.req}'", shell=True).decode())
 
-    if n:  # if packages updated
-        source = file.resolve() if 'file' in locals() else requirements
-        s = f"{prefix} {n} package{'s' * (n > 1)} updated per {source}\n" \
-            f"{prefix} ⚠️ {colorstr('bold', 'Restart runtime or rerun command for updates to take effect')}\n"
-        print(emojis(s))  # emoji-safe
+    if s and install:  # check environment variable
+        print(f"{prefix} YOLOv5 requirement{'s' * (n > 1)} {s}not found, attempting AutoUpdate...")
+        try:
+            # assert check_online(), "AutoUpdate skipped (offline)"
+            print(check_output(f'pip install {s} {cmds}', shell=True).decode())
+            source = file if 'file' in locals() else requirements
+            s = f"{prefix} {n} package{'s' * (n > 1)} updated per {source}\n" \
+                f"{prefix} ⚠️ {colorstr('bold', 'Restart runtime or rerun command for updates to take effect')}\n"
+            print(s)
+        except Exception as e:
+            print(f'{prefix} ❌ {e}')
 
 
 def check_img_size(img_size, s=32):
