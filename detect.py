@@ -344,7 +344,6 @@ def inferWithDynamicBatch(enginePath,opt, save=''):
             if demensions is None and not opt.nosave:
                 demensions = Data_vis[2][0].shape[:2]
                 ffmpeg = FFMPEG_recorder(f'{save_dir}/detect.mp4', videoDimensions= (demensions[1], demensions[0]), fps= dataset.fps)
-            cv2.destroyAllWindows()
             for index, (im) in enumerate(img):
                 cv2.namedWindow(f'{Data_vis[0][index]}', cv2.WINDOW_NORMAL)
                 cv2.imshow(f'{Data_vis[0][index]}', im)
