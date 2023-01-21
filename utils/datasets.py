@@ -228,9 +228,7 @@ class LoadImages:
             im, ratio, dwdh = letterbox(im0, self.img_size, stride=self.stride, auto=self.auto)  # padded resize
             im = im.transpose((2, 0, 1))[::-1]  # HWC to CHW, BGR to RGB
             im = np.ascontiguousarray(im)  # contiguous
-        else:
-            im = None
-        return path, im, im0, self.cap, s, ratio, dwdh
+        return path, im, im0, self.cap, {'string': s, 'frames': [self.frames if self.mode == 'video' else self.nf], 'c_frame': [self.frame if self.mode == 'video' else self.count]}, ratio, dwdh
 
     def _new_video(self, path):
         # Create a new video capture object
@@ -264,46 +262,49 @@ class LoadStreams:
             sources = [sources]
 
         n = len(sources)
-        self.imgs = [None] * n
+        self.imgs, self.frames, self.threads = [None] * n, [0] * n, [None] * n
+        self.c_frame = [0] * n
         self.sources = [clean_str(x) for x in sources]  # clean source names for later
         for i, s in enumerate(sources):
             # Start the thread to read frames from the video stream
             print(f'{i + 1}/{n}: {s}... ', end='')
             url = eval(s) if s.isnumeric() else s
-            if urlparse(s).hostname in ('www.youtube.com', 'youtube.com', 'youtu.be'):  # if source is YouTube video
-                check_requirements(('pafy', 'youtube_dl==2021.12.17'))
+            if urlparse(s).hostname in ('www.youtube.com', 'youtube.com', 'youtu.be', 'https://youtu.be'):  # if source is YouTube video
+                check_requirements(('pafy==0.5.5', 'youtube_dl==2021.12.17'))
                 import pafy
                 url = pafy.new(url).getbest(preftype="mp4").url
             cap = cv2.VideoCapture(url)
             assert cap.isOpened(), f'Failed to open {s}'
             w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            self.frames[i] = max(int(cap.get(cv2.CAP_PROP_FRAME_COUNT)), 0) or float('inf')  # infinite stream fallback
             self.fps = cap.get(cv2.CAP_PROP_FPS) % 100
 
             _, self.imgs[i] = cap.read()  # guarantee first frame
-            thread = Thread(target=self.update, args=([i, cap]), daemon=True)
-            print(f'success ({w}x{h} at {self.fps:.2f} FPS).')
-            thread.start()
+            self.threads[i] = Thread(target=self.update, args=([i, cap, url]), daemon=True)
+            print(f'success ({w}x{h} at {self.fps:.2f} FPS, {self.frames[i]} frames).')
+            self.threads[i].start()
         print('')  # newline
 
-    def update(self, index, cap):
+    def update(self, index, cap, stream):
         # Read next stream frame in a daemon thread
-        n = 0
-        while cap.isOpened():
-            n += 1
+        self.c_frame[index], f = 0, self.frames[index]
+        while cap.isOpened() and self.c_frame[index] < f:
+            self.c_frame[index] += 1
             cap.grab()
-            if n % self.vid_stride == 0:  # read every 4th frame
+            if self.c_frame[index] % self.vid_stride == 0:  # read every 4th frame
                 success, im = cap.retrieve()
                 if success:
                     self.imgs[index] = im
                 else:
-                    self.imgs[index] = self.imgs[index] * 0
+                    self.imgs[index] = np.zeros_like(self.imgs[index])
+                    cap.open(stream)
                     print('WARNING ⚠️ Video stream unresponsive, please check your IP camera connection.')
-                n = 0
             if self.fps != 0:
                 time.sleep(1 / self.fps)  # wait time
             else:
-                time.sleep(0.2)
+                time.sleep(1/30)
+        
 
     def __iter__(self):
         self.count = -1
@@ -311,6 +312,9 @@ class LoadStreams:
 
     def __next__(self):
         self.count += 1
+        if not all(x.is_alive() for x in self.threads):
+            raise StopIteration
+        
         img0 = self.imgs.copy()
         # Letterbox
         img, ratio, dwdh = [letterbox(x, self.img_size, auto=self.auto, stride=self.stride)[0] for x in img0],\
@@ -322,10 +326,10 @@ class LoadStreams:
         # Convert
         img = img[:, :, :, ::-1].transpose(0, 3, 1, 2)  # BGR to RGB, to bsx3x416x416
         img = np.ascontiguousarray(img)            
-        return self.sources, img, img0, None, f'{self.sources}, {self.img_size}', ratio, dwdh
+        return self.sources, img, img0, None, {'frames': self.frames, 'c_frame': self.c_frame, 'height': img0[0].shape[0], 'width': img0[0].shape[1]}, ratio, dwdh
 
     def __len__(self):
-        return len(self.sources)  # 1E12 frames = 32 streams at 30 FPS for 30 years
+        return len(self.sources)
 
 class LoadScreenshots:
     def __init__(self, source, img_size=(640, 640), stride=32, auto=True):
@@ -368,7 +372,7 @@ class LoadScreenshots:
         img = img.transpose((2, 0, 1))[::-1]  # HWC to CHW, BGR to RGB
         img = np.ascontiguousarray(img)  # contiguous
         self.frame += 1
-        return str(self.screen), img, img0, None, s, ratio, dwdh
+        return str(self.screen), img, img0, None, {'string': s, 'frames': [1], 'c_frame': [1]}, ratio, dwdh
 
 
 def img2label_paths(img_paths):

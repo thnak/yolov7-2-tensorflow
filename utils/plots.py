@@ -49,7 +49,7 @@ def butter_lowpass_filtfilt(data, cutoff=1500, fs=50000, order=5):
     b, a = butter_lowpass(cutoff, fs, order=order)
     return filtfilt(b, a, data)  # forward-backward filter
         
-def plot_one_box(x, img, txtColor=None, bboxColor=None, label=None, frameinfo = ['FPS: ', 'Total Object: ']):
+def plot_one_box(x, img, txtColor=None, bboxColor=None, label=None, frameinfo = []):
     img0 = img.copy()
     h, w = img0.shape[:2]
     line_thickness = min(h, w)
@@ -57,13 +57,15 @@ def plot_one_box(x, img, txtColor=None, bboxColor=None, label=None, frameinfo = 
     line_thickness = max(line_thickness, 1)
     tl = int(line_thickness) or round(0.002 * (img.shape[0] + img.shape[1]) / 2) + 1  # line/font thickness
     tf = max(tl - 1, 1)  # font thickness
-    t_sizeMaxWidth = max(max(cv2.getTextSize(frameinfo[1], 0, fontScale=tl / 3, thickness=tf)[0]), max(cv2.getTextSize(frameinfo[0], 0, fontScale=tl / 3, thickness=tf)[0]))
-    t_sizeMaxHeight = max(min(cv2.getTextSize(frameinfo[1], 0, fontScale=tl / 3, thickness=tf)[0]), min(cv2.getTextSize(frameinfo[0], 0, fontScale=tl / 3, thickness=tf)[0]))
-    img0 = cv2.rectangle(img0, (0, 0), (t_sizeMaxWidth + (t_sizeMaxHeight*2), t_sizeMaxHeight*(len(frameinfo)*2)), bboxColor, -1,  cv2.LINE_AA)
-    img0 = cv2.putText(img0,frameinfo[0],org= (t_sizeMaxHeight, int(t_sizeMaxHeight*2)), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale= tl/3, color= txtColor, thickness=1, lineType=cv2.LINE_AA)
-    img0 = cv2.putText(img0,frameinfo[1],org= (t_sizeMaxHeight, int(t_sizeMaxHeight*3)), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale= tl/3, color= txtColor, thickness=1, lineType=cv2.LINE_AA)
-    
-    if label and x:
+    if len(frameinfo):
+        t_sizeMaxWidth = max(max(cv2.getTextSize(frameinfo[1], 0, fontScale=tl / 3, thickness=tf)[0]), max(cv2.getTextSize(frameinfo[0], 0, fontScale=tl / 3, thickness=tf)[0]))
+        t_sizeMaxHeight = max(min(cv2.getTextSize(frameinfo[1], 0, fontScale=tl / 3, thickness=tf)[0]), min(cv2.getTextSize(frameinfo[0], 0, fontScale=tl / 3, thickness=tf)[0]))
+        img0 = cv2.rectangle(img0, (0, 0), (t_sizeMaxWidth + (t_sizeMaxHeight*2), t_sizeMaxHeight*4), bboxColor, -1,  cv2.LINE_AA)
+        img0 = cv2.putText(img0,frameinfo[0],org= (t_sizeMaxHeight, int(t_sizeMaxHeight*2)), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale= tl/3, color= txtColor, thickness=1, lineType=cv2.LINE_AA)
+        img0 = cv2.putText(img0,frameinfo[1],org= (t_sizeMaxHeight, int(t_sizeMaxHeight*3)), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale= tl/3, color= txtColor, thickness=1, lineType=cv2.LINE_AA)
+        img0 = cv2.line(img0, (0, h-3), (int(frameinfo[2]*w), h-3), (255,0,0), 5)
+        
+    if label != None and x != None:
         c1, c2 = (int(x[0]), int(x[1])), (int(x[2]), int(x[3]))
         img0 = cv2.rectangle(img0, c1, c2, bboxColor, thickness=tl, lineType=cv2.LINE_AA)
         t_size = cv2.getTextSize(label, 0, fontScale=tl / 3, thickness=tf)[0]
@@ -176,22 +178,21 @@ def plot_images(images, targets, paths=None, fname='images.jpg', names=None, max
                 cls = names[cls] if names else cls
                 if labels or conf[j] > 0.25:  # 0.25 conf thresh
                     label = '%s' % cls if labels else '%s %.1f' % (cls, conf[j])
-                    plot_one_box(box, mosaic, label=label, color=color, line_thickness=tl)
+                    mosaic = plot_one_box(box, mosaic, label=label, bboxColor=color, txtColor=(0,0,0))
 
         # Draw image filename labels
         if paths:
             label = Path(paths[i]).name[:40]  # trim to 40 char
             t_size = cv2.getTextSize(label, 0, fontScale=tl / 3, thickness=tf)[0]
-            cv2.putText(mosaic, label, (block_x + 5, block_y + t_size[1] + 5), 0, tl / 3, [220, 220, 220], thickness=tf,
+            mosaic =  cv2.putText(mosaic, label, (block_x + 5, block_y + t_size[1] + 5), 0, tl / 3, [220, 220, 220], thickness=tf,
                         lineType=cv2.LINE_AA)
 
         # Image border
-        cv2.rectangle(mosaic, (block_x, block_y), (block_x + w, block_y + h), (255, 255, 255), thickness=3)
+        mosaic = cv2.rectangle(mosaic, (block_x, block_y), (block_x + w, block_y + h), (255, 255, 255), thickness=3)
 
     if fname:
         r = min(1280. / max(h, w) / ns, 1.0)  # ratio to limit image size
         mosaic = cv2.resize(mosaic, (int(ns * w * r), int(ns * h * r)), interpolation=cv2.INTER_AREA)
-        # cv2.imwrite(fname, cv2.cvtColor(mosaic, cv2.COLOR_BGR2RGB))  # cv2 save
         Image.fromarray(mosaic).save(fname)  # PIL save
     return mosaic
 

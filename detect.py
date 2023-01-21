@@ -13,13 +13,17 @@ from utils.plots import plot_one_box
 from utils.torch_utils import select_device, time_synchronized, TracedModel
 import os
 import threading
+import logging
 
 from utils.ffmpeg_ import  FFMPEG_recorder
+
+set_logging()
+logger = logging.getLogger(__name__)
 
 def detect(opt=None):
     source, weights, view_img, save_txt, imgsz, trace = opt.source, opt.weights, opt.view_img, opt.save_txt, opt.img_size, not opt.no_trace
     save_img = not opt.nosave and not source.endswith('.txt')  # save inference images
-    webcam = check_data_source(source)
+    source_type = check_data_source(source)
 
     # Directories
     save_dir = Path(increment_path(Path(opt.project) / opt.name,
@@ -27,7 +31,6 @@ def detect(opt=None):
     (save_dir / 'labels' if save_txt else save_dir).mkdir(parents=True, exist_ok=True)  # make dir
     
     # Initialize
-    set_logging()
     device = select_device(opt.device)[0]
     half = device.type == 'cuda'  # half precision only supported on CUDA
 
@@ -45,9 +48,11 @@ def detect(opt=None):
 
 
     vid_path = None
-    if webcam:
+    if source_type == 'stream':
         cudnn.benchmark = True  # set True to speed up constant image size inference
         dataset = LoadStreams(source, img_size=imgsz, stride=stride, auto=True)
+    elif source_type == 'screen':
+        dataset = LoadScreenshots(source=source, img_size=imgsz, stride=model.stride, auto= True)
     else:
         dataset = LoadImages(source, img_size=imgsz, stride=stride, auto=True)
 
@@ -91,7 +96,7 @@ def detect(opt=None):
         # Process detections
         t4 = time_synchronized()
         for i, det in enumerate(pred):
-            if webcam:
+            if source_type == 'stream':
                 p, s,  im0, frame = path[i], '%g: ' % i, im0s[i].copy(), dataset.count
             else:
                 p, im0, frame = path, im0s, getattr(dataset, 'frame', 0)
@@ -211,7 +216,7 @@ def inferWithDynamicBatch(enginePath,opt, save=''):
     source_type = check_data_source(source)
     prefix = colorstr('ONNX: ')
     from models.yolo import ONNX_Engine
-    model = None
+    
     model = ONNX_Engine(ONNX_EnginePath=enginePath, prefix=prefix, confThres=opt.conf_thres)
     imgsz = model.imgsz
     if source_type == 'stream':
@@ -228,7 +233,6 @@ def inferWithDynamicBatch(enginePath,opt, save=''):
     t2_2_t1 = threading.Event()
     t2_2_t3 = threading.Event()
     #t3_2_t2 = threading.Event()
-    print(f'Warming up...')
     avgFps = int(1/model.warmup(10))
     print(f'speed: {avgFps}FPS')
     
@@ -237,8 +241,9 @@ def inferWithDynamicBatch(enginePath,opt, save=''):
     Data_vis = [None, None, None, None, None, None, None, 0, None]
     
     def Thread1():
+        global stopThread
         for path, img, im0s, vid_cap, s, ratio, dwdh in dataset:
-            if stopThread:
+            if stopThread == True:
                 break
             if len(Data_t1_2_t2[1]) < model.batch_size:
                 if source_type == 'stream':
@@ -248,7 +253,7 @@ def inferWithDynamicBatch(enginePath,opt, save=''):
                             Data_t1_2_t2[1].append(model.preproc_for_infer(img[i]).copy())
                             Data_t1_2_t2[2].append(im0s[i])
                             Data_t1_2_t2[3].append(vid_cap[i] if vid_cap else None)
-                            Data_t1_2_t2[4].append(s[i])
+                            Data_t1_2_t2[4].append(s)
                             Data_t1_2_t2[5].append(ratio[i])
                             Data_t1_2_t2[6].append(dwdh[i])
                         else:
@@ -265,9 +270,9 @@ def inferWithDynamicBatch(enginePath,opt, save=''):
             if len(Data_t1_2_t2[1]) >= model.batch_size:
                 Data_t1_2_t2[1] = model.concat(Data_t1_2_t2[1])       
                 t1_2_t2.set()
-                t2_2_t1.wait()
+                t2_2_t1.wait(1)
                 t2_2_t1.clear()
-                print(f'{colorstr(source_type)} {Data_t1_2_t2[0][0]}, {Data_t1_2_t2[2][0].shape}, FPS: {Data_t2_2_t3[7]}')
+                print(f'{colorstr(source_type)} {Data_t1_2_t2[4][0]} {Data_t1_2_t2[0][0]}, FPS: {Data_t2_2_t3[7]}')
                 Data_t1_2_t2[0] = []
                 Data_t1_2_t2[1] = []
                 Data_t1_2_t2[2] = []
@@ -280,9 +285,9 @@ def inferWithDynamicBatch(enginePath,opt, save=''):
         Data_t1_2_t2[3] = []
         Data_t1_2_t2[4] = []
         Data_t1_2_t2[5] = []
-        Data_t1_2_t2[6] = []        
+        Data_t1_2_t2[6] = []
         t1_2_t2.set()
-        t2_2_t1.wait()
+        t2_2_t1.wait(1)
         t2_2_t1.clear()
         print(f'end: Thread-1')
     
@@ -293,7 +298,7 @@ def inferWithDynamicBatch(enginePath,opt, save=''):
         avgTimeRate = []
         com = max(1, (64/model.batch_size))
         Data_t2_2_t3[7] = avgFps
-        while True:
+        while True and stopThread== False:
             t1_2_t2.wait()
             Data_t2_2_t3[0] = Data_t1_2_t2[0]
             Data_t2_2_t3[1] = Data_t1_2_t2[1]
@@ -305,7 +310,7 @@ def inferWithDynamicBatch(enginePath,opt, save=''):
             t1_2_t2.clear()
             t2_2_t1.set()
             
-            if len(Data_t2_2_t3[1]):
+            if len(Data_t2_2_t3[1]) and stopThread == False:
                 t1 = time_synchronized()
                 Data_t2_2_t3[8] = model.infer(Data_t2_2_t3[1])[0]
                 t2 = time_synchronized() - t1
@@ -317,6 +322,7 @@ def inferWithDynamicBatch(enginePath,opt, save=''):
                     avgTimeRate = []
                 seenn += 1
             else:
+                stopThread = True
                 break
             t2_2_t3.set()
             #t3_2_t2.wait()
@@ -328,7 +334,7 @@ def inferWithDynamicBatch(enginePath,opt, save=''):
         global stopThread
         seen = 0
         demensions = None
-        while True:
+        while True and stopThread == False:
             t2_2_t3.wait()
             Data_vis[0] = Data_t2_2_t3[0]
             Data_vis[1] = Data_t2_2_t3[1]
@@ -340,7 +346,8 @@ def inferWithDynamicBatch(enginePath,opt, save=''):
             Data_vis[7] = Data_t2_2_t3[7]
             Data_vis[8] = Data_t2_2_t3[8]
             t2_2_t3.clear()
-            img = model.end2end(Data_vis[8], Data_vis[2], Data_vis[6], Data_vis[5], Data_vis[7], BFC)
+            
+            img, bbox = model.end2end(Data_vis[8], Data_vis[2], Data_vis[6], Data_vis[5], Data_vis[7], BFC,Data_vis[4][0]['c_frame'][0] / Data_vis[4][0]['frames'][0])
             if demensions is None and not opt.nosave:
                 demensions = Data_vis[2][0].shape[:2]
                 ffmpeg = FFMPEG_recorder(f'{save_dir}/detect.mp4', videoDimensions= (demensions[1], demensions[0]), fps= dataset.fps)
