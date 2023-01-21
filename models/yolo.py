@@ -877,9 +877,9 @@ class ONNX_Engine(object):
         cpu_device = False
         if operating_system == 'Windows':
             if is_x64 and amd_GPUdevices:
-                check_requirements(['onnxruntime-directml'])
+                check_requirements(['onnxruntime-directml==1.13.1'])
             elif is_x64 and nvidia_GPUDevices:
-                check_requirements(['onnxruntime-gpu'])
+                check_requirements(['onnxruntime-gpu==1.13.1'])
             elif is_x64 and intel_Devicess:
                 check_requirements(['onnxruntime-openvino'])
             elif is_x64 is False and amd_GPUdevices is False:
@@ -888,18 +888,18 @@ class ONNX_Engine(object):
                 exit()
             elif is_x64 and amd_GPUdevices is False and nvidia_GPUDevices is False:
                 cpu_device = True
-                check_requirements(['onnxruntime'])
+                check_requirements(['onnxruntime==1.13.1'])
             else:
                 logger.warning(f'{prefix} system not ')
                 exit()
         elif operating_system == 'Linux':
             if is_x64 and nvidia_GPUDevices:
-                check_requirements(['onnxruntime-gpu'])
+                check_requirements(['onnxruntime-gpu==1.13.1'])
             elif is_x64 and intel_Devicess:
                 check_requirements(['onnxruntime-openvino'])
             elif is_x64:
                 cpu_device = True
-                check_requirements(['onnxruntime'])
+                check_requirements(['onnxruntime==1.13.1'])
             elif is_x64 is False:
                 logger.warning(f'{prefix} system not ')
                 exit()
