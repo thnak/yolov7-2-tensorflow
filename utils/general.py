@@ -1,5 +1,3 @@
-# YOLOv7 general utils
-
 import glob
 import logging
 import math

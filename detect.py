@@ -220,11 +220,12 @@ def inferWithDynamicBatch(enginePath,opt, save=''):
     model = ONNX_Engine(ONNX_EnginePath=enginePath, prefix=prefix, confThres=opt.conf_thres)
     imgsz = model.imgsz
     if source_type == 'stream':
-        dataset = LoadStreams(source, img_size=imgsz, stride=model.stride, auto= model.rectangle)
+        # dataset = LoadStreams(source, img_size=imgsz, stride=model.stride, auto= model.rectangle)
+        dataset = LoadStreams(source, img_size=imgsz, stride=model.stride, scaleFill=True, auto=False)
     elif source_type == 'screen':
         dataset = LoadScreenshots(source=source, img_size=imgsz, stride=model.stride, auto= model.rectangle)
     else:
-        dataset = LoadImages(source, img_size=imgsz, stride=model.stride, auto= model.rectangle)
+        dataset = LoadImages(source, img_size=imgsz, stride=model.stride, auto= False, scaleFill=True)
         
     BFC = BackgroundForegroundColors(names= model.names)
     model.batch_size = opt.batch_size if model.batch_size == 0 else model.batch_size
@@ -232,7 +233,7 @@ def inferWithDynamicBatch(enginePath,opt, save=''):
     t1_2_t2 = threading.Event()
     t2_2_t1 = threading.Event()
     t2_2_t3 = threading.Event()
-    #t3_2_t2 = threading.Event()
+    t3_2_t2 = threading.Event()
     avgFps = int(1/model.warmup(10))
     print(f'speed: {avgFps}FPS')
     
@@ -270,9 +271,11 @@ def inferWithDynamicBatch(enginePath,opt, save=''):
             if len(Data_t1_2_t2[1]) >= model.batch_size:
                 Data_t1_2_t2[1] = model.concat(Data_t1_2_t2[1])       
                 t1_2_t2.set()
-                t2_2_t1.wait(1)
+                t2_2_t1.wait(2)
                 t2_2_t1.clear()
-                print(f'{colorstr(source_type)} {Data_t1_2_t2[4][0]} {Data_t1_2_t2[0][0]}, FPS: {Data_t2_2_t3[7]}')
+                a = Data_t1_2_t2[4][0]['c_frame'][0]
+                b = Data_t1_2_t2[4][0]['frames'][0]
+                print(f'{colorstr(source_type)} {Data_t1_2_t2[0][0]} ({a}/{b}), FPS: {Data_t2_2_t3[7]}')
                 Data_t1_2_t2[0] = []
                 Data_t1_2_t2[1] = []
                 Data_t1_2_t2[2] = []
@@ -298,8 +301,8 @@ def inferWithDynamicBatch(enginePath,opt, save=''):
         avgTimeRate = []
         com = max(1, (64/model.batch_size))
         Data_t2_2_t3[7] = avgFps
-        while True and stopThread== False:
-            t1_2_t2.wait()
+        while True and stopThread == False:
+            t1_2_t2.wait(1)
             Data_t2_2_t3[0] = Data_t1_2_t2[0]
             Data_t2_2_t3[1] = Data_t1_2_t2[1]
             Data_t2_2_t3[2] = Data_t1_2_t2[2]
@@ -318,15 +321,14 @@ def inferWithDynamicBatch(enginePath,opt, save=''):
                 if seenn > com:
                     seenn = 0
                     Data_t2_2_t3[7] = int(1/((sum(avgTimeRate) / len(avgTimeRate))/model.batch_size))
-                    
                     avgTimeRate = []
                 seenn += 1
             else:
                 stopThread = True
                 break
             t2_2_t3.set()
-            #t3_2_t2.wait()
-            #t3_2_t2.clear()
+            t3_2_t2.wait(0.1)
+            t3_2_t2.clear()
         print(f'end: Thread-2')
     
     
@@ -346,7 +348,7 @@ def inferWithDynamicBatch(enginePath,opt, save=''):
             Data_vis[7] = Data_t2_2_t3[7]
             Data_vis[8] = Data_t2_2_t3[8]
             t2_2_t3.clear()
-            
+            t3_2_t2.set()
             img, bbox = model.end2end(Data_vis[8], Data_vis[2], Data_vis[6], Data_vis[5], Data_vis[7], BFC,Data_vis[4][0]['c_frame'][0] / Data_vis[4][0]['frames'][0])
             if demensions is None and not opt.nosave:
                 demensions = Data_vis[2][0].shape[:2]
@@ -360,7 +362,6 @@ def inferWithDynamicBatch(enginePath,opt, save=''):
                 seen += 1
                 if not opt.nosave:
                     ffmpeg.writeFrame(im)
-                    
                 if cv2.waitKey(opt.view_img) == 27 and opt.view_img > -1:
                     stopThread = True
                     print('[----------------------------------------------B-R-E-A-K----------------------------------------------]')
@@ -371,7 +372,7 @@ def inferWithDynamicBatch(enginePath,opt, save=''):
                 for i in range(len(Data_vis)):
                     Data_vis[i] = None
         print(f'end: Thread-3 {seen}')
-            #t3_2_t2.set()
+        
     
     thread1 = threading.Thread(target= Thread1, name='Thread-1')
     thread2 = threading.Thread(target= Thread2, name='Thread-2')

@@ -3,11 +3,8 @@ import sys
 import time
 import warnings
 import logging
-import subprocess
 import os
-import yaml
 sys.path.append('./')  # to run '$ python *.py' files in subdirectories
-from termcolor import colored
 import torch
 import torch.nn as nn
 from torch.utils.mobile_optimizer import optimize_for_mobile
@@ -30,7 +27,7 @@ if __name__ == '__main__':
     parser.add_argument('--dynamic-batch', action='store_true', help='dynamic batch onnx for tensorrt and onnx-runtime')
     parser.add_argument('--grid', action='store_true', help='export Detect() layer grid')
     parser.add_argument('--end2end', action='store_true', help='export end2end onnx (/end2end/EfficientNMS_TRT)')
-    parser.add_argument('--max-wh', type=int, default=None, help='None for tensorrt nms, int value for onnx-runtime nms')
+    parser.add_argument('--max-hw', type=int, default=None, help='None for tensorrt nms, int value for onnx-runtime nms')
     parser.add_argument('--topk-all', type=int, default=100, help='topk objects for every images')
     parser.add_argument('--iou-thres', type=float, default=0.45, help='iou threshold for NMS')
     parser.add_argument('--conf-thres', type=float, default=0.25, help='conf threshold for NMS')
@@ -63,8 +60,7 @@ if __name__ == '__main__':
         # Checks
         gs = int(max(model.stride))  # grid size (max stride)
         opt.img_size = [check_img_size(x, gs) for x in opt.img_size]  # verify img_size are gs-multiples
-
-        # Input
+        logging.info(f'Export with shape {opt.img_size}')
         img = torch.zeros(opt.batch_size, 3, *opt.img_size).to(device)  # image size(1,3,320,192) iDetection
 
         # Update model
@@ -151,7 +147,7 @@ if __name__ == '__main__':
                     'images': {
                         0: 'batch',
                     }, }
-                if opt.end2end and opt.max_wh is None:
+                if opt.end2end and opt.max_hw is None:
                     output_axes = {
                         'num_dets': {0: 'batch'},
                         'det_boxes': {0: 'batch'},
@@ -162,10 +158,10 @@ if __name__ == '__main__':
                 dynamic_axes.update(output_axes)
             if opt.grid:
                 if opt.end2end:
-                    x = 'TensorRT' if opt.max_wh is None else 'ONNXRUNTIME'
+                    x = 'TensorRT' if opt.max_hw is None else 'ONNXRUNTIME'
                     logging.info(f'\n{prefix} Starting export end2end onnx model for {colorstr(x)}\n')
-                    model = End2End(model,opt.topk_all,opt.iou_thres,opt.conf_thres,opt.max_wh,device,len(labels))
-                    if opt.end2end and opt.max_wh is None:
+                    model = End2End(model,opt.topk_all,opt.iou_thres,opt.conf_thres,opt.max_hw,device,len(labels))
+                    if opt.end2end and opt.max_hw is None:
                         output_names = ['num_dets', 'det_boxes', 'det_scores', 'det_classes']
                         shapes = [opt.batch_size, 1, opt.batch_size, opt.topk_all, 4,
                                 opt.batch_size, opt.topk_all, opt.batch_size, opt.topk_all]
@@ -187,7 +183,7 @@ if __name__ == '__main__':
             onnx_model = onnx.load(f)  # load onnx model
             onnx.checker.check_model(onnx_model)  # check onnx model
             
-            if opt.end2end and opt.max_wh is None:
+            if opt.end2end and opt.max_hw is None:
                 for i in onnx_model.graph.output:
                     for j in i.type.tensor_type.shape.dim:
                         j.dim_param = str(shapes.pop(0))
@@ -228,7 +224,7 @@ if __name__ == '__main__':
 
             metadata = onnx_model.metadata_props.add()
             metadata.key = 'ort-nms'
-            metadata.value = 'True' if opt.end2end and opt.max_wh else 'False'            
+            metadata.value = 'True' if opt.end2end and opt.max_hw else 'False'            
             
             metadata = onnx_model.metadata_props.add()
             metadata.key = 'date'

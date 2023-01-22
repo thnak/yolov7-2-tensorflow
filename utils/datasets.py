@@ -1,4 +1,3 @@
-# Dataset utils and dataloaders
 import contextlib
 import glob
 import logging
@@ -143,7 +142,7 @@ def check_data_source(source=''):
 
 class LoadImages:
     """Load image from media resouce"""
-    def __init__(self, path, img_size=640, stride=32, auto=True, vid_stride=1):
+    def __init__(self, path, img_size=640, stride=32, auto=True, scaleFill=False, scaleUp=True, vid_stride=1):
         """_summary_
 
         Args:
@@ -182,6 +181,8 @@ class LoadImages:
         self.video_flag = [False] * ni + [True] * nv
         self.mode = 'image'
         self.auto = auto
+        self.scaleFill = scaleFill
+        self.scaleUp = scaleUp
         self.vid_stride = vid_stride  # video frame-rate stride
         if any(videos):
             self._new_video(videos[0])  # new video
@@ -219,16 +220,17 @@ class LoadImages:
 
         else:
             # Read image
+            self.mode = 'image'
             self.count += 1
             im0 = cv2.imread(path)  # BGR
             assert im0 is not None, f'Image Not Found {path}'
             s = f'image {self.count}/{self.nf} {path}: '
 
-        if self.auto is not None:
-            im, ratio, dwdh = letterbox(im0, self.img_size, stride=self.stride, auto=self.auto)  # padded resize
-            im = im.transpose((2, 0, 1))[::-1]  # HWC to CHW, BGR to RGB
-            im = np.ascontiguousarray(im)  # contiguous
-        return path, im, im0, self.cap, {'string': s, 'frames': [self.frames if self.mode == 'video' else self.nf], 'c_frame': [self.frame if self.mode == 'video' else self.count]}, ratio, dwdh
+        im, ratio, dwdh = letterbox(im0, self.img_size, stride=self.stride, auto=self.auto, scaleFill=self.scaleFill)  # padded resize
+        im = im.transpose((2, 0, 1))[::-1]  # HWC to CHW, BGR to RGB
+        im = np.ascontiguousarray(im)  # contiguous
+            
+        return path, im, im0, self.cap, {'string': s, 'frames': ([self.frames] if self.mode == 'video' else [self.nf]), 'c_frame': ([self.frame] if self.mode == 'video' else [self.count])}, ratio, dwdh
 
     def _new_video(self, path):
         # Create a new video capture object
@@ -241,7 +243,7 @@ class LoadImages:
         return self.nf  # number of files
 
 class LoadStreams:
-    def __init__(self, sources='streams.txt', img_size=(640, 640), stride=32, auto=True, vid_stride=1):
+    def __init__(self, sources='streams.txt', img_size=(640, 640), stride=32, auto=True, scaleFill=False, scaleUp=True, vid_stride=1):
         """_summary_
 
         Args:
@@ -250,24 +252,26 @@ class LoadStreams:
             stride (int, optional): _description_. Defaults to 32.
             auto (bool, optional): _description_. Defaults to True.
         """
-        self.mode = 'streaming'
+        
+        self.mode = 'stream'
         self.img_size = img_size
         self.stride = stride
         self.auto = auto
+        self.scaleFill = scaleFill
+        self.scaleUp = scaleUp
         self.vid_stride = vid_stride
         if os.path.isfile(sources):
             with open(sources, 'r') as f:
                 sources = [x.strip() for x in f.read().strip().splitlines() if len(x.strip())]
         else:
-            sources = [sources]
-
+            if isinstance(sources, str):
+                sources = [sources]
         n = len(sources)
         self.imgs, self.frames, self.threads = [None] * n, [0] * n, [None] * n
         self.c_frame = [0] * n
         self.sources = [clean_str(x) for x in sources]  # clean source names for later
         for i, s in enumerate(sources):
-            # Start the thread to read frames from the video stream
-            print(f'{i + 1}/{n}: {s}... ', end='')
+            print(f'{i + 1}/{n}: {s}... init', end='')
             url = eval(s) if s.isnumeric() else s
             if urlparse(s).hostname in ('www.youtube.com', 'youtube.com', 'youtu.be', 'https://youtu.be'):  # if source is YouTube video
                 check_requirements(('pafy==0.5.5', 'youtube_dl==2021.12.17'))
@@ -314,26 +318,25 @@ class LoadStreams:
         self.count += 1
         if not all(x.is_alive() for x in self.threads):
             raise StopIteration
-        
         img0 = self.imgs.copy()
         # Letterbox
-        img, ratio, dwdh = [letterbox(x, self.img_size, auto=self.auto, stride=self.stride)[0] for x in img0],\
-                            [letterbox(x, self.img_size, auto=self.auto, stride=self.stride)[1] for x in img0],\
-                            [letterbox(x, self.img_size, auto=self.auto, stride=self.stride)[2] for x in img0], 
+        img, ratio, dwdh = [letterbox(x, self.img_size, auto=self.auto, scaleFill=self.scaleFill, stride=self.stride)[0] for x in img0],\
+                            [letterbox(x, self.img_size, auto=self.auto, scaleFill=self.scaleFill, stride=self.stride)[1] for x in img0],\
+                            [letterbox(x, self.img_size, auto=self.auto, scaleFill=self.scaleFill, stride=self.stride)[2] for x in img0], 
         # Stack
         img = np.stack(img, 0)
-
         # Convert
         img = img[:, :, :, ::-1].transpose(0, 3, 1, 2)  # BGR to RGB, to bsx3x416x416
-        img = np.ascontiguousarray(img)            
-        return self.sources, img, img0, None, {'frames': self.frames, 'c_frame': self.c_frame, 'height': img0[0].shape[0], 'width': img0[0].shape[1]}, ratio, dwdh
+        img = np.ascontiguousarray(img)
+                  
+        return self.sources, img, img0, None, {'frames': self.frames, 'c_frame': self.c_frame}, ratio, dwdh
 
     def __len__(self):
         return len(self.sources)
 
 class LoadScreenshots:
-    def __init__(self, source, img_size=(640, 640), stride=32, auto=True):
-        check_requirements(('mss'))
+    def __init__(self, source, img_size=(640, 640), stride=32, auto=True, scaleFill=False, scaleUp=True):
+        check_requirements(('mss==7.0.1'))
         import mss
 
         source, *params = source.split()
@@ -347,7 +350,9 @@ class LoadScreenshots:
         self.img_size = img_size
         self.stride = stride
         self.auto = auto
-        self.mode = 'stream'
+        self.scaleFill = scaleFill
+        self.scaleUp = scaleUp
+        self.mode = 'screen'
         self.frame = 0
         self.sct = mss.mss()
 
@@ -366,9 +371,9 @@ class LoadScreenshots:
         # mss screen capture: get raw pixels from the screen as np array
         img0 = np.array(self.sct.grab(self.monitor))[:, :, :3]  # [:, :, :3] BGRA to BGR
         s = f"screen {self.screen} (LTWH): {self.left},{self.top},{self.width},{self.height}: "
-        img = letterbox(img0, self.img_size, stride=self.stride, auto=self.auto)[0]  # padded resize
-        ratio = letterbox(img0, self.img_size, stride=self.stride, auto=self.auto)[1]
-        dwdh = letterbox(img0, self.img_size, stride=self.stride, auto=self.auto)[2]
+        img = letterbox(img0, self.img_size, stride=self.stride, auto=self.auto, scaleFill=self.scaleFill, scaleUp=self.scaleUp)[0]  # padded resize
+        ratio = letterbox(img0, self.img_size, stride=self.stride, auto=self.auto, scaleFill=self.scaleFill, scaleUp=self.scaleUp)[1]
+        dwdh = letterbox(img0, self.img_size, stride=self.stride, auto=self.auto, scaleFill=self.scaleFill, scaleUp=self.scaleUp)[2]
         img = img.transpose((2, 0, 1))[::-1]  # HWC to CHW, BGR to RGB
         img = np.ascontiguousarray(img)  # contiguous
         self.frame += 1
@@ -615,7 +620,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
 
             # Letterbox
             shape = self.batch_shapes[self.batch[index]] if self.rect else self.img_size  # final letterboxed shape
-            img, ratio, pad = letterbox(img, shape, auto=False, scaleup=self.augment)
+            img, ratio, pad = letterbox(img, shape, auto=False, scaleUp=self.augment)
             shapes = (h0, w0), ((h / h0, w / w0), pad)  # for COCO mAP rescaling
 
             labels = self.labels[index].copy()
@@ -995,7 +1000,7 @@ def replicate(img, labels):
     return img, labels
 
 
-def letterbox(img, new_shape=(640, 640), color=(114, 114, 114), auto=True, scaleFill=False, scaleup=True, stride=32):
+def letterbox(img, new_shape=(640, 640), color=(114, 114, 114), auto=True, scaleFill=False, scaleUp=True, stride=32):
     # Resize and pad image while meeting stride-multiple constraints
     shape = img.shape[:2]  # current shape [height, width]
     if isinstance(new_shape, int):
@@ -1003,13 +1008,14 @@ def letterbox(img, new_shape=(640, 640), color=(114, 114, 114), auto=True, scale
 
     # Scale ratio (new / old)
     r = min(new_shape[0] / shape[0], new_shape[1] / shape[1])
-    if not scaleup:  # only scale down, do not scale up (for better test mAP)
+    if not scaleUp:  # only scale down, do not scale up (for better test mAP)
         r = min(r, 1.0)
 
     # Compute padding
     ratio = r, r  # width, height ratios
     new_unpad = int(round(shape[1] * r)), int(round(shape[0] * r))
     dw, dh = new_shape[1] - new_unpad[0], new_shape[0] - new_unpad[1]  # wh padding
+    auto = not scaleFill
     if auto:  # minimum rectangle
         dw, dh = np.mod(dw, stride), np.mod(dh, stride)  # wh padding
     elif scaleFill:  # stretch

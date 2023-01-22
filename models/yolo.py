@@ -1,4 +1,4 @@
-from utils.plots import plot_one_box, xyxy2xywh
+from utils.plots import plot_one_box
 import numpy as np
 from utils.general import check_requirements
 from utils.loss import SigmoidBin
@@ -10,7 +10,6 @@ from models.experimental import *
 from models.common import *
 import torchvision
 import torch
-import time
 import argparse
 import logging
 import sys
@@ -855,7 +854,7 @@ class ONNX_Engine(object):
             nm (int, optional): _description_. Defaults to 0.
             maxWorkSpace (int, optional): _description_. Defaults to 2GB.
         """
-
+        self.prefix = prefix
         self.confThres = confThres
         self.iouThres = iouThres
         self.classes_nms = classes_nms
@@ -950,8 +949,7 @@ class ONNX_Engine(object):
         self.session.enable_fallback()
 
         self.imgsz = self.session.get_inputs()[0].shape[2:]
-        self.imgsz = self.imgsz if isinstance(
-            self.imgsz[0], int) else [640, 640]
+        self.imgsz = self.imgsz if isinstance(self.imgsz[0], int) else [640, 640]
         self.batch_size = self.session.get_inputs()[0].shape[0]
         self.batch_size = 0 if self.batch_size == 'batch' else self.batch_size
         self.dynamic_batch = True if self.batch_size == 0 else False
@@ -966,6 +964,8 @@ class ONNX_Engine(object):
             self.stride, self.names = int(meta['stride']), eval(meta['names'])
             self.nc = int(meta['nc'])
             self.rectangle = self.imgsz[0] != self.imgsz[1]
+            if not self.rectangle:
+                self.isLandscape = self.imgsz[0] < self.imgsz[1] #h,c
             self.opset = int(meta['opset version'])
             self.is_end2end = meta['ort-nms'] == 'True'
             if self.opset > 11:
@@ -1062,17 +1062,11 @@ class ONNX_Engine(object):
         return image, bbox
 
     def warmup(self, num=10):
-        imgsz = (1, 3, self.imgsz[0], self.imgsz[1])
-        im = torch.empty(
-            *imgsz, dtype=torch.half if self.half else torch.float, device=self.device)
-        im = im.cpu().numpy()
-        if self.batch_size > 1:
-            im = [im for i in range(self.batch_size)]
-            im = np.concatenate(im)
-
+        imgsz = (self.batch_size, 3, self.imgsz[0], self.imgsz[1])
+        im = np.ones(imgsz, dtype= np.float16 if self.half else np.float32)
         if self.session.get_providers()[0] in ['CUDAExecutionProvider', 'TensorrtExecutionProvider', 'DmlExecutionProvider']:
             t0 = time_synchronized()
-            logger.info(f'\nWarming up: \n')
+            logger.info(f'\n{self.prefix} warming up... batch-size {self.batch_size}, image shape {imgsz}\n')
             for _ in range(num):
                 self.infer(im)
             return ((time_synchronized() - t0)/num)/self.batch_size
@@ -1086,9 +1080,8 @@ class ONNX_Engine(object):
         # max_det = self.max_det_nms
 
         # Checks
-        assert 0 <= self.confThres <= 1, f'Invalid Confidence threshold {self.confThres}, valid values are between 0.0 and 1.0'
-        assert 0 <= self.iouThres <= 1, f'Invalid IoU {self.iouThres}, valid values are between 0.0 and 1.0'
-        # YOLOv5 model in validation model, output = (inference_out, loss_out)
+        assert 0 <= self.confThres <= 1, f'{self.prefix} Invalid Confidence threshold {self.confThres}, valid values are between 0.0 and 1.0'
+        assert 0 <= self.iouThres <= 1, f'{self.prefix} Invalid IoU {self.iouThres}, valid values are between 0.0 and 1.0'
         if isinstance(self.prediction, (list, tuple)):
             # select only inference output
             self.prediction = self.prediction[0]
@@ -1168,7 +1161,7 @@ class ONNX_Engine(object):
                 output[xi] = output[xi].to(device)
             if (time_synchronized() - t) > time_limit:
                 logger.warning(
-                    f'WARNING ⚠️ NMS time limit {time_limit:.3f}s exceeded')
+                    f'{self.prefix} WARNING ⚠️ NMS time limit {time_limit:.3f}s exceeded')
                 break  # time limit exceeded
         return output
 
