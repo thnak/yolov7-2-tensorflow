@@ -84,7 +84,7 @@ def train(hyp, opt, device, tb_writer=None):
         if wandb_logger.wandb:
             # WandbLogger might update weights, epochs if resuming
             weights, epochs, hyp = opt.weights, opt.epochs, opt.hyp
-
+    data_dict['nc'] = len(data_dict['names']) if 'nc' not in data_dict else data_dict['nc']
     nc = 1 if opt.single_cls else int(data_dict['nc'])  # number of classes
     names = ['item'] if opt.single_cls and len(
         data_dict['names']) != 1 else data_dict['names']  # class names
