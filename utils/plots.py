@@ -64,7 +64,7 @@ def plot_one_box(x, img, txtColor=None, bboxColor=None, label=None, frameinfo = 
         img0 = cv2.putText(img0,frameinfo[1],org= (t_sizeMaxHeight, int(t_sizeMaxHeight*3)), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale= tl/3, color= txtColor, thickness=1, lineType=cv2.LINE_AA)
         img0 = cv2.line(img0, (0, h-3), (int(frameinfo[2]*w), h-3), (255,0,0), 5)
         
-    if label != None and x != None:
+    if label != None and x is not None:
         c1, c2 = (int(x[0]), int(x[1])), (int(x[2]), int(x[3]))
         img0 = cv2.rectangle(img0, c1, c2, bboxColor, thickness=tl, lineType=cv2.LINE_AA)
         t_size = cv2.getTextSize(label, 0, fontScale=tl / 3, thickness=tf)[0]
@@ -190,7 +190,7 @@ def plot_images(images, targets, paths=None, fname='images.jpg', names=None, max
         mosaic = cv2.rectangle(mosaic, (block_x, block_y), (block_x + w, block_y + h), (255, 255, 255), thickness=3)
 
     if fname:
-        r = min(1280. / max(h, w) / ns, 1.0)  # ratio to limit image size
+        r = min(1920. / max(h, w) / ns, 1.0)  # ratio to limit image size
         mosaic = cv2.resize(mosaic, (int(ns * w * r), int(ns * h * r)), interpolation=cv2.INTER_AREA)
         Image.fromarray(mosaic).save(fname)  # PIL save
     return mosaic

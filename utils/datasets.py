@@ -271,7 +271,7 @@ class LoadStreams:
         self.c_frame = [0] * n
         self.sources = [clean_str(x) for x in sources]  # clean source names for later
         for i, s in enumerate(sources):
-            print(f'{i + 1}/{n}: {s}... init', end='')
+            print(f'{i + 1}/{n}: {s}... init ', end='')
             url = eval(s) if s.isnumeric() else s
             if urlparse(s).hostname in ('www.youtube.com', 'youtube.com', 'youtu.be', 'https://youtu.be'):  # if source is YouTube video
                 check_requirements(('pafy==0.5.5', 'youtube_dl==2021.12.17'))
@@ -371,9 +371,7 @@ class LoadScreenshots:
         # mss screen capture: get raw pixels from the screen as np array
         img0 = np.array(self.sct.grab(self.monitor))[:, :, :3]  # [:, :, :3] BGRA to BGR
         s = f"screen {self.screen} (LTWH): {self.left},{self.top},{self.width},{self.height}: "
-        img = letterbox(img0, self.img_size, stride=self.stride, auto=self.auto, scaleFill=self.scaleFill, scaleUp=self.scaleUp)[0]  # padded resize
-        ratio = letterbox(img0, self.img_size, stride=self.stride, auto=self.auto, scaleFill=self.scaleFill, scaleUp=self.scaleUp)[1]
-        dwdh = letterbox(img0, self.img_size, stride=self.stride, auto=self.auto, scaleFill=self.scaleFill, scaleUp=self.scaleUp)[2]
+        img, ratio, dwdh= letterbox(img0, self.img_size, stride=self.stride, auto=self.auto, scaleFill=self.scaleFill, scaleUp=self.scaleUp)  # padded resize
         img = img.transpose((2, 0, 1))[::-1]  # HWC to CHW, BGR to RGB
         img = np.ascontiguousarray(img)  # contiguous
         self.frame += 1
@@ -617,11 +615,9 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         else:
             # Load image
             img, (h0, w0), (h, w) = load_image(self, index)
-
-            # Letterbox
-            shape = self.batch_shapes[self.batch[index]] if self.rect else self.img_size  # final letterboxed shape
+            shape = self.batch_shapes[self.batch[index]] if self.rect else self.img_size
             img, ratio, pad = letterbox(img, shape, auto=False, scaleUp=self.augment)
-            shapes = (h0, w0), ((h / h0, w / w0), pad)  # for COCO mAP rescaling
+            shapes = (h0, w0), ((h / h0, w / w0), pad)
 
             labels = self.labels[index].copy()
             if labels.size:  # normalized xywh to pixel xyxy format
@@ -1015,7 +1011,6 @@ def letterbox(img, new_shape=(640, 640), color=(114, 114, 114), auto=True, scale
     ratio = r, r  # width, height ratios
     new_unpad = int(round(shape[1] * r)), int(round(shape[0] * r))
     dw, dh = new_shape[1] - new_unpad[0], new_shape[0] - new_unpad[1]  # wh padding
-    auto = not scaleFill
     if auto:  # minimum rectangle
         dw, dh = np.mod(dw, stride), np.mod(dh, stride)  # wh padding
     elif scaleFill:  # stretch
@@ -1032,7 +1027,6 @@ def letterbox(img, new_shape=(640, 640), color=(114, 114, 114), auto=True, scale
     left, right = int(round(dw - 0.1)), int(round(dw + 0.1))
     img = cv2.copyMakeBorder(img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=color)  # add border
     return img, ratio, (dw, dh)
-
 
 def random_perspective(img, targets=(), segments=(), degrees=10, translate=.1, scale=.1, shear=10, perspective=0.0,
                        border=(0, 0)):
@@ -1081,7 +1075,7 @@ def random_perspective(img, targets=(), segments=(), degrees=10, translate=.1, s
     # Transform label coordinates
     n = len(targets)
     if n:
-        use_segments = any(x.any() for x in segments)
+        use_segments = any(x.any() for x in segments) and len(segment)
         new = np.zeros((n, 4))
         if use_segments:  # warp segments
             segments = resample_segments(segments)  # upsample

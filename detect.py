@@ -353,19 +353,20 @@ def inferWithDynamicBatch(enginePath,opt, save=''):
             if demensions is None and not opt.nosave:
                 demensions = Data_vis[2][0].shape[:2]
                 ffmpeg = FFMPEG_recorder(f'{save_dir}/detect.mp4', videoDimensions= (demensions[1], demensions[0]), fps= dataset.fps)
-            for index, (im) in enumerate(img):
-                cv2.namedWindow(f'{Data_vis[0][index]}', cv2.WINDOW_NORMAL)
-                cv2.imshow(f'{Data_vis[0][index]}', im)
-                avgFps = Data_vis[7]
-                avgFps = max(avgFps, 1)
-                time.sleep((1/avgFps)-0.001)
-                seen += 1
-                if not opt.nosave:
-                    ffmpeg.writeFrame(im)
-                if cv2.waitKey(opt.view_img) == 27 and opt.view_img > -1:
-                    stopThread = True
-                    print('[----------------------------------------------B-R-E-A-K----------------------------------------------]')
-                    break
+            if opt.view_img > -1:
+                for index, (im) in enumerate(img):
+                    cv2.namedWindow(f'{Data_vis[0][index]}', cv2.WINDOW_NORMAL)
+                    cv2.imshow(f'{Data_vis[0][index]}', im)
+                    avgFps = Data_vis[7]
+                    avgFps = max(avgFps, 1)
+                    time.sleep((1/avgFps)-0.001)
+                    seen += 1
+                    if not opt.nosave:
+                        ffmpeg.writeFrame(im)
+                    if cv2.waitKey(opt.view_img) == 27 and opt.view_img > -1:
+                        stopThread = True
+                        print('[----------------------------------------------B-R-E-A-K----------------------------------------------]')
+                        break
             if stopThread:
                 break
             else:

@@ -956,7 +956,7 @@ class ONNX_Engine(object):
         self.half = self.session.get_inputs()[0].type != "tensor(float)"
 
         self.output_names = [x.name for x in self.session.get_outputs()]
-        self.input_names = [i. name for i in self.session.get_inputs()]
+        self.input_names = [i.name for i in self.session.get_inputs()]
 
         self.names, self.nc, self.stride, self.rectangle = None, None, None, False
         meta = self.session.get_modelmeta().custom_metadata_map
@@ -968,9 +968,9 @@ class ONNX_Engine(object):
                 self.isLandscape = self.imgsz[0] < self.imgsz[1] #h,c
             self.opset = int(meta['opset version'])
             self.is_end2end = meta['ort-nms'] == 'True'
-            if self.opset > 11:
+            if self.opset > 12:
                 logger.warning(
-                    f'{prefix} onnx opset tested for version 11, newer version may have poor performance for ONNXRUNTIME in DmlExecutionProvider')
+                    f'{prefix} onnx opset tested for version 12, newer version may have poor performance for ONNXRUNTIME in DmlExecutionProvider')
         else:
             logger.error(
                 f'{prefix} The model engine was exported with wrong format, please re-export the model')
@@ -1062,7 +1062,7 @@ class ONNX_Engine(object):
         return image, bbox
 
     def warmup(self, num=10):
-        imgsz = (self.batch_size, 3, self.imgsz[0], self.imgsz[1])
+        imgsz = (self.batch_size, self.session.get_inputs()[0].shape[1], self.imgsz[0], self.imgsz[1])
         im = np.ones(imgsz, dtype= np.float16 if self.half else np.float32)
         if self.session.get_providers()[0] in ['CUDAExecutionProvider', 'TensorrtExecutionProvider', 'DmlExecutionProvider']:
             t0 = time_synchronized()

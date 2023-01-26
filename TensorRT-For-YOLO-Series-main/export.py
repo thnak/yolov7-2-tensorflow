@@ -222,6 +222,7 @@ class EngineBuilder:
         # If a better method is found to deal with that issue, this flag can be removed.
         self.config.set_flag(trt.BuilderFlag.STRICT_TYPES)
         self.config.set_flag(trt.BuilderFlag.GPU_FALLBACK)
+        self.config.DLA_core = 0
         
         if precision == "fp16":
             if not self.builder.platform_has_fast_fp16:

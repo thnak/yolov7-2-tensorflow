@@ -595,7 +595,8 @@ def train(hyp, opt, device, tb_writer=None):
         wandb_logger.finish_run()
     else:
         dist.destroy_process_group()
-    torch.cuda.empty_cache()
+    if opt.evolve <= 1:
+        torch.cuda.empty_cache()
     return results
 
 
@@ -770,7 +771,7 @@ if __name__ == '__main__':
             
             # Write mutation results
             print_mutation(hyp_.copy(), results, yaml_file, opt.bucket)
-
+        torch.cuda.empty_cache()
         # Plot results
         plot_evolution(yaml_file)
         logger.info(f'Hyperparameter evolution complete. Best results saved as: {yaml_file}\n'
