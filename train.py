@@ -3,6 +3,7 @@ import logging
 import math
 import os
 import random
+import csv
 from copy import deepcopy
 from pathlib import Path
 from threading import Thread
@@ -52,15 +53,20 @@ def train(hyp, opt, device, tb_writer=None):
     last = wdir / 'last.pt'
     best = wdir / 'best.pt'
     results_file = save_dir / 'results.txt'
-
+    results_file_csv = save_dir / 'results.csv'
     # Save run settings
     with open(save_dir / 'hyp.yaml', 'w') as f:
         yaml.dump(hyp, f, sort_keys=False)
-        f.close()
     with open(save_dir / 'opt.yaml', 'w') as f:
         yaml.dump(vars(opt), f, sort_keys=False)
-        f.close()
 
+    tag_results = ('Epoch', 'GPU_mem', 'box', 'obj', 'cls', 'total', 'labels', 'img_size')
+    if not os.path.exists(str(results_file_csv)):
+        with open(results_file_csv, 'w') as f:
+            csv_writer = csv.writer(f)
+            a = tag_results + ('P', 'R', 'mAP@.5', 'mAP@.5:.95', 'x/lr0', 'x/lr1', 'x/lr2')
+            csv_writer.writerow(a)
+            
     # Configure
     plots = opt.evolve <= 1  # create plots
     cuda = device.type == 'cuda'
@@ -380,8 +386,7 @@ def train(hyp, opt, device, tb_writer=None):
         if rank != -1:
             dataloader.sampler.set_epoch(epoch)
         pbar = enumerate(dataloader)
-        logger.info(('\n' + '%10s' * 8) % ('Epoch', 'gpu_mem',
-                    'box', 'obj', 'cls', 'total', 'labels', 'img_size'))
+        logger.info(('\n' + '%10s' * 8) % tag_results)
         if rank in [-1, 0]:
             pbar = tqdm(pbar, total=nb)  # progress bar
         optimizer.zero_grad()
@@ -481,9 +486,15 @@ def train(hyp, opt, device, tb_writer=None):
 
             # Write
             with open(results_file, 'a') as f:
-                # append metrics, val_loss
                 f.write(s + '%10.4g' * 7 % results + '\n')
-                f.close()
+            with open(results_file_csv, 'a') as f:
+                csv_writer = csv.writer(f)
+                a = []
+                for x in s.split(' '):
+                  if x not in ['', ' ','  ', '   ', '    ']:
+                    a.append(x)
+                csv_writer.writerow(tuple(a) + results)
+                
             if len(opt.name) and opt.bucket:
                 os.system('gsutil cp %s gs://%s/results/results%s.txt' %
                           (results_file, opt.bucket, opt.name))
