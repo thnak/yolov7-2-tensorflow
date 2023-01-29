@@ -63,6 +63,8 @@ if __name__ == '__main__':
         logging.info(f'Export with shape {opt.img_size}')
         img = torch.zeros(opt.batch_size, 3, *opt.img_size).to(device)  # image size(1,3,320,192) iDetection
 
+        if device.type == 'cuda' and opt.fp16:
+            img, model = img.half(), model.half()            
         # Update model
         for k, m in model.named_modules():
             m._non_persistent_buffers_set = set()  # pytorch 1.6.0 compatibility
