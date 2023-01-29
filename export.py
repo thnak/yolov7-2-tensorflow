@@ -60,11 +60,14 @@ if __name__ == '__main__':
         # Checks
         gs = int(max(model.stride))  # grid size (max stride)
         opt.img_size = [check_img_size(x, gs) for x in opt.img_size]  # verify img_size are gs-multiples
-        logging.info(f'Export with shape {opt.img_size}')
+        
         img = torch.zeros(opt.batch_size, 3, *opt.img_size).to(device)  # image size(1,3,320,192) iDetection
-
+        model.eval()
         if device.type == 'cuda' and opt.fp16:
-            img, model = img.half(), model.half()            
+            img, model = img.half(), model.half()
+            logging.info(f'Export with shape {opt.img_size}, half')
+        else:
+            logging.info(f'Export with shape {opt.img_size}, float')
         # Update model
         for k, m in model.named_modules():
             m._non_persistent_buffers_set = set()  # pytorch 1.6.0 compatibility
@@ -73,9 +76,7 @@ if __name__ == '__main__':
                     m.act = Hardswish()
                 elif isinstance(m.act, nn.SiLU):
                     m.act = SiLU()
-                elif isinstance(m, models.yolo.Detect) or isinstance(m, models.yolo.IDetect):
-                    m.dynamic = opt.dynamic
-                elif isinstance(m, models.yolo.IKeypoint) or isinstance(m, models.yolo.IAuxDetect) or isinstance(m, models.yolo.IBin):
+                elif isinstance(m, (models.yolo.Detect, models.yolo.IDetect, models.yolo.IKeypoint, models.yolo.IAuxDetect, models.yolo.IBin)):
                     m.dynamic = opt.dynamic
             # elif isinstance(m, models.yolo.Detect):
             #     m.forward = m.forward_export  # assign forward (optional)
@@ -178,7 +179,7 @@ if __name__ == '__main__':
             torch.onnx.export(model, img, f, verbose=opt.v,
                               opset_version=opt.onnx_opset,
                               input_names=['images'],
-                              output_names=output_names,
+                              output_names=output_names,training=torch.onnx.TrainingMode.EVAL,
                               dynamic_axes=dynamic_axes)
             # Checks
 

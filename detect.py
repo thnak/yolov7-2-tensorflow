@@ -221,11 +221,11 @@ def inferWithDynamicBatch(enginePath,opt, save=''):
     imgsz = model.imgsz
     if source_type == 'stream':
         # dataset = LoadStreams(source, img_size=imgsz, stride=model.stride, auto= model.rectangle)
-        dataset = LoadStreams(source, img_size=imgsz, stride=model.stride, scaleFill=True, auto=False)
+        dataset = LoadStreams(source, img_size=imgsz, stride=model.stride, auto= model.rectangle)
     elif source_type == 'screen':
         dataset = LoadScreenshots(source=source, img_size=imgsz, stride=model.stride, auto= model.rectangle)
     else:
-        dataset = LoadImages(source, img_size=imgsz, stride=model.stride, auto= False, scaleFill=True)
+        dataset = LoadImages(source, img_size=imgsz, stride=model.stride, auto= model.rectangle)
         
     BFC = BackgroundForegroundColors(names= model.names)
     model.batch_size = opt.batch_size if model.batch_size == 0 else model.batch_size
