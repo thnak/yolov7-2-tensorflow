@@ -16,7 +16,7 @@ tqdm==4.64.0
 protobuf<4.21.3
 pycuda==2022.2.2
 nvidia-pyindex==1.0.9
-nvidia-tensorrt==8.4.3.1
+# nvidia-tensorrt==8.4.3.1
 pafy==0.5.5
 youtube_dl==2021.12.17
 # Logging -------------------------------------
@@ -46,6 +46,6 @@ ipython==8.8.0  # interactive notebook
 psutil==5.9.4  # system utilization
 thop==0.1.1.post2209072238
 albumentations==1.3.0
-onnx-graphsurgeon==0.3.25
+# onnx-graphsurgeon==0.3.25
 # pycocotools>=2.0  # COCO mAP
 # roboflow

@@ -47,10 +47,7 @@ def Re_parameterization(inputWeightPath='v7-tiny-training.pt',
         # device = select_device('0'if torch.cuda.is_available() else 'cpu', batch_size=8)[0]
         ckpt = torch.load(inputWeightPath, map_location=device)
         model = Model(cfgPath, ch=3, nc=nc).to(device)
-        with open(cfgPath) as f:
-            yml = yaml.load(f, Loader=yaml.SafeLoader)
-        anchors = len(yml['anchors'][0]) // 2
-
+        anchors = len(ckpt['model'].model[-1].anchor_grid.squeeze()[0])
         # copy intersect weights
         state_dict = ckpt['model'].float().state_dict()
         exclude = []
@@ -61,6 +58,8 @@ def Re_parameterization(inputWeightPath='v7-tiny-training.pt',
         
         if 'tiny' in cfgPath  or cfgPath in 'cfg/deploy/yolov7.yaml' or cfgPath  in 'cfg/deploy/yolov7x.yaml':
             for i in range((model.nc+5)*anchors):
+                if i >= 255:
+                  break
                 model.state_dict()['model.'+total_+'.m.0.weight'].data[i, :, :, :] *= state_dict['model.'+total_+'.im.0.implicit'].data[:, i, : :].squeeze()
                 model.state_dict()['model.'+total_+'.m.1.weight'].data[i, :, :, :] *= state_dict['model.'+total_+'.im.1.implicit'].data[:, i, : :].squeeze()
                 model.state_dict()['model.'+total_+'.m.2.weight'].data[i, :, :, :] *= state_dict['model.'+total_+'.im.2.implicit'].data[:, i, : :].squeeze()

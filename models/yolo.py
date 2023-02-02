@@ -953,7 +953,7 @@ class ONNX_Engine(object):
         self.batch_size = self.session.get_inputs()[0].shape[0]
         self.batch_size = 0 if self.batch_size == 'batch' else self.batch_size
         self.dynamic_batch = True if self.batch_size == 0 else False
-        self.half = self.session.get_inputs()[0].type != "tensor(float)"
+        self.half = self.session.get_inputs()[0].type == "tensor(float16)"
 
         self.output_names = [x.name for x in self.session.get_outputs()]
         self.input_names = [i.name for i in self.session.get_inputs()]

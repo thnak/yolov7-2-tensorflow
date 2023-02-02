@@ -303,12 +303,12 @@ def train(hyp, opt, device, tb_writer=None):
                                        batch_size * 2, gs, opt,
                                        hyp=hyp,
                                        cache=opt.cache_images if (
-                                           opt.cache_images and not opt.notest) else '',
+                                           opt.cache_images and not opt.notest) else 'no',
                                        rect=True,
                                        shuffle=False,
                                        rank=-1,
                                        world_size=opt.world_size,
-                                       workers=opt.workers*2,
+                                       workers=opt.workers,
                                        pad=0.5, prefix=colorstr('val: '))[0]
         
         test_dataloader = create_dataloader(test_path,
@@ -320,7 +320,7 @@ def train(hyp, opt, device, tb_writer=None):
                                        shuffle=False,
                                        rank=-1,
                                        world_size=opt.world_size,
-                                       workers=opt.workers*2,
+                                       workers=opt.workers,
                                        pad=0.5, prefix=colorstr('test: '))[0]
         
         
@@ -555,7 +555,9 @@ def train(hyp, opt, device, tb_writer=None):
                         'ema': deepcopy(ema.ema).half(),
                         'updates': ema.updates,
                         'optimizer': optimizer.state_dict(),
-                        'wandb_id': wandb_logger.wandb_run.id if wandb_logger.wandb else None}
+                        'wandb_id': wandb_logger.wandb_run.id if wandb_logger.wandb else None,
+                        'yaml': hyp,
+                        'opt': opt}
 
                 # Save last, best and delete
                 torch.save(ckpt, last)
@@ -757,7 +759,9 @@ if __name__ == '__main__':
 
     # DDP mode
     opt.total_batch_size = opt.batch_size
-    device = select_device(opt.device, batch_size=opt.batch_size)[0]
+    device, git_status = select_device(opt.device, batch_size=opt.batch_size)
+    opt.device = device
+    opt.git_status = git_status
     if opt.local_rank != -1:
         assert torch.cuda.device_count() > opt.local_rank
         torch.cuda.set_device(opt.local_rank)

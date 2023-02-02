@@ -29,8 +29,8 @@ if __name__ == '__main__':
     parser.add_argument('--end2end', action='store_true', help='export end2end onnx (/end2end/EfficientNMS_TRT)')
     parser.add_argument('--max-hw', type=int, default=None, help='None for tensorrt nms, int value for onnx-runtime nms')
     parser.add_argument('--topk-all', type=int, default=100, help='topk objects for every images')
-    parser.add_argument('--iou-thres', type=float, default=0.45, help='iou threshold for NMS')
-    parser.add_argument('--conf-thres', type=float, default=0.25, help='conf threshold for NMS')
+    parser.add_argument('--iou-thres', '-iou', type=float, default=0.45, help='iou threshold for NMS')
+    parser.add_argument('--conf-thres','-conf', type=float, default=0.25, help='conf threshold for NMS')
     parser.add_argument('--onnx-opset', type=int, default=17, help='onnx opset version, 11 for DmlExecutionProvider')
     parser.add_argument('--device', default='cpu', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     parser.add_argument('--simplify', action='store_true', help='simplify onnx model')
@@ -52,7 +52,8 @@ if __name__ == '__main__':
     for weight in opt.weights:
         logging.info(f'# Load PyTorch model')
         device, gitstatus = select_device(opt.device)
-        model = attempt_load(weight, map_location=device)  # load FP32 model
+        map_device = 'cpu' if device.type == 'privateuseone' else device
+        model = attempt_load(weight, map_location=map_device)  # load FP32 model
         labels = model.names
         model_ori = model
         model_Gflop = model.info()
@@ -63,11 +64,11 @@ if __name__ == '__main__':
         
         img = torch.zeros(opt.batch_size, 3, *opt.img_size).to(device)  # image size(1,3,320,192) iDetection
         model.eval()
-        if device.type == 'cuda' and opt.fp16:
+        if device.type in ['cuda','dml'] and opt.fp16:
             img, model = img.half(), model.half()
-            logging.info(f'Export with shape {opt.img_size}, half')
+            logging.info(f'Export with shape {opt.img_size}, FP16')
         else:
-            logging.info(f'Export with shape {opt.img_size}, float')
+            logging.info(f'Export with shape {opt.img_size}, FP32')
         # Update model
         for k, m in model.named_modules():
             m._non_persistent_buffers_set = set()  # pytorch 1.6.0 compatibility
@@ -162,7 +163,7 @@ if __name__ == '__main__':
             if opt.grid:
                 if opt.end2end:
                     x = 'TensorRT' if opt.max_hw is None else 'ONNXRUNTIME'
-                    logging.info(f'\n{prefix} Starting export end2end onnx model for {colorstr(x)}\n')
+                    logging.info(f'{prefix} Starting export end2end onnx model for {colorstr(x)}')
                     model = End2End(model,opt.topk_all,opt.iou_thres,opt.conf_thres,opt.max_hw,device,len(labels))
                     if opt.end2end and opt.max_hw is None:
                         output_names = ['num_dets', 'det_boxes', 'det_scores', 'det_classes']
@@ -245,7 +246,7 @@ if __name__ == '__main__':
             metadata.key = "pytorch model info"
             metadata.value = str(model_Gflop)
             
-            logging.info(f'\n{prefix} metadata: {onnx_model.metadata_props}\n')
+            logging.info(f'{prefix} metadata: {onnx_model.metadata_props}')
             onnxmltools.utils.save_model(onnx_model,f)
             logging.info(f'{prefix} export success✅, saved as {f}')
 
@@ -276,7 +277,7 @@ if __name__ == '__main__':
             import onnx_tf
             from tools.pytorch2tensorflow import _onnx_to_tf, _tf_to_tflite
             logging.info(f'{prefix} Starting export with...{onnx_tf.__version__}')
-            outputpath = weight.replace('.pt', '01.pb') 
+            outputpath = weight.replace('.pt', '.pb') 
             _onnx_to_tf(onnx_model_path=weight.replace('.pt', '.onnx'), output_path=outputpath)
             logging.info(f'{prefix} export success: {outputpath}')
             filenames.append(outputpath)
