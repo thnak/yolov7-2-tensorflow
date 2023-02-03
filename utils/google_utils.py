@@ -20,7 +20,7 @@ def attempt_download(file, repo='WongKinYiu/yolov7'):
     """Attempt file download if does not exist"""
     file = Path(str(file).strip().replace("'", '').lower())
 
-    if not file.exists():
+    if not os.path.exists(file):
         try:
             from utils.general import colorstr
             prefix = colorstr(f'Attemp_download():')

@@ -41,7 +41,6 @@ from utils.activations import SiLU
 from utils.general import  make_divisible, colorstr
 
 def print_args(args: Optional[dict] = None, show_file=True, show_func=False):
-    # Print function arguments (optional args dict)
     x = inspect.currentframe().f_back  # previous frame
     file, _, func, _, _ = inspect.getframeinfo(x)
     if args is None:  # get args automatically
@@ -61,10 +60,10 @@ class TFBN(keras.layers.Layer):
     def __init__(self, w=None):
         super().__init__()
         self.bn = keras.layers.BatchNormalization(
-            beta_initializer=keras.initializers.Constant(w.bias.numpy()),
-            gamma_initializer=keras.initializers.Constant(w.weight.numpy()),
-            moving_mean_initializer=keras.initializers.Constant(w.running_mean.numpy()),
-            moving_variance_initializer=keras.initializers.Constant(w.running_var.numpy()),
+            beta_initializer=keras.initializers.Constant(w.bias.cpu().numpy()),
+            gamma_initializer=keras.initializers.Constant(w.weight.cpu().numpy()),
+            moving_mean_initializer=keras.initializers.Constant(w.running_mean.cpu().numpy()),
+            moving_variance_initializer=keras.initializers.Constant(w.running_var.cpu().numpy()),
             epsilon=w.eps)
 
     def call(self, inputs):
@@ -73,8 +72,9 @@ class TFBN(keras.layers.Layer):
 class TFMP(keras.layers.Layer):
     def __init__(self, k=2, w=None):
         super(TFMP, self).__init__()
-        self.m = keras.layers.MaxPool2D(pool_size=k, strides=k)
-    def forward(self, x):
+        self.m = keras.layers.MaxPool2D(pool_size=k, strides=k, padding='SAME')
+        
+    def call(self, x):
         return self.m(x)
 
 class TFSP(keras.layers.Layer):
@@ -82,7 +82,7 @@ class TFSP(keras.layers.Layer):
         super(TFSP, self).__init__()
         self.m = keras.layers.MaxPool2D(pool_size=k, strides=s, padding='SAME')
 
-    def forward(self, x):
+    def call(self, x):
         return self.m(x)
     
 class TFImplicitA(keras.layers.Layer):
@@ -94,10 +94,10 @@ class TFImplicitA(keras.layers.Layer):
         self.implicit = nn.Parameter(torch.zeros(1, channel, 1, 1))
         nn.init.normal_(self.implicit, mean=self.mean, std=self.std)
 
-    def forward(self, x):
+    def call(self, x):
         return self.implicit + x
     
-class TFImplicitM(nn.Module):
+class TFImplicitM(keras.layers.Layer):
     def __init__(self, channel, mean=1., std=.02,W=None):
         super(TFImplicitM, self).__init__()
         self.channel = channel
@@ -106,83 +106,136 @@ class TFImplicitM(nn.Module):
         self.implicit = nn.Parameter(torch.ones(1, channel, 1, 1))
         nn.init.normal_(self.implicit, mean=self.mean, std=self.std)
 
-    def forward(self, x):
+    def call(self, x):
         return self.implicit * x
     
 
-class TFIDetect(nn.Module):
-    stride = None  # strides computed during build
-    export = False  # onnx export
-    end2end = False
-    include_nms = False
-    concat = False
-    dynamic = False #https://github.com/WongKinYiu/yolov7/pull/1270
+# class TFIDetect(nn.Module):
+#     stride = None  # strides computed during build
+#     export = False  # onnx export
+#     end2end = False
+#     include_nms = False
+#     concat = False
+#     dynamic = False #https://github.com/WongKinYiu/yolov7/pull/1270
     
+#     def __init__(self, nc=80, anchors=(), ch=(), imgsz=(640, 640), a=None, w=None):  # detection layer
+#         super().__init__()
+#         self.nc = nc  # number of classes
+#         self.no = nc + 5  # number of outputs per anchor
+#         self.nl = len(anchors)  # number of detection layers
+#         self.na = len(anchors[0]) // 2  # number of anchors
+#         self.grid = [torch.zeros(1)] * self.nl  # init grid
+#         a = torch.tensor(anchors).float().view(self.nl, -1, 2)
+#         self.register_buffer('anchors', a)  # shape(nl,na,2)
+#         self.register_buffer('anchor_grid', a.clone().view(self.nl, 1, -1, 1, 1, 2))  # shape(nl,1,na,1,1,2)
+#         self.m = nn.ModuleList(nn.Conv2d(x, self.no * self.na, 1) for x in ch)  # output conv
+#         self.imgsz = imgsz
+#         self.a = a
+#         self.dynamic = False
+#     def call(self, x):
+#         # x = x.copy()  # for profiling
+#         z = []  # inference output
+#         self.training |= self.export
+#         for i in range(self.nl):
+#             x[i] = self.m[i](x[i])  # conv
+#             bs, _, ny, nx = x[i].shape  # x(bs,255,20,20) to x(bs,3,20,20,85)
+#             x[i] = x[i].view(bs, self.na, self.no, ny, nx).permute(0, 1, 3, 4, 2).contiguous()
+
+#             if not self.training:  # inference
+#                 if self.dynamic or self.grid[i].shape[2:4] != x[i].shape[2:4]:
+#                     self.grid[i] = self._make_grid(nx, ny).to(x[i].device)
+#                 y = x[i].sigmoid()
+#                 if not torch.onnx.is_in_onnx_export():
+#                     y[..., 0:2] = (y[..., 0:2] * 2. - 0.5 + self.grid[i]) * self.stride[i]  # xy
+#                     y[..., 2:4] = (y[..., 2:4] * 2) ** 2 * self.anchor_grid[i]  # wh
+#                 else:
+#                     xy, wh, conf = y.split((2, 2, self.nc + 1), 4)  # y.tensor_split((2, 4, 5), 4)  # torch 1.8.0
+#                     xy = xy * (2. * self.stride[i]) + (self.stride[i] * (self.grid[i] - 0.5))  # new xy
+#                     wh = wh ** 2 * (4 * self.anchor_grid[i].data)  # new wh
+#                     y = torch.cat((xy, wh, conf), 4)
+#                 z.append(y.view(bs, -1, self.no))
+
+#         if self.training:
+#             out = x
+#         elif self.end2end:
+#             out = torch.cat(z, 1)
+#         elif self.include_nms:
+#             z = self.convert(z)
+#             out = (z, )
+#         elif self.concat:
+#             out = torch.cat(z, 1)
+#         else:
+#             out = (torch.cat(z, 1), x)
+
+#         return out
+
+#     @staticmethod
+#     def _make_grid(nx=20, ny=20):
+#         yv, xv = torch.meshgrid([torch.arange(ny), torch.arange(nx)], indexing='ij')
+#         return torch.stack((xv, yv), 2).view((1, 1, ny, nx, 2)).float()
+
+#     def convert(self, z):
+#         z = torch.cat(z, 1)
+#         box = z[:, :, :4]
+#         conf = z[:, :, 4:5]
+#         score = z[:, :, 5:]
+#         score *= conf
+#         convert_matrix = torch.tensor([[1, 0, 1, 0], [0, 1, 0, 1], [-0.5, 0, 0.5, 0], [0, -0.5, 0, 0.5]],
+#                                            dtype=torch.float32,
+#                                            device=z.device)
+#         box @= convert_matrix                          
+#         return (box, score)
+class TFIDetect(keras.layers.Layer):
+    # TF YOLOv5 Detect layer
     def __init__(self, nc=80, anchors=(), ch=(), imgsz=(640, 640), w=None):  # detection layer
         super().__init__()
+        self.stride = tf.convert_to_tensor(w.stride.cpu().numpy(), dtype=tf.float32)
         self.nc = nc  # number of classes
         self.no = nc + 5  # number of outputs per anchor
         self.nl = len(anchors)  # number of detection layers
         self.na = len(anchors[0]) // 2  # number of anchors
-        self.grid = [torch.zeros(1)] * self.nl  # init grid
-        a = torch.tensor(anchors).float().view(self.nl, -1, 2)
-        self.register_buffer('anchors', a)  # shape(nl,na,2)
-        self.register_buffer('anchor_grid', a.clone().view(self.nl, 1, -1, 1, 1, 2))  # shape(nl,1,na,1,1,2)
-        self.m = nn.ModuleList(nn.Conv2d(x, self.no * self.na, 1) for x in ch)  # output conv
-        self.dynamic = False
-    def forward(self, x):
-        # x = x.copy()  # for profiling
-        z = []  # inference output
-        self.training |= self.export
+        self.grid = [tf.zeros(1)] * self.nl  # init grid
+        self.anchors = tf.convert_to_tensor(w.anchors.cpu().numpy(), dtype=tf.float32)
+        self.anchor_grid = tf.reshape(self.anchors * tf.reshape(self.stride, [self.nl, 1, 1]), [self.nl, 1, -1, 1, 2])
+        self.m = [TFConv2d(x, self.no * self.na, 1, w=w.m[i]) for i, x in enumerate(ch)]
+        self.ia = [TFImplicitA(x) for x in ch]
+        self.im = [TFImplicitM(self.no * self.na) for _ in ch]
+        self.training = False  # set to False after building model
+        self.imgsz = imgsz
         for i in range(self.nl):
-            x[i] = self.m[i](x[i])  # conv
-            bs, _, ny, nx = x[i].shape  # x(bs,255,20,20) to x(bs,3,20,20,85)
-            x[i] = x[i].view(bs, self.na, self.no, ny, nx).permute(0, 1, 3, 4, 2).contiguous()
+            ny, nx = self.imgsz[0] // self.stride[i], self.imgsz[1] // self.stride[i]
+            self.grid[i] = self._make_grid(nx, ny)
+
+    def call(self, inputs):
+        z = []  # inference output
+        x = []
+        for i in range(self.nl):
+            x.append(self.m[i](inputs[i]))
+            # x(bs,20,20,255) to x(bs,3,20,20,85)
+            ny, nx = self.imgsz[0] // self.stride[i], self.imgsz[1] // self.stride[i]
+            x[i] = tf.reshape(x[i], [-1, ny * nx, self.na, self.no])
 
             if not self.training:  # inference
-                if self.dynamic or self.grid[i].shape[2:4] != x[i].shape[2:4]:
-                    self.grid[i] = self._make_grid(nx, ny).to(x[i].device)
-                y = x[i].sigmoid()
-                if not torch.onnx.is_in_onnx_export():
-                    y[..., 0:2] = (y[..., 0:2] * 2. - 0.5 + self.grid[i]) * self.stride[i]  # xy
-                    y[..., 2:4] = (y[..., 2:4] * 2) ** 2 * self.anchor_grid[i]  # wh
-                else:
-                    xy, wh, conf = y.split((2, 2, self.nc + 1), 4)  # y.tensor_split((2, 4, 5), 4)  # torch 1.8.0
-                    xy = xy * (2. * self.stride[i]) + (self.stride[i] * (self.grid[i] - 0.5))  # new xy
-                    wh = wh ** 2 * (4 * self.anchor_grid[i].data)  # new wh
-                    y = torch.cat((xy, wh, conf), 4)
-                z.append(y.view(bs, -1, self.no))
+                y = x[i]
+                grid = tf.transpose(self.grid[i], [0, 2, 1, 3]) - 0.5
+                anchor_grid = tf.transpose(self.anchor_grid[i], [0, 2, 1, 3]) * 4
+                xy = (tf.sigmoid(y[..., 0:2]) * 2 + grid) * self.stride[i]  # xy
+                wh = tf.sigmoid(y[..., 2:4]) ** 2 * anchor_grid
+                # Normalize xywh to 0-1 to reduce calibration error
+                xy /= tf.constant([[self.imgsz[1], self.imgsz[0]]], dtype=tf.float32)
+                wh /= tf.constant([[self.imgsz[1], self.imgsz[0]]], dtype=tf.float32)
+                y = tf.concat([xy, wh, tf.sigmoid(y[..., 4:5 + self.nc]), y[..., 5 + self.nc:]], -1)
+                z.append(tf.reshape(y, [-1, self.na * ny * nx, self.no]))
 
-        if self.training:
-            out = x
-        elif self.end2end:
-            out = torch.cat(z, 1)
-        elif self.include_nms:
-            z = self.convert(z)
-            out = (z, )
-        elif self.concat:
-            out = torch.cat(z, 1)
-        else:
-            out = (torch.cat(z, 1), x)
-
-        return out
+        return tf.transpose(x, [0, 2, 1, 3]) if self.training else (tf.concat(z, 1),)
 
     @staticmethod
     def _make_grid(nx=20, ny=20):
-        yv, xv = torch.meshgrid([torch.arange(ny), torch.arange(nx)], indexing='ij')
-        return torch.stack((xv, yv), 2).view((1, 1, ny, nx, 2)).float()
+        # yv, xv = torch.meshgrid([torch.arange(ny), torch.arange(nx)])
+        # return torch.stack((xv, yv), 2).view((1, 1, ny, nx, 2)).float()
+        xv, yv = tf.meshgrid(tf.range(nx), tf.range(ny))
+        return tf.cast(tf.reshape(tf.stack([xv, yv], 2), [1, 1, ny * nx, 2]), dtype=tf.float32)
 
-    def convert(self, z):
-        z = torch.cat(z, 1)
-        box = z[:, :, :4]
-        conf = z[:, :, 4:5]
-        score = z[:, :, 5:]
-        score *= conf
-        convert_matrix = torch.tensor([[1, 0, 1, 0], [0, 1, 0, 1], [-0.5, 0, 0.5, 0], [0, -0.5, 0, 0.5]],
-                                           dtype=torch.float32,
-                                           device=z.device)
-        box @= convert_matrix                          
-        return (box, score)
 
 class TFPad(keras.layers.Layer):
     # Pad inputs in spatial dimensions 1 and 2
@@ -198,7 +251,7 @@ class TFPad(keras.layers.Layer):
 
 class TFConv(keras.layers.Layer):
     # Standard convolution
-    def __init__(self, c1, c2, k=1, s=1, p=None, g=1, act=True, w=None):
+    def __init__(self, c1, c2, k=1, s=1, p=None, g=1, d=1, act=True, w=None):
         # ch_in, ch_out, weights, kernel, stride, padding, groups
         super().__init__()
         assert g == 1, "TF v2.2 Conv2D does not support 'groups' argument"
@@ -210,8 +263,8 @@ class TFConv(keras.layers.Layer):
             strides=s,
             padding='SAME' if s == 1 else 'VALID',
             use_bias=not hasattr(w, 'bn'),
-            kernel_initializer=keras.initializers.Constant(w.conv.weight.permute(2, 3, 1, 0).detach().numpy()),
-            bias_initializer='zeros' if hasattr(w, 'bn') else keras.initializers.Constant(w.conv.bias.detach().numpy()))
+            kernel_initializer=keras.initializers.Constant(w.conv.weight.permute(2, 3, 1, 0).cpu().numpy()),
+            bias_initializer='zeros' if hasattr(w, 'bn') else keras.initializers.Constant(w.conv.bias.cpu().numpy()))
         self.conv = conv if s == 1 else keras.Sequential([TFPad(autopad(k, p)), conv])
         self.bn = TFBN(w.bn) if hasattr(w, 'bn') else tf.identity
         self.act = activations(w.act) if act else tf.identity
@@ -568,7 +621,6 @@ def parse_model(d, ch, model, imgsz):  # model_dict, input_channels(3)
             args.append([ch[x] for x in f])
             if isinstance(args[1], int):  # number of anchors
                 args[1] = [list(range(args[1] * 2))] * len(f)
-            args.append(imgsz)
         elif m is ReOrg:
             c2 = ch[f] * 4
         elif m is Contract:
@@ -580,7 +632,6 @@ def parse_model(d, ch, model, imgsz):  # model_dict, input_channels(3)
         tf_m = eval('TF' + m_str.replace('nn.', ''))
         m_ = keras.Sequential([tf_m(*args, w=model.model[i][j]) for j in range(n)]) if n > 1 \
             else tf_m(*args, w=model.model[i])  # module
-            
         torch_m = nn.Sequential(*[m(*args) for _ in range(n)]) if n > 1 else m(*args)  # module
         t = str(m)[8:-2].replace('__main__.', '')  # module type
         np = sum([x.numel() for x in torch_m.parameters()])  # number params
@@ -590,62 +641,6 @@ def parse_model(d, ch, model, imgsz):  # model_dict, input_channels(3)
         layers.append(m_)
         ch.append(c2)
     return keras.Sequential(layers), sorted(save)
-
-# def parse_model(d, ch, model, imgsz):  # model_dict, input_channels(3)
-#     LOGGER.info(f"\n{'':>3}{'from':>18}{'n':>3}{'params':>10}  {'module':<40}{'arguments':<30}")
-#     anchors, nc, gd, gw = d['anchors'], d['nc'], d['depth_multiple'], d['width_multiple']
-#     na = (len(anchors[0]) // 2) if isinstance(anchors, list) else anchors  # number of anchors
-#     no = na * (nc + 5)  # number of outputs = anchors * (classes + 5)
-
-#     layers, save, c2 = [], [], ch[-1]  # layers, savelist, ch out
-#     for i, (f, n, m, args) in enumerate(d['backbone'] + d['head']):  # from, number, module, args
-#         m_str = m
-#         m = eval(m) if isinstance(m, str) else m  # eval strings
-#         for j, a in enumerate(args):
-#             try:
-#                 args[j] = eval(a) if isinstance(a, str) else a  # eval strings
-#             except NameError:
-#                 pass
-
-#         n = max(round(n * gd), 1) if n > 1 else n  # depth gain
-#         if m in [
-#                 nn.Conv2d, Conv, DWConv, DWConvTranspose2d, Bottleneck, SPP, SPPF, MixConv2d, Focus, CrossConv,
-#                 BottleneckCSP, C3, C3x]:
-#             c1, c2 = ch[f], args[0]
-#             c2 = make_divisible(c2 * gw, 8) if c2 != no else c2
-
-#             args = [c1, c2, *args[1:]]
-#             if m in [BottleneckCSP, C3, C3x]:
-#                 args.insert(2, n)
-#                 n = 1
-#         elif m is nn.BatchNorm2d:
-#             args = [ch[f]]
-#         elif m is Concat:
-#             c2 = sum(ch[-1 if x == -1 else x + 1] for x in f)
-#         elif m in [Detect, Segment]:
-#             args.append([ch[x + 1] for x in f])
-#             if isinstance(args[1], int):  # number of anchors
-#                 args[1] = [list(range(args[1] * 2))] * len(f)
-#             if m is Segment:
-#                 args[3] = make_divisible(args[3] * gw, 8)
-#             args.append(imgsz)
-#         else:
-#             c2 = ch[f]
-
-#         tf_m = eval('TF' + m_str.replace('nn.', ''))
-#         m_ = keras.Sequential([tf_m(*args, w=model.model[i][j]) for j in range(n)]) if n > 1 else tf_m(*args, w=model.model[i])  # module
-
-#         torch_m_ = nn.Sequential(*(m(*args) for _ in range(n))) if n > 1 else m(*args)  # module
-#         t = str(m)[8:-2].replace('__main__.', '')  # module type
-#         np = sum(x.numel() for x in torch_m_.parameters())  # number params
-#         m_.i, m_.f, m_.type, m_.np = i, f, t, np  # attach index, 'from' index, type, number params
-#         LOGGER.info(f'{i:>3}{str(f):>18}{str(n):>3}{np:>10}  {t:<40}{str(args):<30}')  # print
-#         save.extend(x % i for x in ([f] if isinstance(f, int) else f) if x != -1)  # append to savelist
-#         layers.append(m_)
-#         ch.append(c2)
-#     return keras.Sequential(layers), sorted(save)
-
-
 
 class TFModel:
     # TF YOLOv5 model
@@ -675,10 +670,9 @@ class TFModel:
                 conf_thres=0.25):
         y = []  # outputs
         x = inputs
-        for m in self.model.layers:
+        for index, (m) in enumerate(self.model.layers):
             if m.f != -1:  # if not from previous layer
                 x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
-
             x = m(x)  # run
             y.append(x if m.i in self.savelist else None)  # save output
 

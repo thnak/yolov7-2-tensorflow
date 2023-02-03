@@ -76,7 +76,6 @@ def train(hyp, opt, device, tb_writer=None):
     init_seeds(2 + rank)
     with open(opt.data) as f:
         data_dict = yaml.load(f, Loader=yaml.SafeLoader)  # data dict
-        f.close()
     is_coco = opt.data.endswith('coco.yaml')
 
     map_device = 'cpu' if device.type == 'privateuseone' else device
@@ -556,7 +555,7 @@ def train(hyp, opt, device, tb_writer=None):
                         'updates': ema.updates,
                         'optimizer': optimizer.state_dict(),
                         'wandb_id': wandb_logger.wandb_run.id if wandb_logger.wandb else None,
-                        'yaml': hyp,
+                        'hyp': hyp,
                         'opt': opt}
 
                 # Save last, best and delete

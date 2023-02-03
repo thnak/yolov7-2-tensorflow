@@ -21,8 +21,9 @@ from utils.torch_utils import time_synchronized
 ##### basic ####
 def autopad(k, p=None, d=1):  # kernel, padding, dilation
     # Pad to 'same' shape outputs
-    if d > 1:
-        k = d * (k - 1) + 1 if isinstance(k, int) else [d * (x - 1) + 1 for x in k]  # actual kernel-size
+    if isinstance(d, int):      
+        if d > 1:
+            k = d * (k - 1) + 1 if isinstance(k, int) else [d * (x - 1) + 1 for x in k]  # actual kernel-size
     if p is None:
         p = k // 2 if isinstance(k, int) else [x // 2 for x in k]  # auto-pad
     return p
@@ -459,8 +460,7 @@ class ImplicitA(nn.Module):
         self.channel = channel
         self.mean = mean
         self.std = std
-        self.implicit = nn.Parameter(torch.zeros(1, channel, 1, 1))
-        nn.init.normal_(self.implicit, mean=self.mean, std=self.std)
+        self.implicit = nn.init.normal_(nn.Parameter(torch.zeros(1, channel, 1, 1)), mean=self.mean, std=self.std)
 
     def forward(self, x):
         return self.implicit + x
@@ -472,8 +472,7 @@ class ImplicitM(nn.Module):
         self.channel = channel
         self.mean = mean
         self.std = std
-        self.implicit = nn.Parameter(torch.ones(1, channel, 1, 1))
-        nn.init.normal_(self.implicit, mean=self.mean, std=self.std)
+        self.implicit = nn.init.normal_(nn.Parameter(torch.zeros(1, channel, 1, 1)), mean=self.mean, std=self.std)
 
     def forward(self, x):
         return self.implicit * x

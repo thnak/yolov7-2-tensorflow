@@ -1,7 +1,9 @@
 import numpy as np
 import onnx
 from onnx import shape_inference
+from utils.general import check_requirements
 try:
+    check_requirements('onnx_graphsurgeon')
     import onnx_graphsurgeon as gs
 except Exception as e:
     print('Import onnx_graphsurgeon failure: %s' % e)
