@@ -10,3 +10,6 @@ best_web_model/
 tre.py
 build/
 wandb/
+TrainRes/
+coco128/
+coco/

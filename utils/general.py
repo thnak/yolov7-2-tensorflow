@@ -99,7 +99,7 @@ def check_version(current='0.0.0', minimum='0.0.0', name='version ', pinned=Fals
     # Check version vs. required version
     current, minimum = (pkg.parse_version(x) for x in (current, minimum))
     result = (current == minimum) if pinned else (current >= minimum)  # bool
-    s = f'WARNING ⚠️ {name}{minimum} is required by YOLOv5, but {name}{current} is currently installed'  # string
+    s = f'WARNING ⚠️ {name}{minimum} is required by YOLO, but {name}{current} is currently installed'  # string
     if hard:
         assert result, emojis(s)  # assert min requirements met
     if verbose and not result:
@@ -128,7 +128,7 @@ def check_requirements(requirements=ROOT / 'requirements.txt', exclude=(), insta
             n += 1
 
     if s and install:  # check environment variable
-        print(f"{prefix} YOLOv5 requirement{'s' * (n > 1)} {s}not found, attempting AutoUpdate...")
+        print(f"{prefix} YOLO requirement{'s' * (n > 1)} {s}not found, attempting AutoUpdate...")
         try:
             # assert check_online(), "AutoUpdate skipped (offline)"
             print(check_output(f'pip install {s} {cmds}', shell=True).decode())
@@ -185,8 +185,13 @@ def check_dataset(dict):
                 print('Downloading %s ...' % s)
                 if s.startswith('http') and s.endswith('.zip'):  # URL
                     f = Path(s).name  # filename
-                    torch.hub.download_url_to_file(s, f)
-                    r = os.system('unzip -q %s -d ../ && rm %s' % (f, f))  # unzip
+                    print(f)
+                    f = f"{dict.get('path')}/{f}"
+                    print(f)
+                    if not os.path.exists(f):
+                        torch.hub.download_url_to_file(s, f)
+                    r = os.system(f'tar -xf {f}')
+                    os.system(f'del TrainRes/coco128.zip')
                 else:  # bash script
                     r = os.system(s)
                 print('Dataset autodownload %s\n' % ('success' if r == 0 else 'failure'))  # analyze return value

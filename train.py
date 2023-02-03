@@ -303,8 +303,8 @@ def train(hyp, opt, device, tb_writer=None):
                                        hyp=hyp,
                                        cache=opt.cache_images if (
                                            opt.cache_images and not opt.notest) else 'no',
-                                       rect=True,
-                                       shuffle=False,
+                                       rect= opt.rect,
+                                       shuffle=False if opt.rect else True,
                                        rank=-1,
                                        world_size=opt.world_size,
                                        workers=opt.workers,
@@ -315,8 +315,8 @@ def train(hyp, opt, device, tb_writer=None):
                                        batch_size * 2, gs, opt,
                                        hyp=hyp,
                                        cache= 'no',
-                                       rect=True,
-                                       shuffle=False,
+                                       rect= opt.rect,
+                                       shuffle=False if opt.rect else True,
                                        rank=-1,
                                        world_size=opt.world_size,
                                        workers=opt.workers,
@@ -326,8 +326,6 @@ def train(hyp, opt, device, tb_writer=None):
         if not opt.resume:
             labels = np.concatenate(dataset.labels, 0)
             c = torch.tensor(labels[:, 0])  # classes
-            # cf = torch.bincount(c.long(), minlength=nc) + 1.  # frequency
-            # model._initialize_biases(cf.to(device))
             if plots:
                 # plot_labels(labels, names, save_dir, loggers)
                 if tb_writer:
@@ -547,16 +545,21 @@ def train(hyp, opt, device, tb_writer=None):
 
             # Save model
             if (not opt.nosave) or (final_epoch and opt.evolve <= 1):  # if save
+                from datetime import datetime
                 ckpt = {'epoch': epoch,
                         'best_fitness': best_fitness,
                         'training_results': results_file.read_text(),
                         'model': deepcopy(model.module if is_parallel(model) else model).half(),
+                        'input shape': imgs.shape[1:], #BCWH to CWH
                         'ema': deepcopy(ema.ema).half(),
                         'updates': ema.updates,
                         'optimizer': optimizer.state_dict(),
                         'wandb_id': wandb_logger.wandb_run.id if wandb_logger.wandb else None,
                         'hyp': hyp,
-                        'opt': opt}
+                        'opt': vars(opt),
+                        'gitstatus': opt.git_status,
+                        'date': datetime.now()
+                        }
 
                 # Save last, best and delete
                 torch.save(ckpt, last)

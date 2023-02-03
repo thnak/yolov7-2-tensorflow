@@ -125,7 +125,7 @@ class RobustConv(nn.Module):
         x = x.to(memory_format=torch.channels_last)
         x = self.conv1x1(self.conv_dw(x))
         if self.gamma is not None:
-            x = x.mul(self.gamma.reshape(1, -1, 1, 1)) 
+            x = x.mul(self.gamma.reshape(1, -1, 1, 1))
         return x
 
 

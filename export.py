@@ -20,7 +20,6 @@ sys.path.append('./')  # to run '$ python *.py' files in subdirectories
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--weights', nargs='+', type=str,default=['./best.pt'], help='weights path')
-    parser.add_argument('--img-size', nargs='+', type=int,default=[640, 640], help='image size [height, width]')
     parser.add_argument('--batch-size', type=int, default=1, help='batch size')
     parser.add_argument('--dynamic', action='store_true',help='dynamic ONNX axes')
     parser.add_argument('--dynamic-batch', action='store_true',help='dynamic batch onnx for tensorrt and onnx-runtime')
@@ -39,7 +38,6 @@ if __name__ == '__main__':
     parser.add_argument('--v', action='store_true', help='Verbose log')
     parser.add_argument('--author', type=str,default='Nguyễn Văn Thạnh', help="author's name")
     opt = parser.parse_args()
-    opt.img_size *= 2 if len(opt.img_size) == 1 else 1  # expand
     opt.dynamic = opt.dynamic and not opt.end2end
     opt.dynamic = False if opt.dynamic_batch else opt.dynamic
     set_logging()
@@ -71,8 +69,7 @@ if __name__ == '__main__':
             weight, map_location=map_device)  # load FP32 model
         ckpt = torch.load(weight, map_location=map_device)
 
-        best_fitness = str(ckpt['best_fitness'][0].astype(
-            int)) if 'best_fitness' in ckpt else 'unknown'
+        best_fitness = str(ckpt['best_fitness']) if 'best_fitness' in ckpt else 'unknown'
         print(f'debug: {type(best_fitness)}')
         epoch = ckpt['epoch'] if 'epoch' in ckpt else 'unknown'
         training_results = ckpt['training_results'] if 'training_results' in ckpt else 'unknown'
@@ -88,18 +85,16 @@ if __name__ == '__main__':
         model_Gflop = model.info()
         gs = int(max(model.stride))  # grid size (max stride)
 
-        # verify img_size are gs-multiples
-
-        opt.img_size = [check_img_size(x, gs) for x in opt.img_size]
-        img = torch.zeros(opt.batch_size, 3, *opt.img_size).to(device)
+        input_shape = ckpt['input shape'] if 'input shape' in ckpt else [3,640,640]
+        img = torch.zeros(opt.batch_size, *input_shape).to(device)
         model.eval()
         if device.type in ['cuda', 'dml'] and opt.fp16:
             img, model = img.half(), model.half()
             logging.info(
-                f'Export with shape {opt.img_size}, FP16, best fitness: {best_fitness}')
+                f'Export with shape {input_shape}, FP16, best fitness: {best_fitness}')
         else:
             logging.info(
-                f'Export with shape {opt.img_size}, FP32, best fitness: {best_fitness}')
+                f'Export with shape {input_shape}, FP32, best fitness: {best_fitness}')
         # Update model
         for k, m in model.named_modules():
             m._non_persistent_buffers_set = set()  # pytorch 1.6.0 compatibility
@@ -255,8 +250,9 @@ if __name__ == '__main__':
             onnx_model = onnx.load(f)  # load onnx model
             onnx.checker.check_model(onnx_model)  # check onnx model
             logging.info(f'{prefix} writing metadata for model...')
-            onnx_MetaData = {'gitstatus': gitstatus,
-                             'best fitness': str(ckpt['best_fitness'][0]) if 'best_fitness' in ckpt else 'unknown',
+            onnx_MetaData = {'export gitstatus': gitstatus,
+                             'traing gitstatus': str(ckpt['gitstatus']) if 'gitstatus' in ckpt else 'unknown',
+                             'best fitness': str(ckpt['best_fitness']) if 'best_fitness' in ckpt else 'unknown',
                              'epoch': str(ckpt['epoch']) if 'epoch' in ckpt else 'unknown',
                              'training result': str(ckpt['training_results']) if 'training_results' in ckpt else 'unknown',
                              'ema': str(ckpt['ema']) if 'ema' in ckpt else 'unknown',
