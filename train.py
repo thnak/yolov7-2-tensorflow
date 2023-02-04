@@ -549,9 +549,9 @@ def train(hyp, opt, device, tb_writer=None):
                 ckpt = {'epoch': epoch,
                         'best_fitness': best_fitness,
                         'training_results': results_file.read_text(),
-                        'model': deepcopy(model.module if is_parallel(model) else model).half(),
+                        'model': deepcopy(model.module if is_parallel(model) else model),
                         'input shape': imgs.shape[1:], #BCWH to CWH
-                        'ema': deepcopy(ema.ema).half(),
+                        'ema': deepcopy(ema.ema),
                         'updates': ema.updates,
                         'optimizer': optimizer.state_dict(),
                         'wandb_id': wandb_logger.wandb_run.id if wandb_logger.wandb else None,

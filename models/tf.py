@@ -37,7 +37,7 @@ from models.yolo import Detect, Segment, IDetect,  RobustConv, RobustConv2, Ghos
                         Res, ResCSPA, ResCSPB, ResCSPC, RepRes, RepResCSPA, RepResCSPB, RepResCSPC, ResX, ResXCSPA, ResXCSPB, ResXCSPC, \
                         RepResX, RepResXCSPA, RepResXCSPB, RepResXCSPC, Ghost, GhostCSPA, GhostCSPB, GhostCSPC,SwinTransformerBlock, STCSPA, STCSPB, STCSPC,\
                         SwinTransformer2Block, ST2CSPA, ST2CSPB, ST2CSPC, IAuxDetect, IBin, IKeypoint
-from utils.activations import SiLU
+from utils.activations import SiLU, Hardswish
 from utils.general import  make_divisible, colorstr
 
 def print_args(args: Optional[dict] = None, show_file=True, show_func=False):
@@ -385,7 +385,7 @@ class TFBottleneckCSP(keras.layers.Layer):
         self.cv3 = TFConv2d(c_, c_, 1, 1, bias=False, w=w.cv3)
         self.cv4 = TFConv(2 * c_, c2, 1, 1, w=w.cv4)
         self.bn = TFBN(w.bn)
-        self.act = lambda x: keras.activations.swish(x)
+        self.act = lambda x: tf.keras.activations.swish(x)
         self.m = keras.Sequential([TFBottleneck(c_, c_, shortcut, g, e=1.0, w=w.m[j]) for j in range(n)])
 
     def call(self, inputs):
@@ -746,24 +746,45 @@ class AgnosticNMS(keras.layers.Layer):
         return padded_boxes, padded_scores, padded_classes, valid_detections
 
 
+
 def activations(act=nn.SiLU):
-    # Returns TF activation from input PyTorch activation
+    """Returns TF activation from input PyTorch activation"""
     if isinstance(act, nn.LeakyReLU):
-        return lambda x: keras.activations.relu(x, alpha=0.1)
-    elif isinstance(act, nn.Hardswish):
+        return lambda x: tf.keras.activations.relu(x, alpha=0.1)
+    elif isinstance(act, (nn.Hardswish, Hardswish)):
         return lambda x: x * tf.nn.relu6(x + 3) * 0.166666667
     elif isinstance(act, nn.ReLU):
         return lambda x: x * tf.nn.relu(x)
+    elif isinstance(act, nn.ReLU6):
+        return lambda x: tf.nn.relu6(x)
     elif isinstance(act, (nn.SiLU, SiLU)):
-        return lambda x: keras.activations.swish(x)
+        return lambda x: tf.keras.activations.swish(x)
+    elif isinstance(act, nn.Tanh):
+        return lambda x: tf.keras.activations.tanh(x)
+    elif isinstance(act, nn.Sigmoid):
+        return lambda x: tf.keras.activations.sigmoid(x)
+    elif isinstance(act, nn.ELU):
+        return lambda x: tf.keras.activations.elu(x)
+    elif isinstance(act, nn.Hardsigmoid):
+        return lambda x: tf.keras.activations.hard_sigmoid(x)
+    elif isinstance(act, nn.GELU):
+        return lambda x: tf.keras.activations.gelu(x)
     elif isinstance(act, nn.PReLU):
-        return lambda x: keras.activations.prelu(x)
+        return lambda x: tf.keras.activations.relu(x,alpha=0.25)
+    elif isinstance(act, nn.Softmax):
+        return lambda x: tf.keras.activations.softmax(x)
+    elif isinstance(act, nn.Softsign):
+        return lambda x: tf.keras.activations.softsign(x)
+    elif isinstance(act, nn.Softplus):
+        return lambda x: tf.keras.activations.softplus(x)
+    elif isinstance(act, nn.Softsign):
+        return lambda x: tf.keras.activations.softsign(x)
     else:
         raise Exception(f'no matching TensorFlow activation found for PyTorch activation {act}')
 
 
 def representative_dataset_gen(dataset, ncalib=100):
-    # Representative dataset generator for use with converter.representative_dataset, returns a generator of np arrays
+    """Representative dataset generator for use with converter.representative_dataset, returns a generator of np arrays"""
     for n, (path, img, im0s, vid_cap, string) in enumerate(dataset):
         im = np.transpose(img, [1, 2, 0])
         im = np.expand_dims(im, axis=0).astype(np.float32)
