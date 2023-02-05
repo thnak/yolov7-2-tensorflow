@@ -502,7 +502,7 @@ def train(hyp, opt, device, tb_writer=None):
                                               single_cls=opt.single_cls,
                                               dataloader=val_dataloader,
                                               save_dir=save_dir,
-                                              verbose= final_epoch,
+                                              verbose= False,
                                               plots=plots and final_epoch,
                                               wandb_logger=wandb_logger,
                                               compute_loss=compute_loss,
@@ -544,7 +544,7 @@ def train(hyp, opt, device, tb_writer=None):
             wandb_logger.end_epoch(best_result=best_fitness == fi)
 
             # Save model
-            if (not opt.nosave) or (final_epoch and opt.evolve <= 1):  # if save
+            if (not opt.nosave) or (final_epoch and opt.evolve < 1):  # if save
                 from datetime import datetime
                 ckpt = {'epoch': epoch,
                         'best_fitness': best_fitness,
@@ -594,21 +594,40 @@ def train(hyp, opt, device, tb_writer=None):
                     (epoch - start_epoch + 1, (time_synchronized() - t0) / 3600))
 
         if best.exists():
-            results, _, _ = tester(opt.data,
+            prefix = colorstr('Validating')
+            logger.info(f'{prefix} model {best}.')
+            results_val, _, _ = tester(opt.data,
                                    batch_size=batch_size * 2,
                                    imgsz=imgsz_test,
                                    conf_thres=0.001,
                                    iou_thres=0.7,
-                                   model=attempt_load(best, device).half(
-                                   ) if device.type == 'cuda' else attempt_load(best, device),
+                                   model=attempt_load(best, device).half() if device.type == 'cuda' else attempt_load(best, device),
                                    single_cls=opt.single_cls,
-                                   dataloader=test_dataloader,
+                                   dataloader=val_dataloader,
                                    save_dir=save_dir,
                                    save_json=is_coco,
                                    verbose=True,
                                    plots=False,
                                    is_coco=is_coco,
                                    v5_metric=opt.v5_metric)
+            
+            prefix = colorstr('Testing')
+            if opt.evolve < 1:
+                logger.info(f'{prefix} model {best}.')
+                results_test, _, _ = tester(opt.data,
+                                    batch_size=batch_size * 2,
+                                    imgsz=imgsz_test,
+                                    conf_thres=0.001,
+                                    iou_thres=0.7,
+                                    model=attempt_load(best, device).half() if device.type == 'cuda' else attempt_load(best, device),
+                                    single_cls=opt.single_cls,
+                                    dataloader=test_dataloader,
+                                    save_dir=save_dir,
+                                    save_json=is_coco,
+                                    verbose=True,
+                                    plots=False,
+                                    is_coco=is_coco,
+                                    v5_metric=opt.v5_metric)            
 
         # Strip optimizers
         final = best if best.exists() else last  # final model
@@ -643,7 +662,7 @@ def train(hyp, opt, device, tb_writer=None):
         dist.destroy_process_group()
     if opt.evolve <= 1:
         torch.cuda.empty_cache()
-    return results
+    return results_val
 
 
 if __name__ == '__main__':
