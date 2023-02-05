@@ -234,7 +234,7 @@ def inferWithDynamicBatch(enginePath,opt, save=''):
     t2_2_t1 = threading.Event()
     t2_2_t3 = threading.Event()
     t3_2_t2 = threading.Event()
-    avgFps = int(1/model.warmup(10))
+    avgFps = int(1/model.warmup(10)) if model.warmup(10) is not None else 30
     print(f'speed: {avgFps}FPS')
     
     Data_t1_2_t2 = [[], [], [], [], [], [], []]

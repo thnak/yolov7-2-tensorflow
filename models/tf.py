@@ -60,10 +60,10 @@ class TFBN(keras.layers.Layer):
     def __init__(self, w=None):
         super().__init__()
         self.bn = keras.layers.BatchNormalization(
-            beta_initializer=keras.initializers.Constant(w.bias.cpu().numpy()),
-            gamma_initializer=keras.initializers.Constant(w.weight.cpu().numpy()),
-            moving_mean_initializer=keras.initializers.Constant(w.running_mean.cpu().numpy()),
-            moving_variance_initializer=keras.initializers.Constant(w.running_var.cpu().numpy()),
+            beta_initializer=keras.initializers.Constant(w.bias.cpu().detach().numpy()),
+            gamma_initializer=keras.initializers.Constant(w.weight.cpu().detach().numpy()),
+            moving_mean_initializer=keras.initializers.Constant(w.running_mean.cpu().detach().numpy()),
+            moving_variance_initializer=keras.initializers.Constant(w.running_var.cpu().detach().numpy()),
             epsilon=w.eps)
 
     def call(self, inputs):
@@ -189,13 +189,13 @@ class TFIDetect(keras.layers.Layer):
     # TF YOLOv5 Detect layer
     def __init__(self, nc=80, anchors=(), ch=(), imgsz=(640, 640), w=None):  # detection layer
         super().__init__()
-        self.stride = tf.convert_to_tensor(w.stride.cpu().numpy(), dtype=tf.float32)
+        self.stride = tf.convert_to_tensor(w.stride.cpu().detach().numpy(), dtype=tf.float32)
         self.nc = nc  # number of classes
         self.no = nc + 5  # number of outputs per anchor
         self.nl = len(anchors)  # number of detection layers
         self.na = len(anchors[0]) // 2  # number of anchors
         self.grid = [tf.zeros(1)] * self.nl  # init grid
-        self.anchors = tf.convert_to_tensor(w.anchors.cpu().numpy(), dtype=tf.float32)
+        self.anchors = tf.convert_to_tensor(w.anchors.cpu().detach().numpy(), dtype=tf.float32)
         self.anchor_grid = tf.reshape(self.anchors * tf.reshape(self.stride, [self.nl, 1, 1]), [self.nl, 1, -1, 1, 2])
         self.m = [TFConv2d(x, self.no * self.na, 1, w=w.m[i]) for i, x in enumerate(ch)]
         self.ia = [TFImplicitA(x) for x in ch]
@@ -263,8 +263,8 @@ class TFConv(keras.layers.Layer):
             strides=s,
             padding='SAME' if s == 1 else 'VALID',
             use_bias=not hasattr(w, 'bn'),
-            kernel_initializer=keras.initializers.Constant(w.conv.weight.permute(2, 3, 1, 0).cpu().numpy()),
-            bias_initializer='zeros' if hasattr(w, 'bn') else keras.initializers.Constant(w.conv.bias.cpu().numpy()))
+            kernel_initializer=keras.initializers.Constant(w.conv.weight.permute(2, 3, 1, 0).cpu().detach().numpy()),
+            bias_initializer='zeros' if hasattr(w, 'bn') else keras.initializers.Constant(w.conv.bias.cpu().detach().numpy()))
         self.conv = conv if s == 1 else keras.Sequential([TFPad(autopad(k, p)), conv])
         self.bn = TFBN(w.bn) if hasattr(w, 'bn') else tf.identity
         self.act = activations(w.act) if act else tf.identity
@@ -284,8 +284,8 @@ class TFDWConv(keras.layers.Layer):
             strides=s,
             padding='SAME' if s == 1 else 'VALID',
             use_bias=not hasattr(w, 'bn'),
-            depthwise_initializer=keras.initializers.Constant(w.conv.weight.permute(2, 3, 1, 0).numpy()),
-            bias_initializer='zeros' if hasattr(w, 'bn') else keras.initializers.Constant(w.conv.bias.numpy()))
+            depthwise_initializer=keras.initializers.Constant(w.conv.weight.permute(2, 3, 1, 0).detach().numpy()),
+            bias_initializer='zeros' if hasattr(w, 'bn') else keras.initializers.Constant(w.conv.bias.detach().numpy()))
         self.conv = conv if s == 1 else keras.Sequential([TFPad(autopad(k, p)), conv])
         self.bn = TFBN(w.bn) if hasattr(w, 'bn') else tf.identity
         self.act = activations(w.act) if act else tf.identity
@@ -301,7 +301,7 @@ class TFDWConvTranspose2d(keras.layers.Layer):
         super().__init__()
         assert c1 == c2, f'TFDWConv() output={c2} must be equal to input={c1} channels'
         assert k == 4 and p1 == 1, 'TFDWConv() only valid for k=4 and p1=1'
-        weight, bias = w.weight.permute(2, 3, 1, 0).numpy(), w.bias.numpy()
+        weight, bias = w.weight.permute(2, 3, 1, 0).detach().numpy(), w.bias.detach().numpy()
         self.c1 = c1
         self.conv = [
             keras.layers.Conv2DTranspose(filters=1,
@@ -367,8 +367,8 @@ class TFConv2d(keras.layers.Layer):
                                         padding='VALID',
                                         use_bias=bias,
                                         kernel_initializer=keras.initializers.Constant(
-                                            w.weight.permute(2, 3, 1, 0).detach().numpy()),
-                                        bias_initializer=keras.initializers.Constant(w.bias.detach().numpy()) if bias else None)
+                                            w.weight.permute(2, 3, 1, 0).detach().detach().cpu().numpy()),
+                                        bias_initializer=keras.initializers.Constant(w.bias.detach().detach().cpu().numpy()) if bias else None)
 
     def call(self, inputs):
         return self.conv(inputs)
@@ -458,13 +458,13 @@ class TFDetect(keras.layers.Layer):
     # TF YOLOv5 Detect layer
     def __init__(self, nc=80, anchors=(), ch=(), imgsz=(640, 640), w=None):  # detection layer
         super().__init__()
-        self.stride = tf.convert_to_tensor(w.stride.numpy(), dtype=tf.float32)
+        self.stride = tf.convert_to_tensor(w.stride.detach().cpu().numpy(), dtype=tf.float32)
         self.nc = nc  # number of classes
         self.no = nc + 5  # number of outputs per anchor
         self.nl = len(anchors)  # number of detection layers
         self.na = len(anchors[0]) // 2  # number of anchors
         self.grid = [0] * self.nl  # init grid
-        self.anchors = tf.convert_to_tensor(w.anchors.numpy(), dtype=tf.float32)
+        self.anchors = tf.convert_to_tensor(w.anchors.detach().cpu().numpy(), dtype=tf.float32)
         self.anchor_grid = tf.reshape(self.anchors * tf.reshape(self.stride, [self.nl, 1, 1]), [self.nl, 1, -1, 1, 2])
         self.m = [TFConv2d(x, self.no * self.na, 1, w=w.m[i]) for i, x in enumerate(ch)]
         self.training = False  # set to False after building model
