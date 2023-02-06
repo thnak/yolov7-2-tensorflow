@@ -269,7 +269,7 @@ def inferWithDynamicBatch(enginePath,opt, save=''):
                     Data_t1_2_t2[6].append(dwdh)
                     
             if len(Data_t1_2_t2[1]) >= model.batch_size:
-                Data_t1_2_t2[1] = model.concat(Data_t1_2_t2[1])       
+                Data_t1_2_t2[1] = model.concat(Data_t1_2_t2[1])
                 t1_2_t2.set()
                 t2_2_t1.wait(2)
                 t2_2_t1.clear()

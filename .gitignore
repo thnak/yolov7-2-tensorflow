@@ -3,6 +3,7 @@ runs/
 models/*.pt
 models/*.ptl
 models/*.onnx
+*.npy
 TrainRes/train
 TrainRes/val
 best_openvino_model/
