@@ -113,6 +113,7 @@ def train(hyp, opt, device, tb_writer=None):
         state_dict = intersect_dicts(
             state_dict, model.state_dict(), exclude=exclude)  # intersect
         model.load_state_dict(state_dict, strict=False)  # load
+        ckpt['best_fitness'] = ckpt['best_fitness'] if 'best_fitness' in ckpt else 'unknown'
         logger.info('Transferred %g/%g items from %s, best fitness %s' %(len(state_dict), len(model.state_dict()), weights, ckpt['best_fitness']))  # report
     else:
         model = Model(opt.cfg, ch=3, nc=nc, anchors=hyp.get(
@@ -123,7 +124,7 @@ def train(hyp, opt, device, tb_writer=None):
     train_path = data_dict['train']
     val_path = data_dict['val']
     test_path = data_dict['test'] if 'test' in data_dict else val_path
-    
+    test_path = test_path if os.path.exists(test_path) else val_path
 
     # Freeze
     freeze = [f'model.{x}.' for x in (freeze if len(freeze) > 1 else range(
@@ -275,11 +276,11 @@ def train(hyp, opt, device, tb_writer=None):
     if opt.sync_bn and cuda and rank != -1:
         model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model).to(device)
         logger.info('Using SyncBatchNorm()')
-
+    opt.cache_images = [opt.cache_images] * 2 if len(opt.cache_images) < 2 else [x for x in opt.cache_images]
     # Trainloader
     dataloader, dataset = create_dataloader(train_path, imgsz, batch_size, gs, opt,
                                             hyp=hyp, augment=opt.augment,
-                                            cache=opt.cache_images,
+                                            cache=opt.cache_images[0],
                                             rect=opt.rect, rank=rank,
                                             world_size=opt.world_size,
                                             workers=opt.workers,
@@ -299,26 +300,28 @@ def train(hyp, opt, device, tb_writer=None):
                                        imgsz_test,
                                        batch_size * 2, gs, opt,
                                        hyp=hyp,
-                                       cache=opt.cache_images if (
-                                           opt.cache_images and not opt.notest) else 'no',
+                                       cache=opt.cache_images[1] if (
+                                           opt.cache_images[1] and not opt.notest) else 'no',
                                        rect= opt.rect,
                                        shuffle=False if opt.rect else True,
                                        rank=-1,
                                        world_size=opt.world_size,
                                        workers=opt.workers,
                                        pad=0.5, prefix=colorstr('val: '))[0]
-        
-        test_dataloader = create_dataloader(test_path,
-                                       imgsz_test,
-                                       batch_size * 2, gs, opt,
-                                       hyp=hyp,
-                                       cache= 'no',
-                                       rect= opt.rect,
-                                       shuffle=False if opt.rect else True,
-                                       rank=-1,
-                                       world_size=opt.world_size,
-                                       workers=opt.workers,
-                                       pad=0.5, prefix=colorstr('test: '))[0]
+        if test_path != val_path:
+            test_dataloader = create_dataloader(test_path,
+                                        imgsz_test,
+                                        batch_size * 2, gs, opt,
+                                        hyp=hyp,
+                                        cache= 'no',
+                                        rect= opt.rect,
+                                        shuffle=False if opt.rect else True,
+                                        rank=-1,
+                                        world_size=opt.world_size,
+                                        workers=opt.workers,
+                                        pad=0.5, prefix=colorstr('test: '))[0]
+        else:
+            logger.info(colorstr('Val and Test is the same thing!'))
         
         
         if not opt.resume:
@@ -556,7 +559,7 @@ def train(hyp, opt, device, tb_writer=None):
                         'hyp': hyp,
                         'opt': vars(opt),
                         'gitstatus': opt.git_status,
-                        'date': datetime.now()
+                        'date': datetime.now().isoformat("#")
                         }
 
                 # Save last, best and delete
@@ -610,7 +613,7 @@ def train(hyp, opt, device, tb_writer=None):
                                    v5_metric=opt.v5_metric)
             
             prefix = colorstr('Testing')
-            if opt.evolve < 1:
+            if opt.evolve < 1 and test_path != val_path:
                 logger.info(f'{prefix} model {best}.')
                 results_test, _, _ = tester(opt.data,
                                     batch_size=batch_size * 2,
@@ -697,8 +700,8 @@ if __name__ == '__main__':
     parser.add_argument('--parent', type=bool, default=True,
                         help='parent selection method: single or weighted, default: True (single)')
     parser.add_argument('--bucket', type=str, default='', help='gsutil bucket')
-    parser.add_argument('--cache-images', type=str, default='',
-                        help='cache images for faster training')
+    parser.add_argument('--cache-images', type=str, nargs='+', default='',
+                        help='cache images for faster training [Train cache, Validation cache]')
     parser.add_argument('--image-weights', action='store_true',
                         help='use weighted image selection for training')
     parser.add_argument('--device', default='',
@@ -823,7 +826,7 @@ if __name__ == '__main__':
                 'iou_t': (1, 0.1, 0.7),  # IoU training threshold
                 'anchor_t': (1, 2.0, 8.0),  # anchor-multiple threshold
                 # anchors per output grid (0 to ignore)
-                'anchors': (2, 2.0, 10.0),
+                'anchors': (0, 3.0, 10.0),
                 'fl_gamma': (1, 0.0, 2.0)}  # focal loss gamma (efficientDet default gamma=1.5)
 
         with open(opt.hyp, errors='ignore') as f:

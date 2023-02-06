@@ -1,6 +1,5 @@
 train: "TrainRes/train"
 val: "TrainRes/val"
-test: "TrainRes/test"
 nc: 1
 names:
   [

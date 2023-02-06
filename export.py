@@ -69,8 +69,9 @@ if __name__ == '__main__':
             weight, map_location=map_device)  # load FP32 model
         ckpt = torch.load(weight, map_location=map_device)
 
-        best_fitness = str(ckpt['best_fitness']) if 'best_fitness' in ckpt else 'unknown'
-        print(f'debug: {type(best_fitness)}')
+        best_fitness = ckpt['best_fitness'].tolist() if 'best_fitness' in ckpt else 'unknown'
+        best_fitness = str(best_fitness[0]) if isinstance(best_fitness, (tuple, list)) else str(best_fitness)
+        
         epoch = ckpt['epoch'] if 'epoch' in ckpt else 'unknown'
         training_results = ckpt['training_results'] if 'training_results' in ckpt else 'unknown'
         ema = ckpt['ema'] if 'ema' in ckpt else 'unknown'
@@ -252,7 +253,7 @@ if __name__ == '__main__':
             logging.info(f'{prefix} writing metadata for model...')
             onnx_MetaData = {'export gitstatus': gitstatus,
                              'traing gitstatus': str(ckpt['gitstatus']) if 'gitstatus' in ckpt else 'unknown',
-                             'best fitness': str(ckpt['best_fitness']) if 'best_fitness' in ckpt else 'unknown',
+                             'best fitness': best_fitness,
                              'epoch': str(ckpt['epoch']) if 'epoch' in ckpt else 'unknown',
                              'training result': str(ckpt['training_results']) if 'training_results' in ckpt else 'unknown',
                              'ema': str(ckpt['ema']) if 'ema' in ckpt else 'unknown',
@@ -265,7 +266,7 @@ if __name__ == '__main__':
                              'stride': str(gs),
                              'nc': str(len(labels)),
                              'names': str(labels), 'ort-nms': 'True' if opt.end2end and opt.max_hw else 'False',
-                             'export date': str(datetime.datetime.now()),
+                             'export date': datetime.datetime.now().isoformat('#'),
                              'train date': str(ckpt['date']) if 'date' in ckpt else 'unknown',
                              'author': str(opt.author),
                              'exporting opt': str(opt),
