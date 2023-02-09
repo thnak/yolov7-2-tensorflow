@@ -48,14 +48,15 @@ def test(data,
 
     else:  # called directly
         set_logging()
-        device = select_device(opt.device, batch_size=batch_size)
+        device = select_device(opt.device, batch_size=batch_size)[0]
 
         # Directories
         save_dir = Path(increment_path(Path(opt.project) / opt.name, exist_ok=opt.exist_ok))  # increment run
         (save_dir / 'labels' if save_txt else save_dir).mkdir(parents=True, exist_ok=True)  # make dir
 
         # Load model
-        model = attempt_load(weights, map_location=device)  # load FP32 model
+        map_device = 'cpu' if device.type=='privateuseone' else device
+        model = attempt_load(weights, map_location=map_device)  # load FP32 model
         gs = max(int(model.stride.max()), 32)  # grid size (max stride)
         imgsz = check_img_size(imgsz, s=gs)  # check img_size
         
@@ -63,10 +64,9 @@ def test(data,
             model = TracedModel(model, device, imgsz)
 
     # Half
-    half = device.type == 'cuda' and half_precision  # half precision only supported on CUDA
+    half = device.type in ['cuda'] and half_precision  # half precision only supported on CUDA
     if half:
         model.half()
-
     # Configure
     model.eval()
     if isinstance(data, str):
@@ -110,22 +110,22 @@ def test(data,
         targets = targets.to(device)
         nb, _, height, width = img.shape  # batch size, channels, height, width
 
-        with torch.no_grad():
+        # with torch.no_grad():
             # Run model
-            t = time_synchronized()
-            out, train_out = model(img, augment=augment)  # inference and training outputs
-            t0 += time_synchronized() - t
+        t = time_synchronized()
+        out, train_out = model(img, augment=augment)  # inference and training outputs
+        t0 += time_synchronized() - t
+        # Compute loss
+        if compute_loss:
+            loss += compute_loss([x.float() for x in train_out], targets)[1][:3]  # box, obj, cls
 
-            # Compute loss
-            if compute_loss:
-                loss += compute_loss([x.float() for x in train_out], targets)[1][:3]  # box, obj, cls
-
-            # Run NMS
-            targets[:, 2:] *= torch.Tensor([width, height, width, height]).to(device)  # to pixels
-            lb = [targets[targets[:, 0] == i, 1:] for i in range(nb)] if save_hybrid else []  # for autolabelling
-            t = time_synchronized()
-            out = non_max_suppression(out, conf_thres=conf_thres, iou_thres=iou_thres, labels=lb, multi_label=True)
-            t1 += time_synchronized() - t
+        # Run NMS
+        targets[:, 2:] *= torch.Tensor([width, height, width, height]).to(device)  # to pixels
+        lb = [targets[targets[:, 0] == i, 1:] for i in range(nb)] if save_hybrid else []  # for autolabelling
+        t = time_synchronized()
+        out = non_max_suppression(out.to("cpu"), conf_thres, iou_thres, labels=lb, multi_label=True, agnostic=single_cls)
+        out = [o.to(device) for o in out]
+        t1 += time_synchronized() - t
 
         # Statistics per image
         for si, pred in enumerate(out):

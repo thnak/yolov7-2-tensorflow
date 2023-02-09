@@ -29,24 +29,34 @@ from utils.autoanchor import check_anchors
 from utils.datasets import create_dataloader
 from utils.general import labels_to_class_weights, increment_path, labels_to_image_weights, init_seeds, \
     fitness, strip_optimizer, get_latest_run, check_dataset, check_file, check_git_status, check_img_size, \
-    check_requirements, print_mutation, set_logging, one_cycle, colorstr
+    print_mutation, set_logging, one_cycle, colorstr
 from utils.google_utils import attempt_download
 from utils.loss import ComputeLoss, ComputeLossOTA, ComputeLossAuxOTA
 from utils.plots import plot_images, plot_labels, plot_results, plot_evolution
 from utils.torch_utils import ModelEMA, select_device, intersect_dicts, torch_distributed_zero_first, is_parallel, time_synchronized
 from utils.wandb_logging.wandb_utils import WandbLogger, check_wandb_resume
-from utils.autobatch import check_train_batch_size
+# from utils.autobatch import check_train_batch_size
 from utils.re_parameteration import Re_parameterization
 
 
 logger = logging.getLogger(__name__)
 
 
-def train(hyp, opt, device, tb_writer=None):
+def train(hyp, opt, tb_writer=None):
+    # Save run settings
+    save_dir, epochs, batch_size, total_batch_size, weights, rank, freeze = \
+        Path(opt.save_dir), opt.epochs, opt.batch_size, opt.total_batch_size, opt.weights, opt.global_rank, opt.freeze    
+    with open(save_dir / 'hyp.yaml', 'w') as f:
+        yaml.dump(hyp, f, sort_keys=False)
+    with open(save_dir / 'opt.yaml', 'w') as f:
+        yaml.dump(vars(opt), f, sort_keys=False)
+    
+    device, git_status = select_device(opt.device, batch_size=opt.batch_size)
+    opt.device = device
+    opt.git_status = git_status
     logger.info(colorstr('hyperparameters: ') +
                 ', '.join(f'{k}={v}' for k, v in hyp.items()))
-    save_dir, epochs, batch_size, total_batch_size, weights, rank, freeze = \
-        Path(opt.save_dir), opt.epochs, opt.batch_size, opt.total_batch_size, opt.weights, opt.global_rank, opt.freeze
+
 
     # Directories
     wdir = save_dir / 'weights'
@@ -55,11 +65,7 @@ def train(hyp, opt, device, tb_writer=None):
     best = wdir / 'best.pt'
     results_file = save_dir / 'results.txt'
     results_file_csv = save_dir / 'results.csv'
-    # Save run settings
-    with open(save_dir / 'hyp.yaml', 'w') as f:
-        yaml.dump(hyp, f, sort_keys=False)
-    with open(save_dir / 'opt.yaml', 'w') as f:
-        yaml.dump(vars(opt), f, sort_keys=False)
+
 
     tag_results = ('Epoch', 'GPU_mem', 'box', 'obj',
                    'cls', 'total', 'labels', 'img_size')
@@ -72,15 +78,16 @@ def train(hyp, opt, device, tb_writer=None):
 
     # Configure
     plots = opt.evolve <= 1  # create plots
-    cuda = device.type == 'cuda'
+    cuda = True if device.type in ['cuda'] else False
     init_seeds(2 + rank)
     with open(opt.data) as f:
         data_dict = yaml.load(f, Loader=yaml.SafeLoader)  # data dict
     is_coco = opt.data.endswith('coco.yaml')
 
-    map_device = 'cpu' if device.type == 'privateuseone' else device
+    
     # Logging- Doing this before checking the dataset. Might update data_dict
     loggers = {'wandb': None}  # loggers dict
+    map_device = 'cpu' if device.type == 'privateuseone' else device
     if rank in [-1, 0]:
         opt.hyp = hyp  # add hyperparameters
         run_id = torch.load(weights, map_location=map_device).get(
@@ -105,6 +112,7 @@ def train(hyp, opt, device, tb_writer=None):
     if pretrained:
         with torch_distributed_zero_first(rank):
             attempt_download(weights)  # download if not found locally
+        
         ckpt = torch.load(weights, map_location=map_device)  # load checkpoint
         model = Model(opt.cfg or ckpt['model'].yaml, ch=3, nc=nc, anchors=hyp.get('anchors')).to(device)  # create
         exclude = ['anchor'] if (opt.cfg or hyp.get(
@@ -116,8 +124,7 @@ def train(hyp, opt, device, tb_writer=None):
         ckpt['best_fitness'] = ckpt['best_fitness'] if 'best_fitness' in ckpt else 'unknown'
         logger.info('Transferred %g/%g items from %s, best fitness %s' %(len(state_dict), len(model.state_dict()), weights, ckpt['best_fitness']))  # report
     else:
-        model = Model(opt.cfg, ch=3, nc=nc, anchors=hyp.get(
-            'anchors')).to(device)  # create
+        model = Model(opt.cfg, ch=3, nc=nc, anchors=hyp.get('anchors')).to(device)  # create
 
     with torch_distributed_zero_first(rank):
         check_dataset(data_dict)  # check
@@ -276,7 +283,7 @@ def train(hyp, opt, device, tb_writer=None):
     if opt.sync_bn and cuda and rank != -1:
         model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model).to(device)
         logger.info('Using SyncBatchNorm()')
-    opt.cache_images = [opt.cache_images] * 2 if len(opt.cache_images) < 2 else [x for x in opt.cache_images]
+    opt.cache_images = [opt.cache_images[0]] * 2 if len(opt.cache_images) < 2 else [x for x in opt.cache_images]
     # Trainloader
     dataloader, dataset = create_dataloader(train_path, imgsz, batch_size, gs, opt,
                                             hyp=hyp, augment=opt.augment,
@@ -353,8 +360,7 @@ def train(hyp, opt, device, tb_writer=None):
     model.nc = nc  # attach number of classes to model
     model.hyp = hyp  # attach hyperparameters to model
     model.gr = 1.0  # iou loss ratio (obj_loss = 1.0 or iou)
-    model.class_weights = labels_to_class_weights(
-        dataset.labels, nc).float().to(device) * nc  # attach class weights
+    model.class_weights = labels_to_class_weights(dataset.labels, nc).float().to(device) * nc  # attach class weights
     model.names = names
 
     # Start training
@@ -411,8 +417,7 @@ def train(hyp, opt, device, tb_writer=None):
         for i, (imgs, targets, paths, _) in pbar:
             # number integrated batches (since train start)
             ni = i + nb * epoch
-            imgs = imgs.to(device, non_blocking=True).float() / \
-                255.0  # uint8 to float32, 0-255 to 0.0-1.0
+            imgs = imgs.to(device, non_blocking=True).float() / 255.0  # uint8 to float32, 0-255 to 0.0-1.0
 
             # Warmup
             if ni <= nw:
@@ -442,11 +447,9 @@ def train(hyp, opt, device, tb_writer=None):
             with amp.autocast(enabled=cuda):
                 pred = model(imgs)  # forward
                 if 'loss_ota' not in hyp or hyp['loss_ota'] == 1:
-                    loss, loss_items = compute_loss_ota(pred, targets.to(
-                        device), imgs)  # loss scaled by batch_size
+                    loss, loss_items = compute_loss_ota([pre.to('cpu') for pre in pred], targets.to('cpu'), imgs.to('cpu'))  # loss scaled by batch_size
                 else:
-                    loss, loss_items = compute_loss(
-                        pred, targets.to(device))  # loss scaled by batch_size
+                    loss, loss_items = compute_loss([pre.to('cpu') for pre in pred], targets.to('cpu'))  # loss scaled by batch_size
                 if rank != -1:
                     loss *= opt.world_size  # gradient averaged between devices in DDP mode
                 if opt.quad:
@@ -465,10 +468,8 @@ def train(hyp, opt, device, tb_writer=None):
 
             # Print
             if rank in [-1, 0]:
-                mloss = (mloss * i + loss_items) / \
-                    (i + 1)  # update mean losses
-                mem = '%.3gG' % (torch.cuda.memory_reserved(
-                ) / 1E9 if torch.cuda.is_available() else 0)  # (GB)
+                mloss = (mloss * i + loss_items.to(device)) / (i + 1)  # update mean losses
+                mem = '%.3gG' % (torch.cuda.memory_reserved() / 1E9 if torch.cuda.is_available() else 0)  # (GB)
                 s = ('%10s' * 2 + '%10.4g' * 6) % ('%g/%g' % (epoch,
                                                               epochs - 1), mem, *mloss, targets.shape[0], imgs.shape[-1])
                 pbar.set_description(s)
@@ -506,7 +507,7 @@ def train(hyp, opt, device, tb_writer=None):
                                               verbose= False,
                                               plots=plots and final_epoch,
                                               wandb_logger=wandb_logger,
-                                              compute_loss=compute_loss,
+                                              compute_loss=compute_loss if device.type != 'privateuseone' else None,
                                               is_coco=is_coco,
                                               v5_metric=opt.v5_metric)
 
@@ -550,9 +551,9 @@ def train(hyp, opt, device, tb_writer=None):
                 ckpt = {'epoch': epoch,
                         'best_fitness': best_fitness,
                         'training_results': results_file.read_text(),
-                        'model': deepcopy(model.module if is_parallel(model) else model),
+                        'model': deepcopy(model.module if is_parallel(model) else model).float(),
                         'input shape': imgs.shape[1:], #BCWH to CWH
-                        'ema': deepcopy(ema.ema),
+                        'ema': deepcopy(ema.ema).float(),
                         'updates': ema.updates,
                         'optimizer': optimizer.state_dict(),
                         'wandb_id': wandb_logger.wandb_run.id if wandb_logger.wandb else None,
@@ -685,7 +686,7 @@ if __name__ == '__main__':
     parser.add_argument('--evolve', type=int, default=-1, help='evolve hyperparameters')
     parser.add_argument('--parent', type=bool, default=True,help='parent selection method: single or weighted, default: True (single)')
     parser.add_argument('--bucket', type=str, default='', help='gsutil bucket')
-    parser.add_argument('--cache-images', type=str, nargs='+', default='',help='cache images for faster training [Train cache, Validation cache]')
+    parser.add_argument('--cache-images', type=str, nargs='+', default=['no', 'no'],help='cache images for faster training [Train cache, Validation cache]')
     parser.add_argument('--image-weights', action='store_true',help='use weighted image selection for training')
     parser.add_argument('--device', default='',help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     parser.add_argument('--multi-scale', action='store_true',help='vary img-size +/- 50%')
@@ -748,13 +749,11 @@ if __name__ == '__main__':
 
     # DDP mode
     opt.total_batch_size = opt.batch_size
-    device, git_status = select_device(opt.device, batch_size=opt.batch_size)
-    opt.device = device
-    opt.git_status = git_status
+
     if opt.local_rank != -1:
         assert torch.cuda.device_count() > opt.local_rank
         torch.cuda.set_device(opt.local_rank)
-        device = torch.device('cuda', opt.local_rank)
+        opt.device = torch.device('cuda', opt.local_rank)
         # distributed backend
         dist.init_process_group(backend='nccl', init_method='env://')
         assert opt.batch_size % opt.world_size == 0, '--batch-size must be multiple of CUDA device count'
@@ -763,7 +762,6 @@ if __name__ == '__main__':
     # Hyperparameters
     with open(opt.hyp) as f:
         hyp = yaml.load(f, Loader=yaml.SafeLoader)  # load hyps
-        f.close()
     # Train
     logger.info(opt)
     if opt.evolve <= 1:
@@ -773,7 +771,7 @@ if __name__ == '__main__':
             logger.info(
                 f"{prefix}Start with 'tensorboard --logdir {opt.project}', view at http://localhost:6006/")
             tb_writer = SummaryWriter(opt.save_dir)  # Tensorboard
-        train(hyp, opt, device, tb_writer)
+        train(hyp, opt, tb_writer)
     # Evolve hyperparameters (optional)
     else:
        # Hyperparameter evolution metadata (mutation scale 0-1, lower_limit, upper_limit)
@@ -850,7 +848,7 @@ if __name__ == '__main__':
                 hyp_[k] = hyp[k]
 
             # Train mutation
-            results = train(hyp.copy(), opt, device)
+            results = train(hyp.copy(), opt)
 
             # Write mutation results
             print_mutation(hyp_.copy(), results, yaml_file, opt.bucket)

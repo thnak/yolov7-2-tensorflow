@@ -16,7 +16,6 @@ import torch.nn.functional as F
 import torchvision
 
 
-
 try:
     import thop  # for FLOPS computation
 except ImportError:
@@ -65,8 +64,8 @@ def select_device(device='', batch_size=None):
     try:
         if 'dml' in device.lower():
             import torch_directml
-            logger.info(f'Selected dml backend')
-            s = f'{s} DirectML'
+            s = f'{s}DirectML'
+            logger.info(f'{s}')
             return torch_directml.device(torch_directml.default_device()), s
     except:
         pass

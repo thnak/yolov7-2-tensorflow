@@ -421,7 +421,8 @@ class ComputeLoss:
     """Compute losses"""
     def __init__(self, model, autobalance=False):
         super(ComputeLoss, self).__init__()
-        device = next(model.parameters()).device  # get model device
+        # device = next(model.parameters()).device  # get model device
+        device = 'cpu'
         h = model.hyp  # hyperparameters
 
         # Define criteria
@@ -499,19 +500,20 @@ class ComputeLoss:
         """Build targets for compute_loss(), input targets(image,class,x,y,w,h)"""
         na, nt = self.na, targets.shape[0]  # number of anchors, targets
         tcls, tbox, indices, anch = [], [], [], []
-        gain = torch.ones(7, device=targets.device).long()  # normalized to gridspace gain
-        ai = torch.arange(na, device=targets.device).float().view(na, 1).repeat(1, nt)  # same as .repeat_interleave(nt)
+        device = targets.device
+        gain = torch.ones(7, device=device).long()  # normalized to gridspace gain
+        ai = torch.arange(na, device=device).float().view(na, 1).repeat(1, nt)  # same as .repeat_interleave(nt)
         targets = torch.cat((targets.repeat(na, 1, 1), ai[:, :, None]), 2)  # append anchor indices
 
         g = 0.5  # bias
         off = torch.tensor([[0, 0],
                             [1, 0], [0, 1], [-1, 0], [0, -1],  # j,k,l,m
                             # [1, 1], [1, -1], [-1, 1], [-1, -1],  # jk,jm,lk,lm
-                            ], device=targets.device).float() * g  # offsets
+                            ], device=device).float() * g  # offsets
 
         for i in range(self.nl):
-            anchors = self.anchors[i]
-            gain[2:6] = torch.tensor(p[i].shape)[[3, 2, 3, 2]]  # xyxy gain
+            anchors = self.anchors[i].to(device)
+            gain[2:6] = torch.tensor(p[i].shape, device=device)[[3, 2, 3, 2]]  # xyxy gain
 
             # Match targets to anchors
             t = targets * gain
@@ -527,9 +529,9 @@ class ComputeLoss:
                 gxi = gain[[2, 3]] - gxy  # inverse
                 j, k = ((gxy % 1. < g) & (gxy > 1.)).T
                 l, m = ((gxi % 1. < g) & (gxi > 1.)).T
-                j = torch.stack((torch.ones_like(j), j, k, l, m))
-                t = t.repeat((5, 1, 1))[j]
-                offsets = (torch.zeros_like(gxy)[None] + off[:, None])[j]
+                j = torch.stack((torch.ones_like(j, device=device), j, k, l, m))
+                t = t.repeat((off.shape[0], 1, 1))[j]
+                offsets = (torch.zeros_like(gxy, device=device)[None] + off[:, None])[j]
             else:
                 t = targets[0]
                 offsets = 0
@@ -543,11 +545,11 @@ class ComputeLoss:
 
             # Append
             a = t[:, 6].long()  # anchor indices
-            indices.append((b, a, gj.clamp_(0, gain[3] - 1), gi.clamp_(0, gain[2] - 1)))  # image, anchor, grid indices
+            indices.append((b, a, gj.clamp_(0, (gain[3] - 1).to(torch.int64)), gi.clamp_(0, (gain[2] - 1).to(torch.int64))))  # image, anchor, grid indices
             tbox.append(torch.cat((gxy - gij, gwh), 1))  # box
             anch.append(anchors[a])  # anchors
             tcls.append(c)  # class
-
+            
         return tcls, tbox, indices, anch
 
 
@@ -555,7 +557,8 @@ class ComputeLossOTA:
     """Compute losses"""
     def __init__(self, model, autobalance=False):
         super(ComputeLossOTA, self).__init__()
-        device = next(model.parameters()).device  # get model device
+        # device = next(model.parameters()).device  # get model device
+        device = 'cpu'
         h = model.hyp  # hyperparameters
 
         # Define criteria
@@ -649,7 +652,7 @@ class ComputeLossOTA:
         matching_anchs = [[] for pp in p]
         
         nl = len(p)    
-        device = torch.device(targets.device)
+        device = targets.device
     
         for batch_idx in range(p[0].shape[0]):
         
@@ -811,7 +814,7 @@ class ComputeLossOTA:
                             ], device=targets.device).float() * g  # offsets
 
         for i in range(self.nl):
-            anchors = self.anchors[i]
+            anchors = self.anchors[i].to(targets.device)
             gain[2:6] = torch.tensor(p[i].shape)[[3, 2, 3, 2]]  # xyxy gain
 
             # Match targets to anchors
@@ -1298,7 +1301,7 @@ class ComputeLossAuxOTA:
         matching_gis = [[] for pp in p]
         matching_targets = [[] for pp in p]
         matching_anchs = [[] for pp in p]
-        device = torch.device(targets.device)
+        device = targets.device
         nl = len(p)    
     
         for batch_idx in range(p[0].shape[0]):
@@ -1436,12 +1439,12 @@ class ComputeLossAuxOTA:
                 matching_targets[i] = torch.cat(matching_targets[i], dim=0)
                 matching_anchs[i] = torch.cat(matching_anchs[i], dim=0)
             else:
-                matching_bs[i] = torch.tensor([], device='cuda:0', dtype=torch.int64)
-                matching_as[i] = torch.tensor([], device='cuda:0', dtype=torch.int64)
-                matching_gjs[i] = torch.tensor([], device='cuda:0', dtype=torch.int64)
-                matching_gis[i] = torch.tensor([], device='cuda:0', dtype=torch.int64)
-                matching_targets[i] = torch.tensor([], device='cuda:0', dtype=torch.int64)
-                matching_anchs[i] = torch.tensor([], device='cuda:0', dtype=torch.int64)
+                matching_bs[i] = torch.tensor([], device=device, dtype=torch.int64)
+                matching_as[i] = torch.tensor([], device=device, dtype=torch.int64)
+                matching_gjs[i] = torch.tensor([], device=device, dtype=torch.int64)
+                matching_gis[i] = torch.tensor([], device=device, dtype=torch.int64)
+                matching_targets[i] = torch.tensor([], device=device, dtype=torch.int64)
+                matching_anchs[i] = torch.tensor([], device=device, dtype=torch.int64)
 
         return matching_bs, matching_as, matching_gjs, matching_gis, matching_targets, matching_anchs
 
@@ -1455,7 +1458,7 @@ class ComputeLossAuxOTA:
         matching_gis = [[] for pp in p]
         matching_targets = [[] for pp in p]
         matching_anchs = [[] for pp in p]
-        device = torch.device(targets.device)
+        device = targets.device
         nl = len(p)    
     
         for batch_idx in range(p[0].shape[0]):
@@ -1593,12 +1596,12 @@ class ComputeLossAuxOTA:
                 matching_targets[i] = torch.cat(matching_targets[i], dim=0)
                 matching_anchs[i] = torch.cat(matching_anchs[i], dim=0)
             else:
-                matching_bs[i] = torch.tensor([], device='cuda:0', dtype=torch.int64)
-                matching_as[i] = torch.tensor([], device='cuda:0', dtype=torch.int64)
-                matching_gjs[i] = torch.tensor([], device='cuda:0', dtype=torch.int64)
-                matching_gis[i] = torch.tensor([], device='cuda:0', dtype=torch.int64)
-                matching_targets[i] = torch.tensor([], device='cuda:0', dtype=torch.int64)
-                matching_anchs[i] = torch.tensor([], device='cuda:0', dtype=torch.int64)
+                matching_bs[i] = torch.tensor([], device=device, dtype=torch.int64)
+                matching_as[i] = torch.tensor([], device=device, dtype=torch.int64)
+                matching_gjs[i] = torch.tensor([], device=device, dtype=torch.int64)
+                matching_gis[i] = torch.tensor([], device=device, dtype=torch.int64)
+                matching_targets[i] = torch.tensor([], device=device, dtype=torch.int64)
+                matching_anchs[i] = torch.tensor([], device=device, dtype=torch.int64)
 
         return matching_bs, matching_as, matching_gjs, matching_gis, matching_targets, matching_anchs              
 
@@ -1617,7 +1620,7 @@ class ComputeLossAuxOTA:
                             ], device=targets.device).float() * g  # offsets
 
         for i in range(self.nl):
-            anchors = self.anchors[i]
+            anchors = self.anchors[i].to(targets.device)
             gain[2:6] = torch.tensor(p[i].shape)[[3, 2, 3, 2]]  # xyxy gain
 
             # Match targets to anchors
