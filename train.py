@@ -45,7 +45,13 @@ logger = logging.getLogger(__name__)
 def train(hyp, opt, tb_writer=None):
     # Save run settings
     save_dir, epochs, batch_size, total_batch_size, weights, rank, freeze = \
-        Path(opt.save_dir), opt.epochs, opt.batch_size, opt.total_batch_size, opt.weights, opt.global_rank, opt.freeze    
+        Path(opt.save_dir), opt.epochs, opt.batch_size, opt.total_batch_size, opt.weights, opt.global_rank, opt.freeze   
+    wdir = save_dir / 'weights'
+    wdir.mkdir(parents=True, exist_ok=True)  # make dir
+    last = wdir / 'last.pt'
+    best = wdir / 'best.pt'
+    results_file = save_dir / 'results.txt'
+    results_file_csv = save_dir / 'results.csv' 
     with open(save_dir / 'hyp.yaml', 'w') as f:
         yaml.dump(hyp, f, sort_keys=False)
     with open(save_dir / 'opt.yaml', 'w') as f:
@@ -59,12 +65,7 @@ def train(hyp, opt, tb_writer=None):
 
 
     # Directories
-    wdir = save_dir / 'weights'
-    wdir.mkdir(parents=True, exist_ok=True)  # make dir
-    last = wdir / 'last.pt'
-    best = wdir / 'best.pt'
-    results_file = save_dir / 'results.txt'
-    results_file_csv = save_dir / 'results.csv'
+
 
 
     tag_results = ('Epoch', 'GPU_mem', 'box', 'obj',
@@ -447,9 +448,9 @@ def train(hyp, opt, tb_writer=None):
             with amp.autocast(enabled=cuda):
                 pred = model(imgs)  # forward
                 if 'loss_ota' not in hyp or hyp['loss_ota'] == 1:
-                    loss, loss_items = compute_loss_ota([pre.to('cpu') for pre in pred], targets.to('cpu'), imgs.to('cpu'))  # loss scaled by batch_size
+                    loss, loss_items = compute_loss_ota([pre.to(map_device) for pre in pred], targets.to(map_device), imgs.to(map_device))  # loss scaled by batch_size
                 else:
-                    loss, loss_items = compute_loss([pre.to('cpu') for pre in pred], targets.to('cpu'))  # loss scaled by batch_size
+                    loss, loss_items = compute_loss([pre.to(map_device) for pre in pred], targets.to(map_device))  # loss scaled by batch_size
                 if rank != -1:
                     loss *= opt.world_size  # gradient averaged between devices in DDP mode
                 if opt.quad:
@@ -475,7 +476,7 @@ def train(hyp, opt, tb_writer=None):
                 pbar.set_description(s)
 
                 # Plot
-                if plots and ni < 10:
+                if plots and ni < 10 and tb_writer:
                     f = save_dir / f'train_batch{ni}.jpg'  # filename
                     tb_writer.add_image(str(f), np.moveaxis(plot_images(
                         images=imgs, targets=targets, paths=paths, fname=f, names=names), -1, 0), ni)
@@ -749,7 +750,7 @@ if __name__ == '__main__':
 
     # DDP mode
     opt.total_batch_size = opt.batch_size
-
+    print(f'debug {opt.save_dir}')
     if opt.local_rank != -1:
         assert torch.cuda.device_count() > opt.local_rank
         torch.cuda.set_device(opt.local_rank)
@@ -770,8 +771,14 @@ if __name__ == '__main__':
             prefix = colorstr('tensorboard: ')
             logger.info(
                 f"{prefix}Start with 'tensorboard --logdir {opt.project}', view at http://localhost:6006/")
-            tb_writer = SummaryWriter(opt.save_dir)  # Tensorboard
-        train(hyp, opt, tb_writer)
+            try:
+                tb_writer = SummaryWriter(opt.save_dir)  # Tensorboard
+                logger.warning(f'{prefix}Init success')
+            except:
+                tb_writer = None
+                logger.warning(f'{prefix}Init error')
+                
+        train(hyp, opt, tb_writer=tb_writer)
     # Evolve hyperparameters (optional)
     else:
        # Hyperparameter evolution metadata (mutation scale 0-1, lower_limit, upper_limit)

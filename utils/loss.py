@@ -422,7 +422,7 @@ class ComputeLoss:
     def __init__(self, model, autobalance=False):
         super(ComputeLoss, self).__init__()
         # device = next(model.parameters()).device  # get model device
-        device = 'cpu'
+        device = next(model.parameters()).device if next(model.parameters()).device.type != 'privateuseone' else 'cpu' # get model device
         h = model.hyp  # hyperparameters
 
         # Define criteria
@@ -557,10 +557,8 @@ class ComputeLossOTA:
     """Compute losses"""
     def __init__(self, model, autobalance=False):
         super(ComputeLossOTA, self).__init__()
-        # device = next(model.parameters()).device  # get model device
-        device = 'cpu'
+        device = next(model.parameters()).device if next(model.parameters()).device.type != 'privateuseone' else 'cpu' # get model device
         h = model.hyp  # hyperparameters
-
         # Define criteria
         BCEcls = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([h['cls_pw']], device=device))
         BCEobj = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([h['obj_pw']], device=device))
