@@ -42,7 +42,7 @@ from utils.re_parameteration import Re_parameterization
 logger = logging.getLogger(__name__)
 
 
-def train(hyp, opt, tb_writer=None):
+def train(hyp, opt, tb_writer=None, data_loader={'dataloader': None, 'dataset': None, 'val_dataloader': None, 'test_dataloader': None}):
     # Save run settings
     save_dir, epochs, batch_size, total_batch_size, weights, rank, freeze = \
         Path(opt.save_dir), opt.epochs, opt.batch_size, opt.total_batch_size, opt.weights, opt.global_rank, opt.freeze   
@@ -286,17 +286,21 @@ def train(hyp, opt, tb_writer=None):
         logger.info('Using SyncBatchNorm()')
     opt.cache_images = [opt.cache_images[0]] * 2 if len(opt.cache_images) < 2 else [x for x in opt.cache_images]
     # Trainloader
-    dataloader, dataset = create_dataloader(train_path, imgsz, batch_size, gs, opt,
-                                            hyp=hyp, augment=opt.augment,
-                                            cache=opt.cache_images[0],
-                                            rect=opt.rect, rank=rank,
-                                            world_size=opt.world_size,
-                                            workers=opt.workers,
-                                            shuffle=False if opt.rect else True,
-                                            seed=opt.seed,
-                                            image_weights=opt.image_weights,
-                                            quad=opt.quad,
-                                            prefix=colorstr('train: '))
+    if data_loader['dataloader'] is None:
+        dataloader, dataset = create_dataloader(train_path, imgsz, batch_size, gs, opt,
+                                                hyp=hyp, augment=opt.augment,
+                                                cache=opt.cache_images[0],
+                                                rect=opt.rect, rank=rank,
+                                                world_size=opt.world_size,
+                                                workers=opt.workers,
+                                                shuffle=False if opt.rect else True,
+                                                seed=opt.seed,
+                                                image_weights=opt.image_weights,
+                                                quad=opt.quad,
+                                                prefix=colorstr('train: '))
+    else:
+        dataloader, dataset = data_loader['dataloader'], data_loader['dataset']
+        
     mlc = np.concatenate(dataset.labels, 0)[:, 0].max()  # max label class
     nb = len(dataloader)  # number of batches
     assert mlc < nc, 'Label class %g exceeds nc=%g in %s. Possible class labels are 0-%g' % (
@@ -304,30 +308,37 @@ def train(hyp, opt, tb_writer=None):
 
     # Process 0
     if rank in [-1, 0]:
-        val_dataloader = create_dataloader(val_path,
-                                       imgsz_test,
-                                       batch_size * 2, gs, opt,
-                                       hyp=hyp,
-                                       cache=opt.cache_images[1] if (
-                                           opt.cache_images[1] and not opt.notest) else 'no',
-                                       rect= opt.rect,
-                                       shuffle=False if opt.rect else True,
-                                       rank=-1,
-                                       world_size=opt.world_size,
-                                       workers=opt.workers,
-                                       pad=0.5, prefix=colorstr('val: '))[0]
-        if test_path != val_path:
-            test_dataloader = create_dataloader(test_path,
+        if data_loader['val_dataloader'] is None:
+            val_dataloader = create_dataloader(val_path,
                                         imgsz_test,
                                         batch_size * 2, gs, opt,
                                         hyp=hyp,
-                                        cache= 'no',
+                                        cache=opt.cache_images[1] if (
+                                            opt.cache_images[1] and not opt.notest) else 'no',
                                         rect= opt.rect,
                                         shuffle=False if opt.rect else True,
                                         rank=-1,
                                         world_size=opt.world_size,
                                         workers=opt.workers,
-                                        pad=0.5, prefix=colorstr('test: '))[0]
+                                        pad=0.5, prefix=colorstr('val: '))[0]
+        else:
+            val_dataloader = data_loader['val_dataloader']
+            
+        if test_path != val_path:
+            if data_loader['test_dataloader'] is None:
+                test_dataloader = create_dataloader(test_path,
+                                            imgsz_test,
+                                            batch_size * 2, gs, opt,
+                                            hyp=hyp,
+                                            cache= 'no',
+                                            rect= opt.rect,
+                                            shuffle=False if opt.rect else True,
+                                            rank=-1,
+                                            world_size=opt.world_size,
+                                            workers=opt.workers,
+                                            pad=0.5, prefix=colorstr('test: '))[0]
+            else:
+                test_dataloader = data_loader['test_dataloader']
         else:
             logger.info(colorstr('Val and Test is the same thing!'))
         
@@ -665,7 +676,9 @@ def train(hyp, opt, tb_writer=None):
         dist.destroy_process_group()
     if opt.evolve <= 1:
         torch.cuda.empty_cache()
-    return results_val
+    
+    data_loader = {'dataloader': dataloader, 'dataset': dataset, 'val_dataloader': val_dataloader, 'test_dataloader': test_dataloader} if opt.evolve > 1 else {'dataloader': None, 'dataset': None, 'val_dataloader': None, 'test_dataloader': None}
+    return results_val, data_loader
 
 
 if __name__ == '__main__':
@@ -714,8 +727,7 @@ if __name__ == '__main__':
     opt = parser.parse_args()
 
     # Set DDP variables
-    opt.world_size = int(os.environ['WORLD_SIZE']
-                         ) if 'WORLD_SIZE' in os.environ else 1
+    opt.world_size = int(os.environ['WORLD_SIZE']) if 'WORLD_SIZE' in os.environ else 1
     opt.global_rank = int(os.environ['RANK']) if 'RANK' in os.environ else -1
     set_logging(opt.global_rank)
     # if opt.global_rank in [-1, 0]:
@@ -814,7 +826,7 @@ if __name__ == '__main__':
         if opt.bucket:
             os.system('gsutil cp gs://%s/evolve.txt .' %
                       opt.bucket)  # download evolve.txt if exists
-
+        data_loader = {'dataloader': None, 'dataset': None, 'val_dataloader': None, 'test_dataloader': None}
         for _ in range(opt.evolve):  # generations to evolve
             a = colorstr('Evolving: ')
             logger.info(
@@ -855,7 +867,7 @@ if __name__ == '__main__':
                 hyp_[k] = hyp[k]
 
             # Train mutation
-            results = train(hyp.copy(), opt)
+            results, data_loader = train(hyp.copy(), opt)
 
             # Write mutation results
             print_mutation(hyp_.copy(), results, yaml_file, opt.bucket)
