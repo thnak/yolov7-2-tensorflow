@@ -1,14 +1,12 @@
-# this is my homework
 
-<div align="center">
-  <h1>Trường Đại Hoc Giao Thông Vận Tải<br>Phân Hiệu Tại TP. Hồ Chí Minh</h1>
+<div align="left">
+  <p>training support on windows computer systems with DirectML backend use '--device dml' to train</p>
+
 </div>
 
 </div>
 <hr>
-<div align="left">
-  <p>Nhận diện gia súc với YoLov7</p>
-</div>
+
 
 <p>Tài liệu tham khảo</p>
 <details><summary> <b>Mở rộng</b> </summary>
