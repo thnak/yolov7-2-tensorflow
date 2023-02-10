@@ -16,10 +16,9 @@ import torch
 import torchvision
 import yaml
 import pkg_resources as pkg
-
+import torch.backends.cudnn as cudnn
 from utils.google_utils import gsutil_getsize
 from utils.metrics import fitness
-from utils.torch_utils import init_torch_seeds
 # Settings
 torch.set_printoptions(linewidth=320, precision=5, profile='long')
 np.set_printoptions(linewidth=320, formatter={'float_kind': '{:11.5g}'.format})  # format short g, %precision=5
@@ -35,7 +34,14 @@ def set_logging(rank=-1, filename=None, filemode=None):
         format="%(message)s",
         level=logging.INFO if rank in [-1, 0] else logging.WARN)
 
-
+def init_torch_seeds(seed=0):
+    # Speed-reproducibility tradeoff https://pytorch.org/docs/stable/notes/randomness.html
+    torch.manual_seed(seed)
+    if seed == 0:  # slower, more reproducible
+        cudnn.benchmark, cudnn.deterministic = False, True
+    else:  # faster, less reproducible
+        cudnn.benchmark, cudnn.deterministic = True, False
+        
 def init_seeds(seed=0):
     """Initialize random number generator (RNG) seeds"""
     random.seed(seed)

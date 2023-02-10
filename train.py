@@ -28,11 +28,11 @@ from models.yolo import Model
 from utils.autoanchor import check_anchors
 from utils.datasets import create_dataloader
 from utils.general import labels_to_class_weights, increment_path, labels_to_image_weights, init_seeds, \
-    fitness, strip_optimizer, get_latest_run, check_dataset, check_file, check_git_status, check_img_size, \
-    print_mutation, set_logging, one_cycle, colorstr
+    fitness, strip_optimizer, get_latest_run, check_dataset, check_file, check_img_size, \
+    print_mutation, set_logging, one_cycle, colorstr, check_requirements
 from utils.google_utils import attempt_download
 from utils.loss import ComputeLoss, ComputeLossOTA, ComputeLossAuxOTA
-from utils.plots import plot_images, plot_labels, plot_results, plot_evolution
+from utils.plots import plot_images, plot_results, plot_evolution
 from utils.torch_utils import ModelEMA, select_device, intersect_dicts, torch_distributed_zero_first, is_parallel, time_synchronized
 from utils.wandb_logging.wandb_utils import WandbLogger, check_wandb_resume
 # from utils.autobatch import check_train_batch_size
@@ -56,8 +56,11 @@ def train(hyp, opt, tb_writer=None, data_loader={'dataloader': None, 'dataset': 
         yaml.dump(hyp, f, sort_keys=False)
     with open(save_dir / 'opt.yaml', 'w') as f:
         yaml.dump(vars(opt), f, sort_keys=False)
-    
-    device, git_status = select_device(opt.device, batch_size=opt.batch_size)
+    if not isinstance(opt.device, torch.device):
+        device, git_status = select_device(opt.device, batch_size=opt.batch_size)
+    else:
+        device =  opt.device
+        git_status = opt.git_status
     opt.device = device
     opt.git_status = git_status
     logger.info(colorstr('hyperparameters: ') +
@@ -298,6 +301,7 @@ def train(hyp, opt, tb_writer=None, data_loader={'dataloader': None, 'dataset': 
                                                 image_weights=opt.image_weights,
                                                 quad=opt.quad,
                                                 prefix=colorstr('train: '))
+        data_loader['dataloader'], data_loader['dataset'] = dataloader, dataset
     else:
         dataloader, dataset = data_loader['dataloader'], data_loader['dataset']
         
@@ -321,6 +325,7 @@ def train(hyp, opt, tb_writer=None, data_loader={'dataloader': None, 'dataset': 
                                         world_size=opt.world_size,
                                         workers=opt.workers,
                                         pad=0.5, prefix=colorstr('val: '))[0]
+            data_loader['val_dataloader'] = val_dataloader
         else:
             val_dataloader = data_loader['val_dataloader']
             
@@ -337,6 +342,7 @@ def train(hyp, opt, tb_writer=None, data_loader={'dataloader': None, 'dataset': 
                                             world_size=opt.world_size,
                                             workers=opt.workers,
                                             pad=0.5, prefix=colorstr('test: '))[0]
+                data_loader['test_dataloader'] = test_dataloader
             else:
                 test_dataloader = data_loader['test_dataloader']
         else:
@@ -677,8 +683,7 @@ def train(hyp, opt, tb_writer=None, data_loader={'dataloader': None, 'dataset': 
     if opt.evolve <= 1:
         torch.cuda.empty_cache()
     
-    data_loader = {'dataloader': dataloader, 'dataset': dataset, 'val_dataloader': val_dataloader, 'test_dataloader': test_dataloader} if opt.evolve > 1 else {'dataloader': None, 'dataset': None, 'val_dataloader': None, 'test_dataloader': None}
-    return results_val, data_loader
+    return results, data_loader
 
 
 if __name__ == '__main__':
@@ -857,7 +862,10 @@ if __name__ == '__main__':
                          * npr.random() * s + 1).clip(0.3, 3.0)
                 for i, k in enumerate(hyp.keys()):  # plt.hist(v.ravel(), 300)
                     if k in meta:
-                        hyp[k] = float(x[i + 7] * v[i])  # mutate
+                        try:
+                            hyp[k] = float(x[i + 7] * v[i])  # mutate
+                        except:
+                            pass
             # Constrain to limits
             hyp_ = meta.copy()
             for k, v in meta.items():
@@ -867,7 +875,7 @@ if __name__ == '__main__':
                 hyp_[k] = hyp[k]
 
             # Train mutation
-            results, data_loader = train(hyp.copy(), opt)
+            results, data_loader = train(hyp.copy(), opt, data_loader=data_loader)
 
             # Write mutation results
             print_mutation(hyp_.copy(), results, yaml_file, opt.bucket)

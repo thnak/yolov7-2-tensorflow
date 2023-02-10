@@ -10,11 +10,11 @@ from copy import deepcopy
 from pathlib import Path
 from termcolor import colored
 import torch
-import torch.backends.cudnn as cudnn
+
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision
-
+from utils.general import check_requirements
 
 try:
     import thop  # for FLOPS computation
@@ -33,16 +33,6 @@ def torch_distributed_zero_first(local_rank: int):
     yield
     if local_rank == 0:
         torch.distributed.barrier()
-
-
-def init_torch_seeds(seed=0):
-    # Speed-reproducibility tradeoff https://pytorch.org/docs/stable/notes/randomness.html
-    torch.manual_seed(seed)
-    if seed == 0:  # slower, more reproducible
-        cudnn.benchmark, cudnn.deterministic = False, True
-    else:  # faster, less reproducible
-        cudnn.benchmark, cudnn.deterministic = True, False
-
 
 def date_modified(path=__file__):
     # return human-readable file modification date, i.e. '2021-3-26'
@@ -63,6 +53,7 @@ def select_device(device='', batch_size=None):
     s = f'YOLOv7 🚀 git commit {git_describe() or date_modified()} torch {torch.__version__} '  # string
     try:
         if 'dml' in device.lower():
+            check_requirements('torch-directml')
             import torch_directml
             s = f'{s}DirectML'
             logger.info(f'{s}')
