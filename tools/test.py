@@ -55,7 +55,7 @@ def test(data,
         (save_dir / 'labels' if save_txt else save_dir).mkdir(parents=True, exist_ok=True)  # make dir
 
         # Load model
-        map_device = 'cpu' if device.type=='privateuseone' else device
+        map_device = 'cpu' if device.type =='privateuseone' else device
         model = attempt_load(weights, map_location=map_device)  # load FP32 model
         gs = max(int(model.stride.max()), 32)  # grid size (max stride)
         imgsz = check_img_size(imgsz, s=gs)  # check img_size

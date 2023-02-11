@@ -56,21 +56,16 @@ def train(hyp, opt, tb_writer=None, data_loader={'dataloader': None, 'dataset': 
         yaml.dump(hyp, f, sort_keys=False)
     with open(save_dir / 'opt.yaml', 'w') as f:
         yaml.dump(vars(opt), f, sort_keys=False)
-    if not isinstance(opt.device, torch.device):
+    if not hasattr(opt, 'git_status'): 
         device, git_status = select_device(opt.device, batch_size=opt.batch_size)
     else:
-        device =  opt.device
+        device = opt.device
         git_status = opt.git_status
     opt.device = device
     opt.git_status = git_status
     logger.info(colorstr('hyperparameters: ') +
                 ', '.join(f'{k}={v}' for k, v in hyp.items()))
-
-
     # Directories
-
-
-
     tag_results = ('Epoch', 'GPU_mem', 'box', 'obj',
                    'cls', 'total', 'labels', 'img_size')
     if not os.path.exists(str(results_file_csv)):
@@ -126,7 +121,7 @@ def train(hyp, opt, tb_writer=None, data_loader={'dataloader': None, 'dataset': 
             state_dict, model.state_dict(), exclude=exclude)  # intersect
         model.load_state_dict(state_dict, strict=False)  # load
         ckpt['best_fitness'] = ckpt['best_fitness'] if 'best_fitness' in ckpt else 'unknown'
-        logger.info('Transferred %g/%g items from %s, best fitness %s' %(len(state_dict), len(model.state_dict()), weights, ckpt['best_fitness']))  # report
+        logger.info('Transferred %g/%g items from: %s, best fitness: %s' %(len(state_dict), len(model.state_dict()), weights, ckpt['best_fitness']))  # report
     else:
         model = Model(opt.cfg, ch=3, nc=nc, anchors=hyp.get('anchors')).to(device)  # create
 
@@ -523,7 +518,7 @@ def train(hyp, opt, tb_writer=None, data_loader={'dataloader': None, 'dataset': 
                                               dataloader=val_dataloader,
                                               save_dir=save_dir,
                                               verbose= False,
-                                              plots=plots and final_epoch,
+                                              plots=plots and final_epoch and device.type != 'privateuseone',
                                               wandb_logger=wandb_logger,
                                               compute_loss=compute_loss if device.type != 'privateuseone' else None,
                                               is_coco=is_coco,
@@ -621,7 +616,7 @@ def train(hyp, opt, tb_writer=None, data_loader={'dataloader': None, 'dataset': 
                                    imgsz=imgsz_test,
                                    conf_thres=0.001,
                                    iou_thres=0.7,
-                                   model=attempt_load(best, device).half() if device.type == 'cuda' else attempt_load(best, device),
+                                   model=attempt_load(best, map_device).half() if device.type == 'cuda' else attempt_load(best, map_device),
                                    single_cls=opt.single_cls,
                                    dataloader=val_dataloader,
                                    save_dir=save_dir,
@@ -639,7 +634,7 @@ def train(hyp, opt, tb_writer=None, data_loader={'dataloader': None, 'dataset': 
                                     imgsz=imgsz_test,
                                     conf_thres=0.001,
                                     iou_thres=0.7,
-                                    model=attempt_load(best, device).half() if device.type == 'cuda' else attempt_load(best, device),
+                                    model=attempt_load(best, map_device).half() if device.type == 'cuda' else attempt_load(best, map_device),
                                     single_cls=opt.single_cls,
                                     dataloader=test_dataloader,
                                     save_dir=save_dir,
@@ -657,20 +652,18 @@ def train(hyp, opt, tb_writer=None, data_loader={'dataloader': None, 'dataset': 
                 strip_optimizer(f, str(f).replace(
                     'best.pt', 'striped.pt'), halfModel=True)
                 if 'best.pt' in str(f):
-                    path_cfg = opt.cfg
-                    path_cfg = path_cfg.replace('training', 'deploy')
                     output_path = str(f)
                     output_path = output_path.replace(
                         'best.pt', 'deploy_best.pt')
                     output_path = output_path.replace(
                         'last.pt', 'deploy_best.pt')
-                    try:
-                        if opt.evolve <= 1:
-                            Re_parameterization(inputWeightPath=str(f),
-                                                outputWeightPath=output_path,
-                                                cfgPath=path_cfg, nc=nc, device=device)
-                    except Exception as ex:
-                        print(ex)
+                    # try:
+                    #     if opt.evolve <= 1:
+                    Re_parameterization(inputWeightPath=str(f),
+                                        outputWeightPath=output_path,
+                                        device=map_device)
+                    # except Exception as ex:
+                    #     print(ex)
         if opt.bucket:
             os.system(f'gsutil cp {final} gs://{opt.bucket}/weights')  # upload
         if wandb_logger.wandb and opt.evolve <= 1:  # Log the stripped model

@@ -65,8 +65,7 @@ if __name__ == '__main__':
         logging.info(f'# Load PyTorch model')
         device, gitstatus = select_device(opt.device)
         map_device = 'cpu' if device.type == 'privateuseone' else device
-        model = attempt_load(
-            weight, map_location=map_device)  # load FP32 model
+        model = attempt_load(weight, map_location=map_device)  # load FP32 model
         ckpt = torch.load(weight, map_location=map_device)
 
         best_fitness = ckpt['best_fitness'].tolist() if 'best_fitness' in ckpt else 'unknown'
@@ -87,7 +86,7 @@ if __name__ == '__main__':
         gs = int(max(model.stride))  # grid size (max stride)
 
         input_shape = ckpt['input shape'] if 'input shape' in ckpt else [3,640,640]
-        img = torch.zeros(opt.batch_size, *input_shape).to(device)
+        img = torch.zeros(opt.batch_size, *input_shape).to(map_device)
         model.eval()
         if device.type in ['cuda', 'dml'] and opt.fp16:
             img, model = img.half(), model.half()
@@ -208,7 +207,7 @@ if __name__ == '__main__':
                 logging.info(
                     f'{prefix} Starting export end2end onnx model for {colorstr(x)}')
                 model = End2End(model, opt.topk_all, opt.iou_thres,
-                                opt.conf_thres, opt.max_hw, device, len(labels))
+                                opt.conf_thres, opt.max_hw, map_device, len(labels))
                 if opt.end2end and opt.max_hw is None:
                     output_names = ['num_dets', 'det_boxes',
                                     'det_scores', 'det_classes']
