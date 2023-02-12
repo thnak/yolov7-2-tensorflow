@@ -7,7 +7,7 @@ import csv
 from copy import deepcopy
 from pathlib import Path
 from threading import Thread
-
+from datetime import datetime
 import numpy as np
 import torch.distributed as dist
 import torch.nn as nn
@@ -120,12 +120,12 @@ def train(hyp, opt, tb_writer=None,
         state_dict = intersect_dicts(
             state_dict, model.state_dict(), exclude=exclude)  # intersect
         model.load_state_dict(state_dict, strict=False)  # load
-        ckpt['best_fitness'] = ckpt['best_fitness'] if 'best_fitness' in ckpt else 'unknown'
+        ckpt['best_fitness'] = ckpt['best_fitness'] if 'best fitness' in ckpt else 'unknown'
         ckpt['best_fitness'] = ckpt['best_fitness'].tolist()[0] if isinstance(ckpt['best_fitness'], np.ndarray) else \
         ckpt['best_fitness']
-        model_version = ckpt['model version'] if 'model version' in ckpt else 0
+        model_version = ckpt['model_version'] if 'model_version' in ckpt else 0
         logger.info('Transferred %g/%g items from: %s, best fitness: %s, version: %s' % (
-        len(state_dict), len(model.state_dict()), weights, ckpt['best_fitness'], model_version))  # report
+        len(state_dict), len(model.state_dict()), weights, ckpt['best_fitness'], model_version if model_version != 0 else 'Init new model'))  # report
         
     else:
         model = Model(opt.cfg, ch=3, nc=nc, anchors=hyp.get('anchors')).to(device)  # create
@@ -569,22 +569,20 @@ def train(hyp, opt, tb_writer=None,
 
             # Save model
             if (not opt.nosave) or (final_epoch and opt.evolve < 1):  # if save
-                from datetime import datetime
                 ckpt = {
-                        'model version': model_version + 1,
+                        'model_version': model_version + 1,
                         'epoch': epoch,
-                        'best fitness': best_fitness,
-                        'training results': results_file.read_text(),
+                        'best_fitness': best_fitness,
+                        'training_results': results_file.read_text(),
                         'model': deepcopy(model.module if is_parallel(model) else model).float(),
-                        'input shape': imgs.shape[1:],  # BCWH to CWH
+                        'input_shape': list(imgs.shape[1:]) if isinstance(imgs.shape[1:], torch.Size) else imgs.shape[1:],  # BCWH to CWH
                         'ema': deepcopy(ema.ema).float(),
                         'updates': ema.updates,
                         'optimizer': optimizer.state_dict(),
                         'wandb_id': wandb_logger.wandb_run.id if wandb_logger.wandb else None,
                         'hyp': hyp,
-                        'opt': vars(opt),
-                        'training gitstatus': opt.git_status,
-                        'training date': datetime.now().isoformat("#")
+                        'training_opt': vars(opt),
+                        'training_date': datetime.now().isoformat("#")
                         }
 
                 # Save last, best and delete
@@ -778,7 +776,6 @@ if __name__ == '__main__':
 
     # DDP mode
     opt.total_batch_size = opt.batch_size
-    print(f'debug {opt.save_dir}')
     if opt.local_rank != -1:
         assert torch.cuda.device_count() > opt.local_rank
         torch.cuda.set_device(opt.local_rank)

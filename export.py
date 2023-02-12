@@ -78,7 +78,7 @@ if __name__ == '__main__':
         model_Gflop = model.info()
         gs = int(max(model.stride))  # grid size (max stride)
 
-        input_shape = ckpt['input shape'] if 'input shape' in ckpt else [3,640,640]
+        input_shape = ckpt['input_shape'] if 'input_shape' in ckpt else [3,640,640]
         img = torch.zeros(opt.batch_size, *input_shape).to(map_device)
         model.eval()
         if device.type in ['cuda', 'dml'] and opt.fp16:
@@ -238,26 +238,23 @@ if __name__ == '__main__':
                 except Exception as e:
                     logging.info(f'{prefix} Simplifier failure❌: {e}')
 
-            onnx.save(onnx_model, f=f)
+            # onnx.save(onnx_model, f=f)
 
-            onnx_model = onnx.load(f)  # load onnx model
+            # onnx_model = onnx.load(f)  # load onnx model
             onnx.checker.check_model(onnx_model)  # check onnx model
             logging.info(f'{prefix} writing metadata for model...')
-            onnx_MetaData = {'export gitstatus': gitstatus,
-                             'opset version': str(opt.onnx_opset),
+            onnx_MetaData = {'export_gitstatus': gitstatus,
                              'stride': str(gs),
                              'nc': str(len(labels)),
                              'names': str(labels), 
-                             'ort-nms': 'True' if opt.end2end and opt.max_hw else 'False',
-                             'export date': datetime.datetime.now().isoformat('#'),
-                             'author': str(opt.author),
-                             'exporting opt': str(opt),
+                             'export_date': datetime.datetime.now().isoformat('#'),
+                             'exporting_opt': vars(opt),
                              }
             key_ = colorstr('yellow','key:')
             for index, key in enumerate(ckpt):
-                metadata = onnx_model.metadata_props.add()
                 if key == 'model':
-                    continue
+                    continue                
+                metadata = onnx_model.metadata_props.add()
                 metadata.key = key
                 metadata.value = str(ckpt[key])
                 logging.info(f'{key_} {key}, value: {ckpt[key]}')
