@@ -14,6 +14,7 @@ import time
 import warnings
 import logging
 import os
+import numpy as np
 sys.path.append('./')  # to run '$ python *.py' files in subdirectories
 
 
@@ -68,8 +69,9 @@ if __name__ == '__main__':
         model = attempt_load(weight, map_location=map_device)  # load FP32 model
         ckpt = torch.load(weight, map_location=map_device)
 
-        best_fitness = ckpt['best_fitness'].tolist() if 'best_fitness' in ckpt else 'unknown'
-        best_fitness = str(best_fitness[0]) if isinstance(best_fitness, (tuple, list)) else str(best_fitness)
+        ckpt['best_fitness'] = ckpt['best_fitness'] if 'best_fitness' in ckpt else 'unknown'
+        ckpt['best_fitness'] = ckpt['best_fitness'].tolist()[0] if isinstance(ckpt['best_fitness'], np.ndarray) else ckpt['best_fitness']
+        best_fitness = str(ckpt['best_fitness'])
         
         epoch = ckpt['epoch'] if 'epoch' in ckpt else 'unknown'
         training_results = ckpt['training_results'] if 'training_results' in ckpt else 'unknown'

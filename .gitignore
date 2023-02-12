@@ -3,6 +3,8 @@ runs/
 models/*.pt
 models/*.ptl
 models/*.onnx
+*.txt
+*.png
 *.npy
 TrainRes/train
 TrainRes/val
@@ -14,3 +16,4 @@ wandb/
 TrainRes/
 coco128/
 coco/
+.idea

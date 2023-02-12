@@ -29,34 +29,35 @@ from utils.autoanchor import check_anchors
 from utils.datasets import create_dataloader
 from utils.general import labels_to_class_weights, increment_path, labels_to_image_weights, init_seeds, \
     fitness, strip_optimizer, get_latest_run, check_dataset, check_file, check_img_size, \
-    print_mutation, set_logging, one_cycle, colorstr, check_requirements
+    print_mutation, set_logging, one_cycle, colorstr
 from utils.google_utils import attempt_download
 from utils.loss import ComputeLoss, ComputeLossOTA, ComputeLossAuxOTA
 from utils.plots import plot_images, plot_results, plot_evolution
-from utils.torch_utils import ModelEMA, select_device, intersect_dicts, torch_distributed_zero_first, is_parallel, time_synchronized
+from utils.torch_utils import ModelEMA, select_device, intersect_dicts, torch_distributed_zero_first, is_parallel, \
+    time_synchronized
 from utils.wandb_logging.wandb_utils import WandbLogger, check_wandb_resume
 # from utils.autobatch import check_train_batch_size
 from utils.re_parameteration import Re_parameterization
 
-
 logger = logging.getLogger(__name__)
 
 
-def train(hyp, opt, tb_writer=None, data_loader={'dataloader': None, 'dataset': None, 'val_dataloader': None, 'test_dataloader': None}):
+def train(hyp, opt, tb_writer=None,
+          data_loader={'dataloader': None, 'dataset': None, 'val_dataloader': None, 'test_dataloader': None}):
     # Save run settings
     save_dir, epochs, batch_size, total_batch_size, weights, rank, freeze = \
-        Path(opt.save_dir), opt.epochs, opt.batch_size, opt.total_batch_size, opt.weights, opt.global_rank, opt.freeze   
+        Path(opt.save_dir), opt.epochs, opt.batch_size, opt.total_batch_size, opt.weights, opt.global_rank, opt.freeze
     wdir = save_dir / 'weights'
     wdir.mkdir(parents=True, exist_ok=True)  # make dir
     last = wdir / 'last.pt'
     best = wdir / 'best.pt'
     results_file = save_dir / 'results.txt'
-    results_file_csv = save_dir / 'results.csv' 
+    results_file_csv = save_dir / 'results.csv'
     with open(save_dir / 'hyp.yaml', 'w') as f:
         yaml.dump(hyp, f, sort_keys=False)
     with open(save_dir / 'opt.yaml', 'w') as f:
         yaml.dump(vars(opt), f, sort_keys=False)
-    if not hasattr(opt, 'git_status'): 
+    if not hasattr(opt, 'git_status'):
         device, git_status = select_device(opt.device, batch_size=opt.batch_size)
     else:
         device = opt.device
@@ -83,8 +84,6 @@ def train(hyp, opt, tb_writer=None, data_loader={'dataloader': None, 'dataset': 
         data_dict = yaml.load(f, Loader=yaml.SafeLoader)  # data dict
     is_coco = opt.data.endswith('coco.yaml')
 
-    
-    # Logging- Doing this before checking the dataset. Might update data_dict
     loggers = {'wandb': None}  # loggers dict
     map_device = 'cpu' if device.type == 'privateuseone' else device
     if rank in [-1, 0]:
@@ -111,7 +110,7 @@ def train(hyp, opt, tb_writer=None, data_loader={'dataloader': None, 'dataset': 
     if pretrained:
         with torch_distributed_zero_first(rank):
             attempt_download(weights)  # download if not found locally
-        
+
         ckpt = torch.load(weights, map_location=map_device)  # load checkpoint
         model = Model(opt.cfg or ckpt['model'].yaml, ch=3, nc=nc, anchors=hyp.get('anchors')).to(device)  # create
         exclude = ['anchor'] if (opt.cfg or hyp.get(
@@ -121,7 +120,10 @@ def train(hyp, opt, tb_writer=None, data_loader={'dataloader': None, 'dataset': 
             state_dict, model.state_dict(), exclude=exclude)  # intersect
         model.load_state_dict(state_dict, strict=False)  # load
         ckpt['best_fitness'] = ckpt['best_fitness'] if 'best_fitness' in ckpt else 'unknown'
-        logger.info('Transferred %g/%g items from: %s, best fitness: %s' %(len(state_dict), len(model.state_dict()), weights, ckpt['best_fitness']))  # report
+        ckpt['best_fitness'] = ckpt['best_fitness'].tolist()[0] if isinstance(ckpt['best_fitness'], np.ndarray) else \
+        ckpt['best_fitness']
+        logger.info('Transferred %g/%g items from: %s, best fitness: %s' % (
+        len(state_dict), len(model.state_dict()), weights, ckpt['best_fitness']))  # report
     else:
         model = Model(opt.cfg, ch=3, nc=nc, anchors=hyp.get('anchors')).to(device)  # create
 
@@ -146,7 +148,7 @@ def train(hyp, opt, tb_writer=None, data_loader={'dataloader': None, 'dataset': 
     # accumulate loss before optimizing
     accumulate = max(round(nbs / total_batch_size), 1)
     hyp['weight_decay'] *= total_batch_size * \
-        accumulate / nbs  # scale weight_decay
+                           accumulate / nbs  # scale weight_decay
     logger.info(f"Scaled weight_decay = {hyp['weight_decay']}")
 
     pg0, pg1, pg2 = [], [], []  # optimizer parameter groups
@@ -230,8 +232,9 @@ def train(hyp, opt, tb_writer=None, data_loader={'dataloader': None, 'dataset': 
     del pg0, pg1, pg2
 
     if opt.linear_lr:
-        def lf(x): return (1 - x / (epochs - 1)) * \
-            (1.0 - hyp['lrf']) + hyp['lrf']  # linear
+        def lf(x):
+            return (1 - x / (epochs - 1)) * \
+                (1.0 - hyp['lrf']) + hyp['lrf']  # linear
     else:
         lf = one_cycle(1, hyp['lrf'], epochs)  # cosine 1->hyp['lrf']
 
@@ -299,7 +302,7 @@ def train(hyp, opt, tb_writer=None, data_loader={'dataloader': None, 'dataset': 
         data_loader['dataloader'], data_loader['dataset'] = dataloader, dataset
     else:
         dataloader, dataset = data_loader['dataloader'], data_loader['dataset']
-        
+
     mlc = np.concatenate(dataset.labels, 0)[:, 0].max()  # max label class
     nb = len(dataloader)  # number of batches
     assert mlc < nc, 'Label class %g exceeds nc=%g in %s. Possible class labels are 0-%g' % (
@@ -309,41 +312,40 @@ def train(hyp, opt, tb_writer=None, data_loader={'dataloader': None, 'dataset': 
     if rank in [-1, 0]:
         if data_loader['val_dataloader'] is None:
             val_dataloader = create_dataloader(val_path,
-                                        imgsz_test,
-                                        batch_size * 2, gs, opt,
-                                        hyp=hyp,
-                                        cache=opt.cache_images[1] if (
-                                            opt.cache_images[1] and not opt.notest) else 'no',
-                                        rect= opt.rect,
-                                        shuffle=False if opt.rect else True,
-                                        rank=-1,
-                                        world_size=opt.world_size,
-                                        workers=opt.workers,
-                                        pad=0.5, prefix=colorstr('val: '))[0]
+                                               imgsz_test,
+                                               batch_size * 2, gs, opt,
+                                               hyp=hyp,
+                                               cache=opt.cache_images[1] if (
+                                                       opt.cache_images[1] and not opt.notest) else 'no',
+                                               rect=opt.rect,
+                                               shuffle=False if opt.rect else True,
+                                               rank=-1,
+                                               world_size=opt.world_size,
+                                               workers=opt.workers,
+                                               pad=0.5, prefix=colorstr('val: '))[0]
             data_loader['val_dataloader'] = val_dataloader
         else:
             val_dataloader = data_loader['val_dataloader']
-            
+
         if test_path != val_path:
             if data_loader['test_dataloader'] is None:
                 test_dataloader = create_dataloader(test_path,
-                                            imgsz_test,
-                                            batch_size * 2, gs, opt,
-                                            hyp=hyp,
-                                            cache= 'no',
-                                            rect= opt.rect,
-                                            shuffle=False if opt.rect else True,
-                                            rank=-1,
-                                            world_size=opt.world_size,
-                                            workers=opt.workers,
-                                            pad=0.5, prefix=colorstr('test: '))[0]
+                                                    imgsz_test,
+                                                    batch_size * 2, gs, opt,
+                                                    hyp=hyp,
+                                                    cache='no',
+                                                    rect=opt.rect,
+                                                    shuffle=False if opt.rect else True,
+                                                    rank=-1,
+                                                    world_size=opt.world_size,
+                                                    workers=opt.workers,
+                                                    pad=0.5, prefix=colorstr('test: '))[0]
                 data_loader['test_dataloader'] = test_dataloader
             else:
                 test_dataloader = data_loader['test_dataloader']
         else:
             logger.info(colorstr('Val and Test is the same thing!'))
-        
-        
+
         if not opt.resume:
             labels = np.concatenate(dataset.labels, 0)
             c = torch.tensor(labels[:, 0])  # classes
@@ -386,7 +388,7 @@ def train(hyp, opt, tb_writer=None, data_loader={'dataloader': None, 'dataset': 
     results = (0, 0, 0, 0, 0, 0, 0)
     scheduler.last_epoch = start_epoch - 1  # do not move
     scaler = amp.GradScaler(enabled=cuda)
-    compute_loss_ota = ComputeLossOTA(model) if not opt.p6 else ComputeLossAuxOTA(model) # init loss class
+    compute_loss_ota = ComputeLossOTA(model) if not opt.p6 else ComputeLossAuxOTA(model)  # init loss class
     compute_loss = ComputeLoss(model)  # init loss class
     logger.info(f'Image sizes {imgsz} train, {imgsz_test} test\n'
                 f'Using {dataloader.num_workers} dataloader workers\n'
@@ -409,7 +411,7 @@ def train(hyp, opt, tb_writer=None, data_loader={'dataloader': None, 'dataset': 
             # Broadcast if DDP
             if rank != -1:
                 indices = (torch.tensor(dataset.indices) if rank ==
-                           0 else torch.zeros(dataset.n)).int()
+                                                            0 else torch.zeros(dataset.n)).int()
                 dist.broadcast(indices, 0)
                 if rank != 0:
                     dataset.indices = indices.cpu().numpy()
@@ -460,9 +462,11 @@ def train(hyp, opt, tb_writer=None, data_loader={'dataloader': None, 'dataset': 
             with amp.autocast(enabled=cuda):
                 pred = model(imgs)  # forward
                 if 'loss_ota' not in hyp or hyp['loss_ota'] == 1:
-                    loss, loss_items = compute_loss_ota([pre.to(map_device) for pre in pred], targets.to(map_device), imgs.to(map_device))  # loss scaled by batch_size
+                    loss, loss_items = compute_loss_ota([pre.to(map_device) for pre in pred], targets.to(map_device),
+                                                        imgs.to(map_device))  # loss scaled by batch_size
                 else:
-                    loss, loss_items = compute_loss([pre.to(map_device) for pre in pred], targets.to(map_device))  # loss scaled by batch_size
+                    loss, loss_items = compute_loss([pre.to(map_device) for pre in pred],
+                                                    targets.to(map_device))  # loss scaled by batch_size
                 if rank != -1:
                     loss *= opt.world_size  # gradient averaged between devices in DDP mode
                 if opt.quad:
@@ -484,7 +488,8 @@ def train(hyp, opt, tb_writer=None, data_loader={'dataloader': None, 'dataset': 
                 mloss = (mloss * i + loss_items.to(device)) / (i + 1)  # update mean losses
                 mem = '%.3gG' % (torch.cuda.memory_reserved() / 1E9 if torch.cuda.is_available() else 0)  # (GB)
                 s = ('%10s' * 2 + '%10.4g' * 6) % ('%g/%g' % (epoch,
-                                                              epochs - 1), mem, *mloss, targets.shape[0], imgs.shape[-1])
+                                                              epochs - 1), mem, *mloss, targets.shape[0],
+                                                   imgs.shape[-1])
                 pbar.set_description(s)
 
                 # Plot
@@ -517,7 +522,7 @@ def train(hyp, opt, tb_writer=None, data_loader={'dataloader': None, 'dataset': 
                                               single_cls=opt.single_cls,
                                               dataloader=val_dataloader,
                                               save_dir=save_dir,
-                                              verbose= False,
+                                              verbose=False,
                                               plots=plots and final_epoch and device.type != 'privateuseone',
                                               wandb_logger=wandb_logger,
                                               compute_loss=compute_loss if device.type != 'privateuseone' else None,
@@ -565,7 +570,7 @@ def train(hyp, opt, tb_writer=None, data_loader={'dataloader': None, 'dataset': 
                         'best_fitness': best_fitness,
                         'training_results': results_file.read_text(),
                         'model': deepcopy(model.module if is_parallel(model) else model).float(),
-                        'input shape': imgs.shape[1:], #BCWH to CWH
+                        'input shape': imgs.shape[1:],  # BCWH to CWH
                         'ema': deepcopy(ema.ema).float(),
                         'updates': ema.updates,
                         'optimizer': optimizer.state_dict(),
@@ -584,9 +589,9 @@ def train(hyp, opt, tb_writer=None, data_loader={'dataloader': None, 'dataset': 
                     torch.save(ckpt, wdir / 'best_{:03d}.pt'.format(epoch))
                 if epoch == 0:
                     torch.save(ckpt, wdir / 'epoch_{:03d}.pt'.format(epoch))
-                elif ((epoch+1) % 25) == 0:
+                elif ((epoch + 1) % 25) == 0:
                     torch.save(ckpt, wdir / 'epoch_{:03d}.pt'.format(epoch))
-                elif epoch >= (epochs-5):
+                elif epoch >= (epochs - 5):
                     torch.save(ckpt, wdir / 'epoch_{:03d}.pt'.format(epoch))
                 if wandb_logger.wandb:
                     if ((epoch + 1) % opt.save_period == 0 and not final_epoch) and opt.save_period != -1:
@@ -602,7 +607,7 @@ def train(hyp, opt, tb_writer=None, data_loader={'dataloader': None, 'dataset': 
             plot_results(save_dir=save_dir)  # save as results.png
             if wandb_logger.wandb:
                 files = ['results.png', 'confusion_matrix.png', *
-                         [f'{x}_curve.png' for x in ('F1', 'PR', 'P', 'R')]]
+                [f'{x}_curve.png' for x in ('F1', 'PR', 'P', 'R')]]
                 wandb_logger.log({"Results": [wandb_logger.wandb.Image(str(save_dir / f), caption=f) for f in files
                                               if (save_dir / f).exists()]})
         logger.info('%g epochs completed in %.3f hours.\n' %
@@ -612,39 +617,43 @@ def train(hyp, opt, tb_writer=None, data_loader={'dataloader': None, 'dataset': 
             prefix = colorstr('Validating')
             logger.info(f'{prefix} model {best}.')
             results_val, _, _ = tester(opt.data,
-                                   batch_size=batch_size * 2,
-                                   imgsz=imgsz_test,
-                                   conf_thres=0.001,
-                                   iou_thres=0.7,
-                                   model=attempt_load(best, map_device).half() if device.type == 'cuda' else attempt_load(best, map_device),
-                                   single_cls=opt.single_cls,
-                                   dataloader=val_dataloader,
-                                   save_dir=save_dir,
-                                   save_json=is_coco,
-                                   verbose=True,
-                                   plots=False,
-                                   is_coco=is_coco,
-                                   v5_metric=opt.v5_metric)
-            
+                                       batch_size=batch_size * 2,
+                                       imgsz=imgsz_test,
+                                       conf_thres=0.001,
+                                       iou_thres=0.7,
+                                       model=attempt_load(best,
+                                                          map_device).half() if device.type == 'cuda' else attempt_load(
+                                           best, map_device),
+                                       single_cls=opt.single_cls,
+                                       dataloader=val_dataloader,
+                                       save_dir=save_dir,
+                                       save_json=is_coco,
+                                       verbose=True,
+                                       plots=False,
+                                       is_coco=is_coco,
+                                       v5_metric=opt.v5_metric)
+
             prefix = colorstr('Testing')
             if opt.evolve < 1 and test_path != val_path:
                 logger.info(f'{prefix} model {best}.')
                 results_test, _, _ = tester(opt.data,
-                                    batch_size=batch_size * 2,
-                                    imgsz=imgsz_test,
-                                    conf_thres=0.001,
-                                    iou_thres=0.7,
-                                    model=attempt_load(best, map_device).half() if device.type == 'cuda' else attempt_load(best, map_device),
-                                    single_cls=opt.single_cls,
-                                    dataloader=test_dataloader,
-                                    save_dir=save_dir,
-                                    save_json=is_coco,
-                                    verbose=True,
-                                    plots=False,
-                                    is_coco=is_coco,
-                                    v5_metric=opt.v5_metric)            
+                                            batch_size=batch_size * 2,
+                                            imgsz=imgsz_test,
+                                            conf_thres=0.001,
+                                            iou_thres=0.7,
+                                            model=attempt_load(best,
+                                                               map_device).half() if device.type == 'cuda' else attempt_load(
+                                                best, map_device),
+                                            single_cls=opt.single_cls,
+                                            dataloader=test_dataloader,
+                                            save_dir=save_dir,
+                                            save_json=is_coco,
+                                            verbose=True,
+                                            plots=False,
+                                            is_coco=is_coco,
+                                            v5_metric=opt.v5_metric)
 
-        # Strip optimizers
+                # Strip optimizers
         final = best if best.exists() else last  # final model
         for f in last, best:
             if f.exists():
@@ -675,52 +684,55 @@ def train(hyp, opt, tb_writer=None, data_loader={'dataloader': None, 'dataset': 
         dist.destroy_process_group()
     if opt.evolve <= 1:
         torch.cuda.empty_cache()
-    
+
     return results, data_loader
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--weights', type=str, default='',help='initial weights path')
+    parser.add_argument('--weights', type=str, default='', help='initial weights path')
     parser.add_argument('--cfg', type=str, default='cfg/training/yolov7.yaml', help='model.yaml path')
-    parser.add_argument('--export', action='store_true',help='export best model to onnx model')
-    parser.add_argument('--data', type=str,default='mydataset.yaml', help='data.yaml path')
+    parser.add_argument('--export', action='store_true', help='export best model to onnx model')
+    parser.add_argument('--data', type=str, default='mydataset.yaml', help='data.yaml path')
     parser.add_argument('--hyp', type=str, default='data/hyp.scratch.custom.yaml', help='hyperparameters path')
     parser.add_argument('--epochs', type=int, default=300)
-    parser.add_argument('--augment', action='store_true',help='using augment for training')
-    parser.add_argument('--batch-size', type=int, default=16,help='total batch size for all GPUs')
-    parser.add_argument('--img-size', nargs='+', type=int,default=[640, 640], help='[train, test] image sizes')
-    parser.add_argument('--rect', action='store_true',help='rectangular training')
-    parser.add_argument('--resume', nargs='?', const=True,default=False, help='resume most recent training')
-    parser.add_argument('--nosave', action='store_true',help='only save final checkpoint')
-    parser.add_argument('--notest', action='store_true',help='only test final epoch')
-    parser.add_argument('--noautoanchor', action='store_true',help='disable autoanchor check')
+    parser.add_argument('--augment', action='store_true', help='using augment for training')
+    parser.add_argument('--batch-size', type=int, default=16, help='total batch size for all GPUs')
+    parser.add_argument('--img-size', nargs='+', type=int, default=[640, 640], help='[train, test] image sizes')
+    parser.add_argument('--rect', action='store_true', help='rectangular training')
+    parser.add_argument('--resume', nargs='?', const=True, default=False, help='resume most recent training')
+    parser.add_argument('--nosave', action='store_true', help='only save final checkpoint')
+    parser.add_argument('--notest', action='store_true', help='only test final epoch')
+    parser.add_argument('--noautoanchor', action='store_true', help='disable autoanchor check')
     parser.add_argument('--evolve', type=int, default=-1, help='evolve hyperparameters')
-    parser.add_argument('--parent', type=bool, default=True,help='parent selection method: single or weighted, default: True (single)')
+    parser.add_argument('--parent', type=bool, default=True,
+                        help='parent selection method: single or weighted, default: True (single)')
     parser.add_argument('--bucket', type=str, default='', help='gsutil bucket')
-    parser.add_argument('--cache-images', type=str, nargs='+', default=['no', 'no'],help='cache images for faster training [Train cache, Validation cache]')
-    parser.add_argument('--image-weights', action='store_true',help='use weighted image selection for training')
-    parser.add_argument('--device', default='',help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
-    parser.add_argument('--multi-scale', action='store_true',help='vary img-size +/- 50%')
-    parser.add_argument('--single-cls', action='store_true',help='train multi-class data as single-class')
-    parser.add_argument('--adam', action='store_true',help='use torch.optim.Adam() optimizer')
-    parser.add_argument('--sync-bn', action='store_true',help='use SyncBatchNorm, only available in DDP mode')
-    parser.add_argument('--local_rank', type=int, default=-1,help='DDP parameter, do not modify')
-    parser.add_argument('--workers', type=int, default=512,help='maximum number of dataloader workers')
-    parser.add_argument('--project', default='runs/train',help='save to project/name')
+    parser.add_argument('--cache-images', type=str, nargs='+', default=['no', 'no'],
+                        help='cache images for faster training [Train cache, Validation cache]')
+    parser.add_argument('--image-weights', action='store_true', help='use weighted image selection for training')
+    parser.add_argument('--device', default='', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
+    parser.add_argument('--multi-scale', action='store_true', help='vary img-size +/- 50%')
+    parser.add_argument('--single-cls', action='store_true', help='train multi-class data as single-class')
+    parser.add_argument('--adam', action='store_true', help='use torch.optim.Adam() optimizer')
+    parser.add_argument('--sync-bn', action='store_true', help='use SyncBatchNorm, only available in DDP mode')
+    parser.add_argument('--local_rank', type=int, default=-1, help='DDP parameter, do not modify')
+    parser.add_argument('--workers', type=int, default=512, help='maximum number of dataloader workers')
+    parser.add_argument('--project', default='runs/train', help='save to project/name')
     parser.add_argument('--entity', default=None, help='W&B entity')
     parser.add_argument('--name', default='exp', help='save to project/name')
-    parser.add_argument('--exist-ok', action='store_true',help='existing project/name ok, do not increment')
+    parser.add_argument('--exist-ok', action='store_true', help='existing project/name ok, do not increment')
     parser.add_argument('--quad', action='store_true', help='quad dataloader')
     parser.add_argument('--linear-lr', action='store_true', help='linear LR')
-    parser.add_argument('--label-smoothing', type=float,default=0.0, help='Label smoothing epsilon')
-    parser.add_argument('--upload_dataset', action='store_true',help='Upload dataset as W&B artifact table')
-    parser.add_argument('--bbox_interval', type=int, default=-1,help='Set bounding-box image logging interval for W&B')
-    parser.add_argument('--save_period', type=int, default=-1,help='Log model after every "save_period" epoch')
-    parser.add_argument('--artifact_alias', type=str, default="latest",help='version of dataset artifact to be used')
-    parser.add_argument('--freeze', nargs='+', type=int,default=[0], help='Freeze layers: backbone of yolov7=50, first3=0 1 2')
-    parser.add_argument('--v5-metric', action='store_true',help='assume maximum recall as 1.0 in AP calculation')
-    parser.add_argument('--seed', type=int, default=0,help='Global training seed')
+    parser.add_argument('--label-smoothing', type=float, default=0.0, help='Label smoothing epsilon')
+    parser.add_argument('--upload_dataset', action='store_true', help='Upload dataset as W&B artifact table')
+    parser.add_argument('--bbox_interval', type=int, default=-1, help='Set bounding-box image logging interval for W&B')
+    parser.add_argument('--save_period', type=int, default=-1, help='Log model after every "save_period" epoch')
+    parser.add_argument('--artifact_alias', type=str, default="latest", help='version of dataset artifact to be used')
+    parser.add_argument('--freeze', nargs='+', type=int, default=[0],
+                        help='Freeze layers: backbone of yolov7=50, first3=0 1 2')
+    parser.add_argument('--v5-metric', action='store_true', help='assume maximum recall as 1.0 in AP calculation')
+    parser.add_argument('--seed', type=int, default=0, help='Global training seed')
     parser.add_argument('--p6', action='store_true', help='P6 Aux model')
     opt = parser.parse_args()
 
@@ -787,11 +799,11 @@ if __name__ == '__main__':
             except:
                 tb_writer = None
                 logger.warning(f'{prefix}Init error')
-                
+
         train(hyp, opt, tb_writer=tb_writer)
     # Evolve hyperparameters (optional)
     else:
-       # Hyperparameter evolution metadata (mutation scale 0-1, lower_limit, upper_limit)
+        # Hyperparameter evolution metadata (mutation scale 0-1, lower_limit, upper_limit)
         meta = {'lr0': (1, 1e-5, 1e-1),  # initial learning rate (SGD=1E-2, Adam=1E-3)
                 # final OneCycleLR learning rate (lr0 * lrf)
                 'lrf': (1, 0.01, 1.0),
@@ -820,7 +832,7 @@ if __name__ == '__main__':
         opt.notest, opt.nosave = True, True  # only test/save final epoch
         # ei = [isinstance(x, (int, float)) for x in hyp.values()]  # evolvable indices
         yaml_file = Path(opt.save_dir) / \
-            'hyp_evolved.yaml'  # save best result here
+                    'hyp_evolved.yaml'  # save best result here
         if opt.bucket:
             os.system('gsutil cp gs://%s/evolve.txt .' %
                       opt.bucket)  # download evolve.txt if exists
