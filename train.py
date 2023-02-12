@@ -107,6 +107,7 @@ def train(hyp, opt, tb_writer=None,
 
     # Model
     pretrained = weights.endswith('.pt')
+    model_version = 0
     if pretrained:
         with torch_distributed_zero_first(rank):
             attempt_download(weights)  # download if not found locally
@@ -122,8 +123,10 @@ def train(hyp, opt, tb_writer=None,
         ckpt['best_fitness'] = ckpt['best_fitness'] if 'best_fitness' in ckpt else 'unknown'
         ckpt['best_fitness'] = ckpt['best_fitness'].tolist()[0] if isinstance(ckpt['best_fitness'], np.ndarray) else \
         ckpt['best_fitness']
-        logger.info('Transferred %g/%g items from: %s, best fitness: %s' % (
-        len(state_dict), len(model.state_dict()), weights, ckpt['best_fitness']))  # report
+        model_version = ckpt['model version'] if 'model version' in ckpt else 0
+        logger.info('Transferred %g/%g items from: %s, best fitness: %s, version: %s' % (
+        len(state_dict), len(model.state_dict()), weights, ckpt['best_fitness'], model_version))  # report
+        
     else:
         model = Model(opt.cfg, ch=3, nc=nc, anchors=hyp.get('anchors')).to(device)  # create
 
@@ -493,10 +496,11 @@ def train(hyp, opt, tb_writer=None,
                 pbar.set_description(s)
 
                 # Plot
-                if plots and ni < 10 and tb_writer:
+                if plots and ni < 10:
                     f = save_dir / f'train_batch{ni}.jpg'  # filename
-                    tb_writer.add_image(str(f), np.moveaxis(plot_images(
-                        images=imgs, targets=targets, paths=paths, fname=f, names=names), -1, 0), ni)
+                    if tb_writer:
+                        tb_writer.add_image(str(f), np.moveaxis(plot_images(
+                            images=imgs, targets=targets, paths=paths, fname=f, names=names), -1, 0), ni)
                     Thread(target=plot_images, args=(
                         imgs, targets, paths, f), daemon=True).start()
                 elif plots and ni == 10 and wandb_logger.wandb:
@@ -566,9 +570,11 @@ def train(hyp, opt, tb_writer=None,
             # Save model
             if (not opt.nosave) or (final_epoch and opt.evolve < 1):  # if save
                 from datetime import datetime
-                ckpt = {'epoch': epoch,
-                        'best_fitness': best_fitness,
-                        'training_results': results_file.read_text(),
+                ckpt = {
+                        'model version': model_version + 1,
+                        'epoch': epoch,
+                        'best fitness': best_fitness,
+                        'training results': results_file.read_text(),
                         'model': deepcopy(model.module if is_parallel(model) else model).float(),
                         'input shape': imgs.shape[1:],  # BCWH to CWH
                         'ema': deepcopy(ema.ema).float(),
@@ -577,8 +583,8 @@ def train(hyp, opt, tb_writer=None,
                         'wandb_id': wandb_logger.wandb_run.id if wandb_logger.wandb else None,
                         'hyp': hyp,
                         'opt': vars(opt),
-                        'gitstatus': opt.git_status,
-                        'date': datetime.now().isoformat("#")
+                        'training gitstatus': opt.git_status,
+                        'training date': datetime.now().isoformat("#")
                         }
 
                 # Save last, best and delete

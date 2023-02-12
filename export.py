@@ -73,15 +73,6 @@ if __name__ == '__main__':
         ckpt['best_fitness'] = ckpt['best_fitness'].tolist()[0] if isinstance(ckpt['best_fitness'], np.ndarray) else ckpt['best_fitness']
         best_fitness = str(ckpt['best_fitness'])
         
-        epoch = ckpt['epoch'] if 'epoch' in ckpt else 'unknown'
-        training_results = ckpt['training_results'] if 'training_results' in ckpt else 'unknown'
-        ema = ckpt['ema'] if 'ema' in ckpt else 'unknown'
-        updates = ckpt['updates'] if 'updates' in ckpt else 'unknown'
-        optimizer = ckpt['optimizer'] if 'optimizer' in ckpt else 'unknown'
-        wandb_id = ckpt['wandb_id'] if 'wandb_id' in ckpt else 'unknown'
-        hyp = ckpt['hyp'] if 'hyp' in ckpt else 'unknown'
-        trainOpt = ckpt['opt'] if 'opt' in ckpt else 'unknown'
-
         labels = model.names
         model_ori = model
         model_Gflop = model.info()
@@ -253,31 +244,28 @@ if __name__ == '__main__':
             onnx.checker.check_model(onnx_model)  # check onnx model
             logging.info(f'{prefix} writing metadata for model...')
             onnx_MetaData = {'export gitstatus': gitstatus,
-                             'traing gitstatus': str(ckpt['gitstatus']) if 'gitstatus' in ckpt else 'unknown',
-                             'best fitness': best_fitness,
-                             'epoch': str(ckpt['epoch']) if 'epoch' in ckpt else 'unknown',
-                             'training result': str(ckpt['training_results']) if 'training_results' in ckpt else 'unknown',
-                             'ema': str(ckpt['ema']) if 'ema' in ckpt else 'unknown',
-                             'updates': str(ckpt['updates']) if 'updates' in ckpt else 'unknown',
-                             'optimizer': str(ckpt['optimizer']) if 'optimizer' in ckpt else 'unknown',
-                             'wandb id':  str(ckpt['wandb_id']) if 'wandb_id' in ckpt else 'unknown',
-                             'hyp': str(ckpt['hyp']) if 'hyp' in ckpt else 'unknown',
-                             'training opt': str(ckpt['opt']) if 'opt' in ckpt else 'unknown',
                              'opset version': str(opt.onnx_opset),
                              'stride': str(gs),
                              'nc': str(len(labels)),
-                             'names': str(labels), 'ort-nms': 'True' if opt.end2end and opt.max_hw else 'False',
+                             'names': str(labels), 
+                             'ort-nms': 'True' if opt.end2end and opt.max_hw else 'False',
                              'export date': datetime.datetime.now().isoformat('#'),
-                             'train date': str(ckpt['date']) if 'date' in ckpt else 'unknown',
                              'author': str(opt.author),
                              'exporting opt': str(opt),
-                             'pytorch model info': str(model_Gflop)
                              }
+            key_ = colorstr('yellow','key:')
+            for index, key in enumerate(ckpt):
+                metadata = onnx_model.metadata_props.add()
+                if key == 'model':
+                    continue
+                metadata.key = key
+                metadata.value = str(ckpt[key])
+                logging.info(f'{key_} {key}, value: {ckpt[key]}')
             for index, key in enumerate(onnx_MetaData):
                 metadata = onnx_model.metadata_props.add()
                 metadata.key = key
-                metadata.value = onnx_MetaData[key]
-                logging.info(f'key: {key}, value: {onnx_MetaData[key]}')
+                metadata.value = str(onnx_MetaData[key])
+                logging.info(f'{key_} {key}, value: {onnx_MetaData[key]}')
 
             onnxmltools.utils.save_model(onnx_model, f)
             logging.info(f'{prefix} export success✅, saved as {f}')
