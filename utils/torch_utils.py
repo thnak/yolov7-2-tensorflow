@@ -51,15 +51,23 @@ def git_describe(path=Path(__file__).parent):  # path must be a directory
 
 def select_device(device='', batch_size=None):
     s = f'YOLOv7 🚀 git commit {git_describe() or date_modified()} torch {torch.__version__} '  # string
-    try:
-        if 'dml' in device.lower():
-            check_requirements('torch-directml')
-            import torch_directml
-            s = f'{s}DirectML'
-            logger.info(f'{s}')
-            return torch_directml.device(torch_directml.default_device()), s
-    except:
-        pass
+    if 'dml' in device.lower():
+        try:
+                check_requirements('torch-directml')
+                import torch_directml
+                s = f'{s}DirectML'
+                logger.info(f'{s}')
+                return torch_directml.device(torch_directml.default_device()), s
+        except:
+            pass
+    if 'xla' in device.lower():
+        try:
+            check_requirements('torch-xla')
+            import torch_xla.core.xla_model as xm
+            s = f'{s}XLA'
+            return xm.xla_device(), s
+        except:
+            pass
     if torch.cuda.is_available():
         device = device if device.isnumeric() and int(device) >= 0 and int(device) < torch.cuda.device_count() else 'cpu'
     else:

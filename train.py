@@ -11,7 +11,7 @@ from datetime import datetime
 import numpy as np
 import torch.distributed as dist
 import torch.nn as nn
-import torch.nn.functional as F
+import torch.nn.functional as functional
 import torch.optim as optim
 import torch.optim.lr_scheduler as lr_scheduler
 import torch.utils.data
@@ -458,7 +458,7 @@ def train(hyp, opt, tb_writer=None,
                 if sf != 1:
                     # new shape (stretched to gs-multiple)
                     ns = [math.ceil(x * sf / gs) * gs for x in imgs.shape[2:]]
-                    imgs = F.interpolate(
+                    imgs = functional.interpolate(
                         imgs, size=ns, mode='bilinear', align_corners=False, antialias=False)
 
             # Forward
@@ -753,14 +753,11 @@ if __name__ == '__main__':
     if opt.resume and not wandb_run:  # resume an interrupted run
         # specified or most recent path
         ckpt = opt.resume if isinstance(opt.resume, str) else get_latest_run()
-        assert os.path.isfile(
-            ckpt), 'ERROR: --resume checkpoint does not exist'
-        apriori = opt.global_rank, opt.local_rank
+        assert os.path.isfile(ckpt), 'ERROR: --resume checkpoint does not exist'
         with open(Path(ckpt).parent.parent / 'opt.yaml') as f:
             opt = argparse.Namespace(
                 **yaml.load(f, Loader=yaml.SafeLoader))  # replace
-            f.close()
-        opt.cfg, opt.weights, opt.resume, opt.batch_size, opt.global_rank, opt.local_rank = '', ckpt, True, opt.total_batch_size, *apriori  # reinstate
+        opt.cfg, opt.weights, opt.resume, opt.batch_size, opt.global_rank, opt.local_rank = '', ckpt, True, opt.total_batch_size, opt.global_rank, opt.local_rank  # reinstate
         logger.info('Resuming training from %s' % ckpt)
     else:
         # opt.hyp = opt.hyp or ('hyp.finetune.yaml' if opt.weights else 'hyp.scratch.yaml')
