@@ -12,7 +12,6 @@ import numpy as np
 import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as functional
-import torch.optim as optim
 import torch.optim.lr_scheduler as lr_scheduler
 import torch.utils.data
 import yaml
@@ -281,8 +280,8 @@ def train(hyp, opt, tb_writer=None,
             # Anchors
             if not opt.noautoanchor:
                 check_anchors(dataset, model=model,
-                              thr=hyp['anchor_t'], imgsz=imgsz)
-            model.half().float()  # pre-reduce anchor precision
+                              thr=hyp['anchor_t'], imgsz=imgsz, device=map_device)
+            model.to(device).half().float()
 
     # DDP mode
     if cuda and rank != -1:
