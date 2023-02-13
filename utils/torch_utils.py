@@ -14,7 +14,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision
-from utils.general import check_requirements
+from utils.general import check_requirements, colorstr
 
 try:
     import thop  # for FLOPS computation
@@ -34,6 +34,7 @@ def torch_distributed_zero_first(local_rank: int):
     if local_rank == 0:
         torch.distributed.barrier()
 
+
 def date_modified(path=__file__):
     # return human-readable file modification date, i.e. '2021-3-26'
     t = datetime.datetime.fromtimestamp(Path(path).stat().st_mtime)
@@ -49,15 +50,101 @@ def git_describe(path=Path(__file__).parent):  # path must be a directory
         return ''  # not a git repository
 
 
+def smart_optimizer(model, name='Adam', lr=0.001, momentum=0.9, decay=1e-5):
+    # YOLOv5 3-param group optimizer: 0) weights with decay, 1) weights no decay, 2) biases no decay
+    g = [], [], []  # optimizer parameter groups
+    pg0, pg1, pg2 = [], [], []  # optimizer parameter groups
+    for k, v in model.named_modules():
+        if hasattr(v, 'bias') and isinstance(v.bias, nn.Parameter):
+            pg2.append(v.bias)  # biases
+        if isinstance(v, nn.BatchNorm2d):
+            pg0.append(v.weight)  # no decay
+        elif hasattr(v, 'weight') and isinstance(v.weight, nn.Parameter):
+            pg1.append(v.weight)  # apply decay
+        if hasattr(v, 'im'):
+            if hasattr(v.im, 'implicit'):
+                pg0.append(v.im.implicit)
+            else:
+                for iv in v.im:
+                    pg0.append(iv.implicit)
+        if hasattr(v, 'imc'):
+            if hasattr(v.imc, 'implicit'):
+                pg0.append(v.imc.implicit)
+            else:
+                for iv in v.imc:
+                    pg0.append(iv.implicit)
+        if hasattr(v, 'imb'):
+            if hasattr(v.imb, 'implicit'):
+                pg0.append(v.imb.implicit)
+            else:
+                for iv in v.imb:
+                    pg0.append(iv.implicit)
+        if hasattr(v, 'imo'):
+            if hasattr(v.imo, 'implicit'):
+                pg0.append(v.imo.implicit)
+            else:
+                for iv in v.imo:
+                    pg0.append(iv.implicit)
+        if hasattr(v, 'ia'):
+            if hasattr(v.ia, 'implicit'):
+                pg0.append(v.ia.implicit)
+            else:
+                for iv in v.ia:
+                    pg0.append(iv.implicit)
+        if hasattr(v, 'attn'):
+            if hasattr(v.attn, 'logit_scale'):
+                pg0.append(v.attn.logit_scale)
+            if hasattr(v.attn, 'q_bias'):
+                pg0.append(v.attn.q_bias)
+            if hasattr(v.attn, 'v_bias'):
+                pg0.append(v.attn.v_bias)
+            if hasattr(v.attn, 'relative_position_bias_table'):
+                pg0.append(v.attn.relative_position_bias_table)
+        if hasattr(v, 'rbr_dense'):
+            if hasattr(v.rbr_dense, 'weight_rbr_origin'):
+                pg0.append(v.rbr_dense.weight_rbr_origin)
+            if hasattr(v.rbr_dense, 'weight_rbr_avg_conv'):
+                pg0.append(v.rbr_dense.weight_rbr_avg_conv)
+            if hasattr(v.rbr_dense, 'weight_rbr_pfir_conv'):
+                pg0.append(v.rbr_dense.weight_rbr_pfir_conv)
+            if hasattr(v.rbr_dense, 'weight_rbr_1x1_kxk_idconv1'):
+                pg0.append(v.rbr_dense.weight_rbr_1x1_kxk_idconv1)
+            if hasattr(v.rbr_dense, 'weight_rbr_1x1_kxk_conv2'):
+                pg0.append(v.rbr_dense.weight_rbr_1x1_kxk_conv2)
+            if hasattr(v.rbr_dense, 'weight_rbr_gconv_dw'):
+                pg0.append(v.rbr_dense.weight_rbr_gconv_dw)
+            if hasattr(v.rbr_dense, 'weight_rbr_gconv_pw'):
+                pg0.append(v.rbr_dense.weight_rbr_gconv_pw)
+            if hasattr(v.rbr_dense, 'vector'):
+                pg0.append(v.rbr_dense.vector)
+
+    if name == 'Adam':
+        optimizer = torch.optim.Adam(pg0, lr=lr, betas=(momentum, 0.999))  # adjust beta1 to momentum
+    elif name == 'AdamW':
+        optimizer = torch.optim.AdamW(pg0, lr=lr, betas=(momentum, 0.999), weight_decay=0.0)
+    elif name == 'RMSProp':
+        optimizer = torch.optim.RMSprop(pg0, lr=lr, momentum=momentum)
+    elif name == 'SGD':
+        optimizer = torch.optim.SGD(pg0, lr=lr, momentum=momentum, nesterov=True)
+    else:
+        raise NotImplementedError(f'Optimizer {name} not implemented.')
+
+    optimizer.add_param_group({'params': pg1, 'weight_decay': decay})
+    optimizer.add_param_group({'params': pg2})  # add pg2 (biases)
+    logger.info(f"{colorstr('optimizer:')} {type(optimizer).__name__}(lr={lr}) with parameter groups "
+                f"{len(g[1])} weight(decay=0.0), {len(g[0])} weight(decay={decay}), {len(g[2])} bias")
+    return optimizer
+
+
 def select_device(device='', batch_size=None):
     s = f'YOLOv7 🚀 git commit {git_describe() or date_modified()} torch {torch.__version__} '  # string
     if 'dml' in device.lower():
         try:
-                check_requirements('torch-directml')
-                import torch_directml
-                s = f'{s}DirectML'
-                logger.info(f'{s}')
-                return torch_directml.device(torch_directml.default_device()), s
+            check_requirements('torch-directml')
+            import torch_directml
+            s = f'{s}DirectML'
+            logger.info(f'{s}')
+            return torch_directml.device(torch_directml.default_device()), s
         except:
             pass
     if 'xla' in device.lower():
@@ -69,10 +156,11 @@ def select_device(device='', batch_size=None):
         except:
             pass
     if torch.cuda.is_available():
-        device = device if device.isnumeric() and int(device) >= 0 and int(device) < torch.cuda.device_count() else 'cpu'
+        device = device if device.isnumeric() and int(device) >= 0 and int(
+            device) < torch.cuda.device_count() else 'cpu'
     else:
-        device = 'cpu'   
-    
+        device = 'cpu'
+
     cpu = device.lower() == 'cpu'
     if cpu:
         os.environ['CUDA_VISIBLE_DEVICES'] = '-1'  # force torch.cuda.is_available() = False
@@ -94,7 +182,7 @@ def select_device(device='', batch_size=None):
     s = s.encode().decode('ascii', 'ignore') if platform.system() == 'Windows' else s
     logger.info(s)  # emoji-safe
     return torch.device(f'cuda:{device}' if cuda else 'cpu'), s
-    #if torch_directml.is_available() is False else torch_directml.device()
+    # if torch_directml.is_available() is False else torch_directml.device()
 
 
 def time_synchronized():
@@ -230,13 +318,14 @@ def model_info(model, verbose=False, img_size=640):
         flops = profile(deepcopy(model), inputs=(img,), verbose=False)[0] / 1E9 * 2  # stride GFLOPS
         img_size = img_size if isinstance(img_size, list) else [img_size, img_size]  # expand if int/float
         fs = '%.3f GFLOPS' % (flops * img_size[0] / stride * img_size[1] / stride)  # 640x640 GFLOPS
-        
+
     except Exception as ex:
         fs = '? GFLOPS'
-        print(colored(f"{ex}",'red'))
+        print(colored(f"{ex}", 'red'))
     fs = f"Model Summary: {len(list(model.modules()))} layers, {n_p} parameters, {n_g} gradients, {fs}"
     logger.info(fs)
     return fs
+
 
 def load_classifier(name='resnet101', n=2):
     """Loads a pretrained model reshaped to n-class output"""
@@ -328,6 +417,7 @@ class BatchNormXd(torch.nn.modules.batchnorm._BatchNorm):
         we could return the one that was originally created)"""
         return
 
+
 def revert_sync_batchnorm(module):
     """this is very similar to the function that it is trying to revert:
         https://github.com/pytorch/pytorch/blob/c8b3686a3e4ba63dc59e5dcfe5db3430df256833/torch/nn/modules/batchnorm.py#L679"""
@@ -335,9 +425,9 @@ def revert_sync_batchnorm(module):
     if isinstance(module, torch.nn.modules.batchnorm.SyncBatchNorm):
         new_cls = BatchNormXd
         module_output = BatchNormXd(module.num_features,
-                                               module.eps, module.momentum,
-                                               module.affine,
-                                               module.track_running_stats)
+                                    module.eps, module.momentum,
+                                    module.affine,
+                                    module.track_running_stats)
         if module.affine:
             with torch.no_grad():
                 module_output.weight = module.weight
@@ -355,10 +445,11 @@ def revert_sync_batchnorm(module):
 
 class TracedModel(nn.Module):
     """Traced for faster inference"""
-    def __init__(self, model=None, device=None, img_size=(640,640),saveTrace=False): 
+
+    def __init__(self, model=None, device=None, img_size=(640, 640), saveTrace=False):
         super(TracedModel, self).__init__()
-        
-        print("Convert model to Traced-model... ") 
+
+        print("Convert model to Traced-model... ")
         self.stride = model.stride
         self.names = model.names
         self.model = model
@@ -369,18 +460,18 @@ class TracedModel(nn.Module):
 
         self.detect_layer = self.model.model[-1]
         self.model.traced = True
-        
+
         rand_example = torch.rand(1, 3, img_size, img_size)
-        
+
         traced_script_module = torch.jit.trace(self.model, rand_example, strict=False)
-        #traced_script_module = torch.jit.script(self.model)
+        # traced_script_module = torch.jit.script(self.model)
         if saveTrace:
             traced_script_module.save("traced_model.pt")
         print("traced_script_module saved! ")
         self.model = traced_script_module
         self.model.to(device)
         self.detect_layer.to(device)
-        print("model is traced! \n") 
+        print("model is traced! \n")
 
     def forward(self, x, augment=False, profile=False):
         out = self.model(x)

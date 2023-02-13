@@ -34,7 +34,7 @@ from utils.google_utils import attempt_download
 from utils.loss import ComputeLoss, ComputeLossOTA, ComputeLossAuxOTA
 from utils.plots import plot_images, plot_results, plot_evolution
 from utils.torch_utils import ModelEMA, select_device, intersect_dicts, torch_distributed_zero_first, is_parallel, \
-    time_synchronized
+    time_synchronized, smart_optimizer
 from utils.wandb_logging.wandb_utils import WandbLogger, check_wandb_resume
 # from utils.autobatch import check_train_batch_size
 from utils.re_parameteration import Re_parameterization
@@ -111,7 +111,6 @@ def train(hyp, opt, tb_writer=None,
     if pretrained:
         with torch_distributed_zero_first(rank):
             attempt_download(weights)  # download if not found locally
-
         ckpt = torch.load(weights, map_location=map_device)  # load checkpoint
         model = Model(opt.cfg or ckpt['model'].yaml, ch=3, nc=nc, anchors=hyp.get('anchors')).to(device)  # create
         exclude = ['anchor'] if (opt.cfg or hyp.get(
@@ -122,14 +121,18 @@ def train(hyp, opt, tb_writer=None,
         model.load_state_dict(state_dict, strict=False)  # load
         ckpt['best_fitness'] = ckpt['best_fitness'] if 'best fitness' in ckpt else 'unknown'
         ckpt['best_fitness'] = ckpt['best_fitness'].tolist()[0] if isinstance(ckpt['best_fitness'], np.ndarray) else \
-        ckpt['best_fitness']
+            ckpt['best_fitness']
         model_version = ckpt['model_version'] if 'model_version' in ckpt else 0
         logger.info('Transferred %g/%g items from: %s, best fitness: %s, version: %s' % (
-        len(state_dict), len(model.state_dict()), weights, ckpt['best_fitness'], model_version if model_version != 0 else 'Init new model'))  # report
-        
+            len(state_dict), len(model.state_dict()), weights, ckpt['best_fitness'],
+            model_version if model_version != 0 else 'Init new model'))  # report
+        nodes = len(ckpt['model'].yaml['head']) + len(ckpt['model'].yaml['backbone']) - 1
+
     else:
         model = Model(opt.cfg, ch=3, nc=nc, anchors=hyp.get('anchors')).to(device)  # create
+        nodes = len(model.yaml['head']) + len(model.yaml['backbone']) - 1
 
+    p5_model = True if nodes in [77, 105, 121] else False
     with torch_distributed_zero_first(rank):
         check_dataset(data_dict)  # check
     train_path = data_dict['train']
@@ -153,94 +156,14 @@ def train(hyp, opt, tb_writer=None,
     hyp['weight_decay'] *= total_batch_size * \
                            accumulate / nbs  # scale weight_decay
     logger.info(f"Scaled weight_decay = {hyp['weight_decay']}")
-
-    pg0, pg1, pg2 = [], [], []  # optimizer parameter groups
-    for k, v in model.named_modules():
-        if hasattr(v, 'bias') and isinstance(v.bias, nn.Parameter):
-            pg2.append(v.bias)  # biases
-        if isinstance(v, nn.BatchNorm2d):
-            pg0.append(v.weight)  # no decay
-        elif hasattr(v, 'weight') and isinstance(v.weight, nn.Parameter):
-            pg1.append(v.weight)  # apply decay
-        if hasattr(v, 'im'):
-            if hasattr(v.im, 'implicit'):
-                pg0.append(v.im.implicit)
-            else:
-                for iv in v.im:
-                    pg0.append(iv.implicit)
-        if hasattr(v, 'imc'):
-            if hasattr(v.imc, 'implicit'):
-                pg0.append(v.imc.implicit)
-            else:
-                for iv in v.imc:
-                    pg0.append(iv.implicit)
-        if hasattr(v, 'imb'):
-            if hasattr(v.imb, 'implicit'):
-                pg0.append(v.imb.implicit)
-            else:
-                for iv in v.imb:
-                    pg0.append(iv.implicit)
-        if hasattr(v, 'imo'):
-            if hasattr(v.imo, 'implicit'):
-                pg0.append(v.imo.implicit)
-            else:
-                for iv in v.imo:
-                    pg0.append(iv.implicit)
-        if hasattr(v, 'ia'):
-            if hasattr(v.ia, 'implicit'):
-                pg0.append(v.ia.implicit)
-            else:
-                for iv in v.ia:
-                    pg0.append(iv.implicit)
-        if hasattr(v, 'attn'):
-            if hasattr(v.attn, 'logit_scale'):
-                pg0.append(v.attn.logit_scale)
-            if hasattr(v.attn, 'q_bias'):
-                pg0.append(v.attn.q_bias)
-            if hasattr(v.attn, 'v_bias'):
-                pg0.append(v.attn.v_bias)
-            if hasattr(v.attn, 'relative_position_bias_table'):
-                pg0.append(v.attn.relative_position_bias_table)
-        if hasattr(v, 'rbr_dense'):
-            if hasattr(v.rbr_dense, 'weight_rbr_origin'):
-                pg0.append(v.rbr_dense.weight_rbr_origin)
-            if hasattr(v.rbr_dense, 'weight_rbr_avg_conv'):
-                pg0.append(v.rbr_dense.weight_rbr_avg_conv)
-            if hasattr(v.rbr_dense, 'weight_rbr_pfir_conv'):
-                pg0.append(v.rbr_dense.weight_rbr_pfir_conv)
-            if hasattr(v.rbr_dense, 'weight_rbr_1x1_kxk_idconv1'):
-                pg0.append(v.rbr_dense.weight_rbr_1x1_kxk_idconv1)
-            if hasattr(v.rbr_dense, 'weight_rbr_1x1_kxk_conv2'):
-                pg0.append(v.rbr_dense.weight_rbr_1x1_kxk_conv2)
-            if hasattr(v.rbr_dense, 'weight_rbr_gconv_dw'):
-                pg0.append(v.rbr_dense.weight_rbr_gconv_dw)
-            if hasattr(v.rbr_dense, 'weight_rbr_gconv_pw'):
-                pg0.append(v.rbr_dense.weight_rbr_gconv_pw)
-            if hasattr(v.rbr_dense, 'vector'):
-                pg0.append(v.rbr_dense.vector)
-
-    if opt.adam:
-        optimizer = optim.Adam(pg0, lr=hyp['lr0'], betas=(
-            hyp['momentum'], 0.999))  # adjust beta1 to momentum
-    else:
-        optimizer = optim.SGD(
-            pg0, lr=hyp['lr0'], momentum=hyp['momentum'], nesterov=True)
-
-    # add pg1 with weight_decay
-    optimizer.add_param_group(
-        {'params': pg1, 'weight_decay': hyp['weight_decay']})
-    optimizer.add_param_group({'params': pg2})  # add pg2 (biases)
-    logger.info('Optimizer groups: %g .bias, %g conv.weight, %g other' %
-                (len(pg2), len(pg1), len(pg0)))
-    del pg0, pg1, pg2
+    optimizer = smart_optimizer(model, opt.optimizer, lr=hyp['lr0'], decay=hyp['weight_decay'],
+                                momentum=hyp['momentum'])
 
     if opt.linear_lr:
-        def lf(x):
-            return (1 - x / (epochs - 1)) * \
-                (1.0 - hyp['lrf']) + hyp['lrf']  # linear
+        lf = lambda x: (1 - x / (epochs - 1)) * (1.0 - hyp['lrf']) + hyp['lrf']  # linear
     else:
         lf = one_cycle(1, hyp['lrf'], epochs)  # cosine 1->hyp['lrf']
-
+    scheduler = lr_scheduler.LambdaLR(optimizer, lr_lambda=lf)
     ema = ModelEMA(model) if rank in [-1, 0] else None
     # Resume
     start_epoch, best_fitness = 0, 0.0
@@ -270,8 +193,6 @@ def train(hyp, opt, tb_writer=None,
                         (weights, ckpt['epoch'], epochs))
             epochs += ckpt['epoch']  # finetune additional epochs
         del ckpt, state_dict
-
-    scheduler = lr_scheduler.LambdaLR(optimizer, lr_lambda=lf)
 
     # Image sizes
     gs = max(int(model.stride.max()), 32)  # grid size (max stride)
@@ -365,8 +286,8 @@ def train(hyp, opt, tb_writer=None,
 
     # DDP mode
     if cuda and rank != -1:
+        # nn.Multihead Attention incompatibility with DDP https://github.com/pytorch/pytorch/issues/26698
         model = DDP(model, device_ids=[opt.local_rank], output_device=opt.local_rank,
-                    # nn.MultiheadAttention incompatibility with DDP https://github.com/pytorch/pytorch/issues/26698
                     find_unused_parameters=any(isinstance(layer, nn.MultiheadAttention) for layer in model.modules()))
 
     # Model parameters
@@ -391,7 +312,7 @@ def train(hyp, opt, tb_writer=None,
     results = (0, 0, 0, 0, 0, 0, 0)
     scheduler.last_epoch = start_epoch - 1  # do not move
     scaler = amp.GradScaler(enabled=cuda)
-    compute_loss_ota = ComputeLossOTA(model) if not opt.p6 else ComputeLossAuxOTA(model)  # init loss class
+    compute_loss_ota = ComputeLossOTA(model) if p5_model else ComputeLossAuxOTA(model)  # init loss class
     compute_loss = ComputeLoss(model)  # init loss class
     logger.info(f'Image sizes {imgsz} train, {imgsz_test} test\n'
                 f'Using {dataloader.num_workers} dataloader workers\n'
@@ -401,14 +322,14 @@ def train(hyp, opt, tb_writer=None,
     # epoch ------------------------------------------------------------------
     for epoch in range(start_epoch, epochs):
         model.train()
-
         # Update image weights (optional)
         if opt.image_weights:
             # Generate indices
             if rank in [-1, 0]:
                 cw = model.class_weights.cpu().numpy() * (1 - maps) ** 2 / nc  # class weights
                 iw = labels_to_image_weights(
-                    dataset.labels, nc=nc, class_weights=cw)  # image weights
+                    dataset.labels, nc=nc,
+                    class_weights=cw)  # image weights
                 dataset.indices = random.choices(
                     range(dataset.n), weights=iw, k=dataset.n)  # rand weighted idx
             # Broadcast if DDP
@@ -418,10 +339,6 @@ def train(hyp, opt, tb_writer=None,
                 dist.broadcast(indices, 0)
                 if rank != 0:
                     dataset.indices = indices.cpu().numpy()
-
-        # Update mosaic border
-        # b = int(random.uniform(0.25 * imgsz, 0.75 * imgsz + gs) // gs * gs)
-        # dataset.mosaic_border = [b - imgsz, -b]  # height, width borders
 
         mloss = torch.zeros(4, device=device)  # mean losses
         if rank != -1:
@@ -519,19 +436,19 @@ def train(hyp, opt, tb_writer=None,
             final_epoch = epoch + 1 == epochs
             if not opt.notest or final_epoch:  # Calculate mAP
                 wandb_logger.current_epoch = epoch + 1
-                results, maps, times = tester(data_dict,
-                                              batch_size=batch_size * 2,
-                                              imgsz=imgsz_test,
-                                              model=ema.ema,
-                                              single_cls=opt.single_cls,
-                                              dataloader=val_dataloader,
-                                              save_dir=save_dir,
-                                              verbose=False,
-                                              plots=plots and final_epoch and device.type != 'privateuseone',
-                                              wandb_logger=wandb_logger,
-                                              compute_loss=compute_loss if device.type != 'privateuseone' else None,
-                                              is_coco=is_coco,
-                                              v5_metric=opt.v5_metric)
+                results, maps = tester(data_dict,
+                                       batch_size=batch_size * 2,
+                                       imgsz=imgsz_test,
+                                       model=ema.ema,
+                                       single_cls=opt.single_cls,
+                                       dataloader=val_dataloader,
+                                       save_dir=save_dir,
+                                       verbose=False,
+                                       plots=plots and final_epoch and device.type != 'privateuseone',
+                                       wandb_logger=wandb_logger,
+                                       compute_loss=compute_loss if device.type != 'privateuseone' else None,
+                                       is_coco=is_coco,
+                                       v5_metric=opt.v5_metric)[:2]
 
             # Write
             with open(results_file, 'a') as f:
@@ -570,20 +487,21 @@ def train(hyp, opt, tb_writer=None,
             # Save model
             if (not opt.nosave) or (final_epoch and opt.evolve < 1):  # if save
                 ckpt = {
-                        'model_version': model_version + 1,
-                        'epoch': epoch,
-                        'best_fitness': best_fitness,
-                        'training_results': results_file.read_text(),
-                        'model': deepcopy(model.module if is_parallel(model) else model).float(),
-                        'input_shape': list(imgs.shape[1:]) if isinstance(imgs.shape[1:], torch.Size) else imgs.shape[1:],  # BCWH to CWH
-                        'ema': deepcopy(ema.ema).float(),
-                        'updates': ema.updates,
-                        'optimizer': optimizer.state_dict(),
-                        'wandb_id': wandb_logger.wandb_run.id if wandb_logger.wandb else None,
-                        'hyp': hyp,
-                        'training_opt': vars(opt),
-                        'training_date': datetime.now().isoformat("#")
-                        }
+                    'model_version': model_version + 1,
+                    'epoch': epoch,
+                    'best_fitness': best_fitness,
+                    'training_results': results_file.read_text(),
+                    'model': deepcopy(model.module if is_parallel(model) else model).float(),
+                    'input_shape': list(imgs.shape[1:]) if isinstance(imgs.shape[1:], torch.Size) else imgs.shape[1:],
+                    # BCWH to CWH
+                    'ema': deepcopy(ema.ema).float(),
+                    'updates': ema.updates,
+                    'optimizer': optimizer.state_dict(),
+                    'wandb_id': wandb_logger.wandb_run.id if wandb_logger.wandb else None,
+                    'hyp': hyp,
+                    'training_opt': vars(opt),
+                    'training_date': datetime.now().isoformat("#")
+                }
 
                 # Save last, best and delete
                 torch.save(ckpt, last)
@@ -620,42 +538,42 @@ def train(hyp, opt, tb_writer=None,
         if best.exists():
             prefix = colorstr('Validating')
             logger.info(f'{prefix} model {best}.')
-            results_val, _, _ = tester(opt.data,
-                                       batch_size=batch_size * 2,
-                                       imgsz=imgsz_test,
-                                       conf_thres=0.001,
-                                       iou_thres=0.7,
-                                       model=attempt_load(best,
-                                                          map_device).half() if device.type == 'cuda' else attempt_load(
-                                           best, map_device),
-                                       single_cls=opt.single_cls,
-                                       dataloader=val_dataloader,
-                                       save_dir=save_dir,
-                                       save_json=is_coco,
-                                       verbose=True,
-                                       plots=False,
-                                       is_coco=is_coco,
-                                       v5_metric=opt.v5_metric)
+            results_val = tester(opt.data,
+                                 batch_size=batch_size * 2,
+                                 imgsz=imgsz_test,
+                                 conf_thres=0.001,
+                                 iou_thres=0.7,
+                                 model=attempt_load(best,
+                                                    map_device).half() if device.type == 'cuda' else attempt_load(
+                                     best, map_device),
+                                 single_cls=opt.single_cls,
+                                 dataloader=val_dataloader,
+                                 save_dir=save_dir,
+                                 save_json=is_coco,
+                                 verbose=True,
+                                 plots=False,
+                                 is_coco=is_coco,
+                                 v5_metric=opt.v5_metric)[0]
 
             prefix = colorstr('Testing')
             if opt.evolve < 1 and test_path != val_path:
                 logger.info(f'{prefix} model {best}.')
-                results_test, _, _ = tester(opt.data,
-                                            batch_size=batch_size * 2,
-                                            imgsz=imgsz_test,
-                                            conf_thres=0.001,
-                                            iou_thres=0.7,
-                                            model=attempt_load(best,
-                                                               map_device).half() if device.type == 'cuda' else attempt_load(
-                                                best, map_device),
-                                            single_cls=opt.single_cls,
-                                            dataloader=test_dataloader,
-                                            save_dir=save_dir,
-                                            save_json=is_coco,
-                                            verbose=True,
-                                            plots=False,
-                                            is_coco=is_coco,
-                                            v5_metric=opt.v5_metric)
+                results_test = tester(opt.data,
+                                      batch_size=batch_size * 2,
+                                      imgsz=imgsz_test,
+                                      conf_thres=0.001,
+                                      iou_thres=0.7,
+                                      model=attempt_load(best,
+                                                         map_device).half() if device.type == 'cuda' else attempt_load(
+                                          best, map_device),
+                                      single_cls=opt.single_cls,
+                                      dataloader=test_dataloader,
+                                      save_dir=save_dir,
+                                      save_json=is_coco,
+                                      verbose=True,
+                                      plots=False,
+                                      is_coco=is_coco,
+                                      v5_metric=opt.v5_metric)[0]
 
                 # Strip optimizers
         final = best if best.exists() else last  # final model
@@ -670,13 +588,13 @@ def train(hyp, opt, tb_writer=None,
                         'best.pt', 'deploy_best.pt')
                     output_path = output_path.replace(
                         'last.pt', 'deploy_best.pt')
-                    # try:
-                    #     if opt.evolve <= 1:
-                    Re_parameterization(inputWeightPath=str(f),
-                                        outputWeightPath=output_path,
-                                        device=map_device)
-                    # except Exception as ex:
-                    #     print(ex)
+                    try:
+                        if opt.evolve <= 1:
+                            Re_parameterization(inputWeightPath=str(f),
+                                                outputWeightPath=output_path,
+                                                device=map_device)
+                    except Exception as ex:
+                        print(ex)
         if opt.bucket:
             os.system(f'gsutil cp {final} gs://{opt.bucket}/weights')  # upload
         if wandb_logger.wandb and opt.evolve <= 1:  # Log the stripped model
@@ -696,7 +614,6 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--weights', type=str, default='', help='initial weights path')
     parser.add_argument('--cfg', type=str, default='cfg/training/yolov7.yaml', help='model.yaml path')
-    parser.add_argument('--export', action='store_true', help='export best model to onnx model')
     parser.add_argument('--data', type=str, default='mydataset.yaml', help='data.yaml path')
     parser.add_argument('--hyp', type=str, default='data/hyp.scratch.custom.yaml', help='hyperparameters path')
     parser.add_argument('--epochs', type=int, default=300)
@@ -718,26 +635,21 @@ if __name__ == '__main__':
     parser.add_argument('--device', default='', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     parser.add_argument('--multi-scale', action='store_true', help='vary img-size +/- 50%')
     parser.add_argument('--single-cls', action='store_true', help='train multi-class data as single-class')
-    parser.add_argument('--adam', action='store_true', help='use torch.optim.Adam() optimizer')
+    parser.add_argument('--optimizer', type=str, choices=['SGD', 'Adam', 'AdamW'], default='SGD', help='optimizer')
     parser.add_argument('--sync-bn', action='store_true', help='use SyncBatchNorm, only available in DDP mode')
     parser.add_argument('--local_rank', type=int, default=-1, help='DDP parameter, do not modify')
     parser.add_argument('--workers', type=int, default=512, help='maximum number of dataloader workers')
     parser.add_argument('--project', default='runs/train', help='save to project/name')
-    parser.add_argument('--entity', default=None, help='W&B entity')
     parser.add_argument('--name', default='exp', help='save to project/name')
     parser.add_argument('--exist-ok', action='store_true', help='existing project/name ok, do not increment')
     parser.add_argument('--quad', action='store_true', help='quad dataloader')
     parser.add_argument('--linear-lr', action='store_true', help='linear LR')
     parser.add_argument('--label-smoothing', type=float, default=0.0, help='Label smoothing epsilon')
-    parser.add_argument('--upload_dataset', action='store_true', help='Upload dataset as W&B artifact table')
-    parser.add_argument('--bbox_interval', type=int, default=-1, help='Set bounding-box image logging interval for W&B')
     parser.add_argument('--save_period', type=int, default=-1, help='Log model after every "save_period" epoch')
-    parser.add_argument('--artifact_alias', type=str, default="latest", help='version of dataset artifact to be used')
     parser.add_argument('--freeze', nargs='+', type=int, default=[0],
                         help='Freeze layers: backbone of yolov7=50, first3=0 1 2')
     parser.add_argument('--v5-metric', action='store_true', help='assume maximum recall as 1.0 in AP calculation')
     parser.add_argument('--seed', type=int, default=0, help='Global training seed')
-    parser.add_argument('--p6', action='store_true', help='P6 Aux model')
     opt = parser.parse_args()
 
     # Set DDP variables

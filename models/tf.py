@@ -108,134 +108,6 @@ class TFImplicitM(keras.layers.Layer):
 
     def call(self, x):
         return self.implicit * x
-    
-
-# class TFIDetect(nn.Module):
-#     stride = None  # strides computed during build
-#     export = False  # onnx export
-#     end2end = False
-#     include_nms = False
-#     concat = False
-#     dynamic = False #https://github.com/WongKinYiu/yolov7/pull/1270
-    
-#     def __init__(self, nc=80, anchors=(), ch=(), imgsz=(640, 640), a=None, w=None):  # detection layer
-#         super().__init__()
-#         self.nc = nc  # number of classes
-#         self.no = nc + 5  # number of outputs per anchor
-#         self.nl = len(anchors)  # number of detection layers
-#         self.na = len(anchors[0]) // 2  # number of anchors
-#         self.grid = [torch.zeros(1)] * self.nl  # init grid
-#         a = torch.tensor(anchors).float().view(self.nl, -1, 2)
-#         self.register_buffer('anchors', a)  # shape(nl,na,2)
-#         self.register_buffer('anchor_grid', a.clone().view(self.nl, 1, -1, 1, 1, 2))  # shape(nl,1,na,1,1,2)
-#         self.m = nn.ModuleList(nn.Conv2d(x, self.no * self.na, 1) for x in ch)  # output conv
-#         self.imgsz = imgsz
-#         self.a = a
-#         self.dynamic = False
-#     def call(self, x):
-#         # x = x.copy()  # for profiling
-#         z = []  # inference output
-#         self.training |= self.export
-#         for i in range(self.nl):
-#             x[i] = self.m[i](x[i])  # conv
-#             bs, _, ny, nx = x[i].shape  # x(bs,255,20,20) to x(bs,3,20,20,85)
-#             x[i] = x[i].view(bs, self.na, self.no, ny, nx).permute(0, 1, 3, 4, 2).contiguous()
-
-#             if not self.training:  # inference
-#                 if self.dynamic or self.grid[i].shape[2:4] != x[i].shape[2:4]:
-#                     self.grid[i] = self._make_grid(nx, ny).to(x[i].device)
-#                 y = x[i].sigmoid()
-#                 if not torch.onnx.is_in_onnx_export():
-#                     y[..., 0:2] = (y[..., 0:2] * 2. - 0.5 + self.grid[i]) * self.stride[i]  # xy
-#                     y[..., 2:4] = (y[..., 2:4] * 2) ** 2 * self.anchor_grid[i]  # wh
-#                 else:
-#                     xy, wh, conf = y.split((2, 2, self.nc + 1), 4)  # y.tensor_split((2, 4, 5), 4)  # torch 1.8.0
-#                     xy = xy * (2. * self.stride[i]) + (self.stride[i] * (self.grid[i] - 0.5))  # new xy
-#                     wh = wh ** 2 * (4 * self.anchor_grid[i].data)  # new wh
-#                     y = torch.cat((xy, wh, conf), 4)
-#                 z.append(y.view(bs, -1, self.no))
-
-#         if self.training:
-#             out = x
-#         elif self.end2end:
-#             out = torch.cat(z, 1)
-#         elif self.include_nms:
-#             z = self.convert(z)
-#             out = (z, )
-#         elif self.concat:
-#             out = torch.cat(z, 1)
-#         else:
-#             out = (torch.cat(z, 1), x)
-
-#         return out
-
-#     @staticmethod
-#     def _make_grid(nx=20, ny=20):
-#         yv, xv = torch.meshgrid([torch.arange(ny), torch.arange(nx)], indexing='ij')
-#         return torch.stack((xv, yv), 2).view((1, 1, ny, nx, 2)).float()
-
-#     def convert(self, z):
-#         z = torch.cat(z, 1)
-#         box = z[:, :, :4]
-#         conf = z[:, :, 4:5]
-#         score = z[:, :, 5:]
-#         score *= conf
-#         convert_matrix = torch.tensor([[1, 0, 1, 0], [0, 1, 0, 1], [-0.5, 0, 0.5, 0], [0, -0.5, 0, 0.5]],
-#                                            dtype=torch.float32,
-#                                            device=z.device)
-#         box @= convert_matrix                          
-#         return (box, score)
-class TFIDetect(keras.layers.Layer):
-    # TF YOLOv5 Detect layer
-    def __init__(self, nc=80, anchors=(), ch=(), imgsz=(640, 640), w=None):  # detection layer
-        super().__init__()
-        self.stride = tf.convert_to_tensor(w.stride.cpu().detach().numpy(), dtype=tf.float32)
-        self.nc = nc  # number of classes
-        self.no = nc + 5  # number of outputs per anchor
-        self.nl = len(anchors)  # number of detection layers
-        self.na = len(anchors[0]) // 2  # number of anchors
-        self.grid = [tf.zeros(1)] * self.nl  # init grid
-        self.anchors = tf.convert_to_tensor(w.anchors.cpu().detach().numpy(), dtype=tf.float32)
-        self.anchor_grid = tf.reshape(self.anchors * tf.reshape(self.stride, [self.nl, 1, 1]), [self.nl, 1, -1, 1, 2])
-        self.m = [TFConv2d(x, self.no * self.na, 1, w=w.m[i]) for i, x in enumerate(ch)]
-        self.ia = [TFImplicitA(x) for x in ch]
-        self.im = [TFImplicitM(self.no * self.na) for _ in ch]
-        self.training = False  # set to False after building model
-        self.imgsz = imgsz
-        for i in range(self.nl):
-            ny, nx = self.imgsz[0] // self.stride[i], self.imgsz[1] // self.stride[i]
-            self.grid[i] = self._make_grid(nx, ny)
-
-    def call(self, inputs):
-        z = []  # inference output
-        x = []
-        for i in range(self.nl):
-            x.append(self.m[i](inputs[i]))
-            # x(bs,20,20,255) to x(bs,3,20,20,85)
-            ny, nx = self.imgsz[0] // self.stride[i], self.imgsz[1] // self.stride[i]
-            x[i] = tf.reshape(x[i], [-1, ny * nx, self.na, self.no])
-
-            if not self.training:  # inference
-                y = x[i]
-                grid = tf.transpose(self.grid[i], [0, 2, 1, 3]) - 0.5
-                anchor_grid = tf.transpose(self.anchor_grid[i], [0, 2, 1, 3]) * 4
-                xy = (tf.sigmoid(y[..., 0:2]) * 2 + grid) * self.stride[i]  # xy
-                wh = tf.sigmoid(y[..., 2:4]) ** 2 * anchor_grid
-                # Normalize xywh to 0-1 to reduce calibration error
-                xy /= tf.constant([[self.imgsz[1], self.imgsz[0]]], dtype=tf.float32)
-                wh /= tf.constant([[self.imgsz[1], self.imgsz[0]]], dtype=tf.float32)
-                y = tf.concat([xy, wh, tf.sigmoid(y[..., 4:5 + self.nc]), y[..., 5 + self.nc:]], -1)
-                z.append(tf.reshape(y, [-1, self.na * ny * nx, self.no]))
-
-        return tf.transpose(x, [0, 2, 1, 3]) if self.training else (tf.concat(z, 1),)
-
-    @staticmethod
-    def _make_grid(nx=20, ny=20):
-        # yv, xv = torch.meshgrid([torch.arange(ny), torch.arange(nx)])
-        # return torch.stack((xv, yv), 2).view((1, 1, ny, nx, 2)).float()
-        xv, yv = tf.meshgrid(tf.range(nx), tf.range(ny))
-        return tf.cast(tf.reshape(tf.stack([xv, yv], 2), [1, 1, ny * nx, 2]), dtype=tf.float32)
-
 
 class TFPad(keras.layers.Layer):
     # Pad inputs in spatial dimensions 1 and 2
@@ -273,7 +145,7 @@ class TFConv(keras.layers.Layer):
         return self.act(self.bn(self.conv(inputs)))
 
 class TFDWConv(keras.layers.Layer):
-    # Depthwise convolution
+    """Depthwise convolution"""
     def __init__(self, c1, c2, k=1, s=1, p=None, act=True, w=None):
         # ch_in, ch_out, weights, kernel, stride, padding, groups
         super().__init__()
@@ -292,7 +164,6 @@ class TFDWConv(keras.layers.Layer):
 
     def call(self, inputs):
         return self.act(self.bn(self.conv(inputs)))
-
 
 class TFDWConvTranspose2d(keras.layers.Layer):
     # Depthwise ConvTranspose2d
@@ -463,7 +334,7 @@ class TFDetect(keras.layers.Layer):
         self.no = nc + 5  # number of outputs per anchor
         self.nl = len(anchors)  # number of detection layers
         self.na = len(anchors[0]) // 2  # number of anchors
-        self.grid = [0] * self.nl  # init grid
+        self.grid = [tf.zeros(1)] * self.nl  # init grid
         self.anchors = tf.convert_to_tensor(w.anchors.detach().cpu().numpy(), dtype=tf.float32)
         self.anchor_grid = tf.reshape(self.anchors * tf.reshape(self.stride, [self.nl, 1, 1]), [self.nl, 1, -1, 1, 2])
         self.m = [TFConv2d(x, self.no * self.na, 1, w=w.m[i]) for i, x in enumerate(ch)]
@@ -483,23 +354,20 @@ class TFDetect(keras.layers.Layer):
             x[i] = tf.reshape(x[i], [-1, ny * nx, self.na, self.no])
 
             if not self.training:  # inference
-                y = x[i]
+                y = tf.sigmoid(x[i])
                 grid = tf.transpose(self.grid[i], [0, 2, 1, 3]) - 0.5
                 anchor_grid = tf.transpose(self.anchor_grid[i], [0, 2, 1, 3]) * 4
-                xy = (tf.sigmoid(y[..., 0:2]) * 2 + grid) * self.stride[i]  # xy
-                wh = tf.sigmoid(y[..., 2:4]) ** 2 * anchor_grid
+                xy = y[..., 0:2] * (2. * self.stride[i]) + (self.stride[i] * (grid - 0.5))
+                wh = y[..., 2:4] ** 2 * (4 * anchor_grid)  # new wh
                 # Normalize xywh to 0-1 to reduce calibration error
                 xy /= tf.constant([[self.imgsz[1], self.imgsz[0]]], dtype=tf.float32)
                 wh /= tf.constant([[self.imgsz[1], self.imgsz[0]]], dtype=tf.float32)
-                y = tf.concat([xy, wh, tf.sigmoid(y[..., 4:5 + self.nc]), y[..., 5 + self.nc:]], -1)
-                z.append(tf.reshape(y, [-1, self.na * ny * nx, self.no]))
-
+                y = tf.concat([xy, wh, y[..., 4:5 + self.nc], y[..., 5 + self.nc:]], -1)
+                z.append(tf.reshape(y, [-1, self.na * nx * ny, self.no]))
         return tf.transpose(x, [0, 2, 1, 3]) if self.training else (tf.concat(z, 1),)
 
     @staticmethod
     def _make_grid(nx=20, ny=20):
-        # yv, xv = torch.meshgrid([torch.arange(ny), torch.arange(nx)])
-        # return torch.stack((xv, yv), 2).view((1, 1, ny, nx, 2)).float()
         xv, yv = tf.meshgrid(tf.range(nx), tf.range(ny))
         return tf.cast(tf.reshape(tf.stack([xv, yv], 2), [1, 1, ny * nx, 2]), dtype=tf.float32)
 
@@ -617,10 +485,13 @@ def parse_model(d, ch, model, imgsz):  # model_dict, input_channels(3)
             c2 = ch[f[0]]
         elif m is Foldcut:
             c2 = ch[f] // 2
-        elif m in [Detect, IDetect, IAuxDetect, IBin, IKeypoint]:
+        elif m in [Detect, IAuxDetect, IBin, IKeypoint]:
             args.append([ch[x] for x in f])
             if isinstance(args[1], int):  # number of anchors
                 args[1] = [list(range(args[1] * 2))] * len(f)
+        elif m in [IDetect]:
+            LOGGER.info(f'Please retrain the model, {m} is unsupported')
+            sys.exit()
         elif m is ReOrg:
             c2 = ch[f] * 4
         elif m is Contract:

@@ -70,8 +70,7 @@ class Detect(nn.Module):
                     # y.tensor_split((2, 4, 5), 4)  # torch 1.8.0
                     xy, wh, conf = y.split((2, 2, self.nc + 1), 4)
                     # new xy
-                    xy = xy * (2. * self.stride[i]) + \
-                        (self.stride[i] * (self.grid[i] - 0.5))
+                    xy = xy * (2. * self.stride[i]) + (self.stride[i] * (self.grid[i] - 0.5))
                     wh = wh ** 2 * (4 * self.anchor_grid[i].data)  # new wh
                     y = torch.cat((xy, wh, conf), 4)
                 z.append(y.view(bs, -1, self.no))

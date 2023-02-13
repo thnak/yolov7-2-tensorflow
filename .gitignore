@@ -3,6 +3,10 @@ runs/
 models/*.pt
 models/*.ptl
 models/*.onnx
+models/*.pb
+models/best_web_model/
+models/best_openvino_model/
+models/best_saved_model
 *.txt
 *.png
 *.npy
