@@ -93,7 +93,7 @@ def kmean_anchors(path='./data/coco.yaml', n=9, img_size=640, thr=4.0, gen=1000,
     def print_results(k, device='cpu'):
         k = k[np.argsort(k.prod(1))]  # sort small to large
         x, best = metric(k, wh0)
-        bpr, aat = (best > thr).cpu().float().mean(), (x > thr).cpu().float().mean() * n  # best possible recall, anch > thr
+        bpr, aat = (best > thr).float().mean(), (x > thr).float().mean() * n  # best possible recall, anch > thr
         print(f'{prefix}thr={thr:.2f}: {bpr:.4f} best possible recall, {aat:.2f} anchors past thr')
         print(f'{prefix}n={n}, img_size={img_size}, metric_all={x.mean():.3f}/{best.mean():.3f}-mean/best, '
               f'past_thr={x[x > thr].mean():.3f}-mean: ', end='')
@@ -128,21 +128,21 @@ def kmean_anchors(path='./data/coco.yaml', n=9, img_size=640, thr=4.0, gen=1000,
     k *= s
     wh = torch.tensor(wh, dtype=torch.float32)  # filtered
     wh0 = torch.tensor(wh0, dtype=torch.float32)  # unfiltered
-    k = print_results(k)
+    k = print_results(k, device)
     # Evolve
     npr = np.random
-    f, sh, mp, s = anchor_fitness(k), k.shape, 0.9, 0.1  # fitness, generations, mutation prob, sigma
+    f, sh, mp, s = anchor_fitness(k, device=device), k.shape, 0.9, 0.1  # fitness, generations, mutation prob, sigma
     pbar = tqdm(range(gen), desc=f'{prefix}Evolving anchors with Genetic Algorithm:')  # progress bar
     for _ in pbar:
         v = np.ones(sh)
         while (v == 1).all():  # mutate until a change occurs (prevent duplicates)
             v = ((npr.random(sh) < mp) * npr.random() * npr.randn(*sh) * s + 1).clip(0.3, 3.0)
         kg = (k.copy() * v).clip(min=2.0)
-        fg = anchor_fitness(kg)
+        fg = anchor_fitness(kg, device=device)
         if fg > f:
             f, k = fg, kg.copy()
             pbar.desc = f'{prefix}Evolving anchors with Genetic Algorithm: fitness = {f:.4f}'
             if verbose:
-                print_results(k)
+                print_results(k, device)
 
-    return print_results(k)
+    return print_results(k, device)
