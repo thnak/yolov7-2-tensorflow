@@ -137,7 +137,7 @@ def smart_optimizer(model, name='Adam', lr=0.001, momentum=0.9, decay=1e-5):
 
 
 def select_device(device='', batch_size=None):
-    s = f'YOLOv7 🚀 git commit {git_describe() or date_modified()} torch {torch.__version__} '  # string
+    s = f'YOLOv7 🚀 git commit {git_describe() or date_modified()} Torch {torch.__version__} '  # string
     if 'dml' in device.lower():
         try:
             check_requirements('torch-directml')
@@ -145,16 +145,17 @@ def select_device(device='', batch_size=None):
             s = f'{s}DirectML'
             logger.info(f'{s}')
             return torch_directml.device(torch_directml.default_device()), s
-        except:
-            pass
+        except ImportError as err:
+            logger.info(f'{err} init error switching')
     if 'xla' in device.lower():
         try:
-            check_requirements('torch-xla')
+            check_requirements('torch==1.13.0')
+            logger.info(f"https://storage.googleapis.com/tpu-pytorch/wheels/tpuvm/torch_xla-1.13-cp38-cp38-linux_x86_64.whl, torch_xla[tpuvm]")
             import torch_xla.core.xla_model as xm
             s = f'{s}XLA'
             return xm.xla_device(), s
-        except:
-            pass
+        except ImportError as im:
+            logger.info(f'{im} init error switching')
     if torch.cuda.is_available():
         device = device if device.isnumeric() and int(device) >= 0 and int(
             device) < torch.cuda.device_count() else 'cpu'

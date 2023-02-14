@@ -40,7 +40,12 @@ def test(data,
          half_precision=True,
          trace=False,
          is_coco=False,
-         v5_metric=False):
+         v5_metric=False,
+         project=None,
+         name=None,
+         task=None,
+         exist_ok=None,
+         device=None):
     # Initialize/load model and set device
     training = model is not None
     if training:  # called by train.py
@@ -48,20 +53,19 @@ def test(data,
 
     else:  # called directly
         set_logging()
-        device = select_device(opt.device, batch_size=batch_size)[0]
+        device = device if isinstance(device, str) else str(device)
+        device = select_device(device, batch_size=batch_size)[0]
 
         # Directories
-        save_dir = Path(increment_path(Path(opt.project) / opt.name, exist_ok=opt.exist_ok))  # increment run
+        save_dir = Path(increment_path(Path(project) / name, exist_ok=exist_ok))  # increment run
         (save_dir / 'labels' if save_txt else save_dir).mkdir(parents=True, exist_ok=True)  # make dir
-
         # Load model
         map_device = 'cpu' if device.type =='privateuseone' else device
-        model = attempt_load(weights, map_location=map_device)  # load FP32 model
+        model = attempt_load(weights, map_location=map_device).to(device)  # load FP32 model
         gs = max(int(model.stride.max()), 32)  # grid size (max stride)
         imgsz = check_img_size(imgsz, s=gs)  # check img_size
-        
         if trace:
-            model = TracedModel(model, device, imgsz)
+            model = TracedModel(model, device, imgsz, saveTrace=False)
 
     # Half
     half = device.type in ['cuda'] and half_precision  # half precision only supported on CUDA
@@ -88,8 +92,9 @@ def test(data,
     if not training:
         if device.type == 'cuda':
             model(torch.zeros(1, 3, imgsz, imgsz).to(device).type_as(next(model.parameters())))  # run once
-        task = opt.task if opt.task in ('train', 'val', 'test') else 'val'  # path to train/val/test images
-        dataloader = create_dataloader(data[task], imgsz, batch_size, gs, opt, pad=0.5, rect=True,
+        task = task if task in ('train', 'val', 'test') else 'val'  # path to train/val/test images
+        if dataloader is None:
+            dataloader = create_dataloader(data[task], imgsz, batch_size, gs, opt, pad=0.5, rect=True,
                                        prefix=colorstr(f'{task}: '))[0]
 
     if v5_metric:

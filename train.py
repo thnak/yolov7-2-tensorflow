@@ -56,12 +56,8 @@ def train(hyp, opt, tb_writer=None,
         yaml.dump(hyp, f, sort_keys=False)
     with open(save_dir / 'opt.yaml', 'w') as f:
         yaml.dump(vars(opt), f, sort_keys=False)
-    if not hasattr(opt, 'git_status'):
-        device, git_status = select_device(opt.device, batch_size=opt.batch_size)
-    else:
-        device = opt.device
-        git_status = opt.git_status
-    opt.device = device
+
+    device, git_status = select_device(opt.device, batch_size=opt.batch_size)
     opt.git_status = git_status
     logger.info(colorstr('hyperparameters: ') +
                 ', '.join(f'{k}={v}' for k, v in hyp.items()))
@@ -84,7 +80,7 @@ def train(hyp, opt, tb_writer=None,
     is_coco = opt.data.endswith('coco.yaml')
 
     loggers = {'wandb': None}  # loggers dict
-    map_device = 'cpu' if device.type == 'privateuseone' else device
+    map_device = 'cpu' if device.type in ['privateuseone', 'xla'] else device
     if rank in [-1, 0]:
         opt.hyp = hyp  # add hyperparameters
         run_id = torch.load(weights, map_location=map_device).get(
@@ -118,7 +114,7 @@ def train(hyp, opt, tb_writer=None,
         state_dict = intersect_dicts(
             state_dict, model.state_dict(), exclude=exclude)  # intersect
         model.load_state_dict(state_dict, strict=False)  # load
-        ckpt['best_fitness'] = ckpt['best_fitness'] if 'best fitness' in ckpt else 'unknown'
+        ckpt['best_fitness'] = ckpt['best_fitness'] if 'best_fitness' in ckpt else 'unknown'
         ckpt['best_fitness'] = ckpt['best_fitness'].tolist()[0] if isinstance(ckpt['best_fitness'], np.ndarray) else \
             ckpt['best_fitness']
         model_version = ckpt['model_version'] if 'model_version' in ckpt else 0
@@ -280,8 +276,8 @@ def train(hyp, opt, tb_writer=None,
             # Anchors
             if not opt.noautoanchor:
                 check_anchors(dataset, model=model,
-                              thr=hyp['anchor_t'], imgsz=imgsz, device=map_device)
-            model.to(device).half().float()
+                              thr=hyp['anchor_t'], imgsz=imgsz, device='cpu')
+            model.half().float() if device.type == 'xla' else model.to(device).half().float()
 
     # DDP mode
     if cuda and rank != -1:
@@ -320,7 +316,7 @@ def train(hyp, opt, tb_writer=None,
     torch.save(model, wdir / 'init.pt')
     # epoch ------------------------------------------------------------------
     for epoch in range(start_epoch, epochs):
-        model.train()
+        model.to(device).train()
         # Update image weights (optional)
         if opt.image_weights:
             # Generate indices
@@ -490,14 +486,15 @@ def train(hyp, opt, tb_writer=None,
                     'epoch': epoch,
                     'best_fitness': best_fitness,
                     'training_results': results_file.read_text(),
-                    'model': deepcopy(model.module if is_parallel(model) else model).float(),
+                    'model': deepcopy(model.module if is_parallel(model) else model),
                     'input_shape': list(imgs.shape[1:]) if isinstance(imgs.shape[1:], torch.Size) else imgs.shape[1:],
                     # BCWH to CWH
-                    'ema': deepcopy(ema.ema).float(),
+                    'ema': deepcopy(ema.ema).to(map_device),
                     'updates': ema.updates,
                     'optimizer': optimizer.state_dict(),
                     'wandb_id': wandb_logger.wandb_run.id if wandb_logger.wandb else None,
                     'hyp': hyp,
+                    'git': git_status,
                     'training_opt': vars(opt),
                     'training_date': datetime.now().isoformat("#")
                 }
@@ -542,9 +539,7 @@ def train(hyp, opt, tb_writer=None,
                                  imgsz=imgsz_test,
                                  conf_thres=0.001,
                                  iou_thres=0.7,
-                                 model=attempt_load(best,
-                                                    map_device).half() if device.type == 'cuda' else attempt_load(
-                                     best, map_device),
+                                 weights=best,
                                  single_cls=opt.single_cls,
                                  dataloader=val_dataloader,
                                  save_dir=save_dir,
@@ -552,7 +547,13 @@ def train(hyp, opt, tb_writer=None,
                                  verbose=True,
                                  plots=False,
                                  is_coco=is_coco,
-                                 v5_metric=opt.v5_metric)[0]
+                                 v5_metric=opt.v5_metric,
+                                 device=opt.device,
+                                 task='val',
+                                 name=opt.name,
+                                 project=opt.project,
+                                 exist_ok=opt.exist_ok,
+                                 trace=True)[0]
 
             prefix = colorstr('Testing')
             if opt.evolve < 1 and test_path != val_path:
@@ -562,9 +563,7 @@ def train(hyp, opt, tb_writer=None,
                                       imgsz=imgsz_test,
                                       conf_thres=0.001,
                                       iou_thres=0.7,
-                                      model=attempt_load(best,
-                                                         map_device).half() if device.type == 'cuda' else attempt_load(
-                                          best, map_device),
+                                      weights=best,
                                       single_cls=opt.single_cls,
                                       dataloader=test_dataloader,
                                       save_dir=save_dir,
@@ -572,9 +571,14 @@ def train(hyp, opt, tb_writer=None,
                                       verbose=True,
                                       plots=False,
                                       is_coco=is_coco,
-                                      v5_metric=opt.v5_metric)[0]
+                                      v5_metric=opt.v5_metric,
+                                      device=opt.device,
+                                      task='test',
+                                      name=opt.name,
+                                      project=opt.project,
+                                      exist_ok=opt.exist_ok,
+                                      trace=True)[0]
 
-                # Strip optimizers
         final = best if best.exists() else last  # final model
         for f in last, best:
             if f.exists():
@@ -655,6 +659,7 @@ if __name__ == '__main__':
     opt.world_size = int(os.environ['WORLD_SIZE']) if 'WORLD_SIZE' in os.environ else 1
     opt.global_rank = int(os.environ['RANK']) if 'RANK' in os.environ else -1
     set_logging(opt.global_rank)
+    opt.epochs = 300 if opt.epochs < 1 else opt.epochs
     # if opt.global_rank in [-1, 0]:
     #     check_git_status()
     #     check_requirements()

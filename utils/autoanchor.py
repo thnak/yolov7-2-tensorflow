@@ -1,5 +1,3 @@
-# Auto-anchor utils
-
 import numpy as np
 import torch
 import yaml
@@ -28,7 +26,8 @@ def check_anchors(dataset, model, thr=4.0, imgsz=640, device='cpu'):
     m = model.module.model[-1] if hasattr(model, 'module') else model.model[-1]  # Detect()
     shapes = imgsz * dataset.shapes / dataset.shapes.max(1, keepdims=True)
     scale = np.random.uniform(0.9, 1.1, size=(shapes.shape[0], 1))  # augment scale
-    wh = torch.tensor(np.concatenate([l[:, 3:5] * s for s, l in zip(shapes * scale, dataset.labels)]), device=device).float()  # wh
+    wh = torch.tensor(np.concatenate([l[:, 3:5] * s for s, l in zip(shapes * scale, dataset.labels)]),
+                      device=device).float()  # wh
 
     def metric(k):  # compute metric
         r = wh[:, None] / k[None]
@@ -38,7 +37,7 @@ def check_anchors(dataset, model, thr=4.0, imgsz=640, device='cpu'):
         bpr = (best > 1. / thr).float().mean()  # best possible recall
         return bpr, aat
 
-    anchors = m.anchor_grid.clone().cpu().view(-1, 2)  # current anchors
+    anchors = m.anchor_grid.clone().to(device).view(-1, 2)  # current anchors
     bpr, aat = metric(anchors)
     print(f'anchors/target = {aat:.2f}, Best Possible Recall (BPR) = {bpr:.4f}', end='')
     if bpr < 0.98:  # threshold to recompute
@@ -46,8 +45,8 @@ def check_anchors(dataset, model, thr=4.0, imgsz=640, device='cpu'):
         na = m.anchor_grid.numel() // 2  # number of anchors
         try:
             anchors = kmean_anchors(dataset, n=na, img_size=imgsz, thr=thr, gen=1000, verbose=False, device=device)
-        except Exception as e:
-            print(f'{prefix}ERROR: {e}')
+        except Exception as ex:
+            print(f'{prefix}ERROR: {ex}')
         new_bpr = metric(anchors)[0]
         if new_bpr > bpr:  # replace anchors
             anchors = torch.tensor(anchors, device=m.anchors.device).type_as(m.anchors)
@@ -81,13 +80,14 @@ def kmean_anchors(path='./data/coco.yaml', n=9, img_size=640, thr=4.0, gen=1000,
     prefix = colorstr('autoanchor: ')
 
     def metric(k, wh, device='cpu'):  # compute metrics
+        wh = wh if not isinstance(wh, torch.Tensor) else wh.to(device)
+        k = k if not isinstance(k, torch.Tensor) else k.to(device)
         r = wh[:, None] / k[None]
         x = torch.min(r, 1. / r).min(2)[0]  # ratio metric
-        # x = wh_iou(wh, torch.tensor(k))  # iou metric
         return x, x.max(1)[0]  # x, best_x
 
     def anchor_fitness(k, device='cpu'):  # mutation fitness
-        _, best = metric(torch.tensor(k, device=device, dtype=torch.float32), wh)
+        _, best = metric(torch.tensor(k, device=device, dtype=torch.float32), wh, device)
         return (best * (best > thr).float()).mean()  # fitness
 
     def print_results(k, device='cpu'):
