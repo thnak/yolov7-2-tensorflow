@@ -445,32 +445,32 @@ def train(hyp, opt, tb_writer=None,
                                        is_coco=is_coco,
                                        v5_metric=opt.v5_metric)[:2]
 
-            # Write
-            with open(results_file, 'a') as f:
-                f.write(s + '%10.4g' * 7 % results + '\n')
-            with open(results_file_csv, 'a') as f:
-                csv_writer = csv.writer(f)
-                a = []
-                for x in s.split(' '):
-                    if x not in ['', ' ', '  ', '   ', '    ']:
-                        a.append(x)
-                csv_writer.writerow(tuple(a) + results)
+                # Write
+                with open(results_file, 'a') as f:
+                    f.write(s + '%10.4g' * 7 % results + '\n')
+                with open(results_file_csv, 'a') as f:
+                    csv_writer = csv.writer(f)
+                    a = []
+                    for x in s.split(' '):
+                        if x not in ['', ' ', '  ', '   ', '    ']:
+                            a.append(x)
+                    csv_writer.writerow(tuple(a) + results)
 
-            if len(opt.name) and opt.bucket:
-                os.system('gsutil cp %s gs://%s/results/results%s.txt' %
-                          (results_file, opt.bucket, opt.name))
+                if len(opt.name) and opt.bucket:
+                    os.system('gsutil cp %s gs://%s/results/results%s.txt' %
+                              (results_file, opt.bucket, opt.name))
 
-            # Log
-            tags = ['train/box_loss', 'train/obj_loss', 'train/cls_loss',  # train loss
-                    'metrics/precision', 'metrics/recall', 'metrics/mAP_0.5', 'metrics/mAP_0.5:0.95',
-                    'val/box_loss', 'val/obj_loss', 'val/cls_loss',  # val loss
-                    'x/lr0', 'x/lr1', 'x/lr2']  # params
-            if tb_writer or wandb_logger.wandb:
-                for x, tag in zip(list(mloss[:-1]) + list(results) + lr, tags):
-                    if tb_writer:
-                        tb_writer.add_scalar(tag, x, epoch)  # tensorboard
-                    if wandb_logger.wandb:
-                        wandb_logger.log({tag: x})  # W&B
+                # Log
+                tags = ['train/box_loss', 'train/obj_loss', 'train/cls_loss',  # train loss
+                        'metrics/precision', 'metrics/recall', 'metrics/mAP_0.5', 'metrics/mAP_0.5:0.95',
+                        'val/box_loss', 'val/obj_loss', 'val/cls_loss',  # val loss
+                        'x/lr0', 'x/lr1', 'x/lr2']  # params
+                if tb_writer or wandb_logger.wandb:
+                    for x, tag in zip(list(mloss[:-1]) + list(results) + lr, tags):
+                        if tb_writer:
+                            tb_writer.add_scalar(tag, x, epoch)  # tensorboard
+                        if wandb_logger.wandb:
+                            wandb_logger.log({tag: x})  # W&B
 
             # Update best mAP
             # weighted combination of [P, R, mAP@.5, mAP@.5-.95]
@@ -484,12 +484,12 @@ def train(hyp, opt, tb_writer=None,
                 ckpt = {
                     'model_version': model_version + 1,
                     'epoch': epoch,
-                    'best_fitness': best_fitness,
+                    'best_fitness': best_fitness.tolist()[0],
                     'training_results': results_file.read_text(),
-                    'model': deepcopy(model.module if is_parallel(model) else model),
+                    'model': deepcopy(model.module if is_parallel(model) else model).half(),
                     'input_shape': list(imgs.shape[1:]) if isinstance(imgs.shape[1:], torch.Size) else imgs.shape[1:],
                     # BCWH to CWH
-                    'ema': deepcopy(ema.ema).to(map_device),
+                    'ema': deepcopy(ema.ema).half(),
                     'updates': ema.updates,
                     'optimizer': optimizer.state_dict(),
                     'wandb_id': wandb_logger.wandb_run.id if wandb_logger.wandb else None,

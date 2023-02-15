@@ -138,13 +138,14 @@ def smart_optimizer(model, name='Adam', lr=0.001, momentum=0.9, decay=1e-5):
 
 def select_device(device='', batch_size=None):
     s = f'YOLOv7 🚀 git commit {git_describe() or date_modified()} Torch {torch.__version__} '  # string
-    if 'dml' in device.lower():
+    device = device.lower()
+    if device.lower() in [f'dml:{x}' for x in range(10)]:
         try:
             check_requirements('torch-directml')
             import torch_directml
             s = f'{s}DirectML'
             logger.info(f'{s}')
-            return torch_directml.device(torch_directml.default_device()), s
+            return torch_directml.device(int(device.split(':')[1])), s
         except ImportError as err:
             logger.info(f'{err} init error switching')
     if 'xla' in device.lower():
