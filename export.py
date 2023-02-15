@@ -66,7 +66,7 @@ if __name__ == '__main__':
         logging.info(f'# Load PyTorch model')
         device, gitstatus = select_device(opt.device)
         map_device = 'cpu' if device.type == 'privateuseone' else device
-        model = attempt_load(weight, map_location=map_device)  # load FP32 model
+        model = attempt_load(weight, map_location=map_device).to(map_device)  # load FP32 model
         ckpt = torch.load(weight, map_location=map_device)
 
         ckpt['best_fitness'] = ckpt['best_fitness'] if 'best_fitness' in ckpt else 'unknown'

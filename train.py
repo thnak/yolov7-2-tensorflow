@@ -12,17 +12,16 @@ import numpy as np
 import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as functional
-import torch.optim.lr_scheduler as lr_scheduler
+from torch.optim.lr_scheduler import LambdaLR
 import torch.utils.data
 import yaml
-from torch.cuda import amp
+from torch import autocast, float16, bfloat16, float32
+from torch.cuda.amp import GradScaler
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
-# import test.py to get mAP after each epoch
 from tools.test import test as tester
-from models.experimental import attempt_load
 from models.yolo import Model
 from utils.autoanchor import check_anchors
 from utils.datasets import create_dataloader
@@ -80,7 +79,7 @@ def train(hyp, opt, tb_writer=None,
     is_coco = opt.data.endswith('coco.yaml')
 
     loggers = {'wandb': None}  # loggers dict
-    map_device = 'cpu' if device.type in ['privateuseone', 'xla'] else device
+    map_device = 'cpu' if device.type in ['privateuseone', 'xla', 'cpu'] else device
     if rank in [-1, 0]:
         opt.hyp = hyp  # add hyperparameters
         run_id = torch.load(weights, map_location=map_device).get(
@@ -107,12 +106,15 @@ def train(hyp, opt, tb_writer=None,
         with torch_distributed_zero_first(rank):
             attempt_download(weights)  # download if not found locally
         ckpt = torch.load(weights, map_location=map_device)  # load checkpoint
-        model = Model(opt.cfg or ckpt['model'].yaml, ch=3, nc=nc, anchors=hyp.get('anchors')).to(device)  # create
-        exclude = ['anchor'] if (opt.cfg or hyp.get(
-            'anchors')) and not opt.resume else []  # exclude keys
+        model = Model(opt.cfg or ckpt['model'].yaml,
+                      ch=1 if opt.single_channel else 3,
+                      nc=nc,
+                      anchors=hyp.get('anchors')).to(device)  # create
+        exclude = ['anchor'] if (opt.cfg or hyp.get('anchors')) and not opt.resume else []  # exclude keys
         state_dict = ckpt['model'].float().state_dict()  # to FP32
-        state_dict = intersect_dicts(
-            state_dict, model.state_dict(), exclude=exclude)  # intersect
+        state_dict = intersect_dicts(state_dict,
+                                     model.state_dict(),
+                                     exclude=exclude)  # intersect
         model.load_state_dict(state_dict, strict=False)  # load
         ckpt['best_fitness'] = ckpt['best_fitness'] if 'best_fitness' in ckpt else 'unknown'
         ckpt['best_fitness'] = ckpt['best_fitness'].tolist()[0] if isinstance(ckpt['best_fitness'], np.ndarray) else \
@@ -151,14 +153,16 @@ def train(hyp, opt, tb_writer=None,
     hyp['weight_decay'] *= total_batch_size * \
                            accumulate / nbs  # scale weight_decay
     logger.info(f"Scaled weight_decay = {hyp['weight_decay']}")
-    optimizer = smart_optimizer(model, opt.optimizer, lr=hyp['lr0'], decay=hyp['weight_decay'],
+    optimizer = smart_optimizer(model, opt.optimizer,
+                                lr=hyp['lr0'],
+                                decay=hyp['weight_decay'],
                                 momentum=hyp['momentum'])
 
     if opt.linear_lr:
         lf = lambda x: (1 - x / (epochs - 1)) * (1.0 - hyp['lrf']) + hyp['lrf']  # linear
     else:
         lf = one_cycle(1, hyp['lrf'], epochs)  # cosine 1->hyp['lrf']
-    scheduler = lr_scheduler.LambdaLR(optimizer, lr_lambda=lf)
+    scheduler = LambdaLR(optimizer, lr_lambda=lf)
     ema = ModelEMA(model) if rank in [-1, 0] else None
     # Resume
     start_epoch, best_fitness = 0, 0.0
@@ -187,7 +191,7 @@ def train(hyp, opt, tb_writer=None,
             logger.info('%s has been trained for %g epochs. Fine-tuning for %g additional epochs.' %
                         (weights, ckpt['epoch'], epochs))
             epochs += ckpt['epoch']  # finetune additional epochs
-        del ckpt, state_dict
+        del ckpt, state_dict, nodes, freeze
 
     # Image sizes
     gs = max(int(model.stride.max()), 32)  # grid size (max stride)
@@ -246,7 +250,7 @@ def train(hyp, opt, tb_writer=None,
         else:
             val_dataloader = data_loader['val_dataloader']
 
-        if test_path != val_path:
+        if test_path != val_path and os.path.exists(test_path):
             if data_loader['test_dataloader'] is None:
                 test_dataloader = create_dataloader(test_path,
                                                     imgsz_test,
@@ -263,7 +267,7 @@ def train(hyp, opt, tb_writer=None,
             else:
                 test_dataloader = data_loader['test_dataloader']
         else:
-            logger.info(colorstr('Val and Test is the same thing!'))
+            logger.info(colorstr('Val and Test is the same thing or test path does not exists!'))
 
         if not opt.resume:
             labels = np.concatenate(dataset.labels, 0)
@@ -306,7 +310,7 @@ def train(hyp, opt, tb_writer=None,
     # P, R, mAP@.5, mAP@.5-.95, val_loss(box, obj, cls)
     results = (0, 0, 0, 0, 0, 0, 0)
     scheduler.last_epoch = start_epoch - 1  # do not move
-    scaler = amp.GradScaler(enabled=cuda)
+    scaler = GradScaler(enabled=cuda)
     compute_loss_ota = ComputeLossOTA(model) if p5_model else ComputeLossAuxOTA(model)  # init loss class
     compute_loss = ComputeLoss(model)  # init loss class
     logger.info(f'Image sizes {imgsz} train, {imgsz_test} test\n'
@@ -316,17 +320,18 @@ def train(hyp, opt, tb_writer=None,
     torch.save(model, wdir / 'init.pt')
     # epoch ------------------------------------------------------------------
     for epoch in range(start_epoch, epochs):
-        model.to(device).train()
+        model.to(device).train(mode=True)
         # Update image weights (optional)
         if opt.image_weights:
             # Generate indices
             if rank in [-1, 0]:
                 cw = model.class_weights.cpu().numpy() * (1 - maps) ** 2 / nc  # class weights
-                iw = labels_to_image_weights(
-                    dataset.labels, nc=nc,
-                    class_weights=cw)  # image weights
-                dataset.indices = random.choices(
-                    range(dataset.n), weights=iw, k=dataset.n)  # rand weighted idx
+                iw = labels_to_image_weights(dataset.labels,
+                                             nc=nc,
+                                             class_weights=cw)  # image weights
+                dataset.indices = random.choices(range(dataset.n),
+                                                 weights=iw,
+                                                 k=dataset.n)  # rand weighted idx
             # Broadcast if DDP
             if rank != -1:
                 indices = (torch.tensor(dataset.indices) if rank ==
@@ -342,7 +347,7 @@ def train(hyp, opt, tb_writer=None,
         logger.info(('\n' + '%10s' * 8) % tag_results)
         if rank in [-1, 0]:
             pbar = tqdm(pbar, total=nb)  # progress bar
-        optimizer.zero_grad()
+
         # batch -------------------------------------------------------------
         for i, (imgs, targets, paths, _) in pbar:
             # number integrated batches (since train start)
@@ -374,10 +379,12 @@ def train(hyp, opt, tb_writer=None,
                         imgs, size=ns, mode='bilinear', align_corners=False, antialias=False)
 
             # Forward
-            with amp.autocast(enabled=cuda):
+            with autocast(enabled=True if device.type in ['cpu', 'cuda'] else False, device_type=map_device):
+                optimizer.zero_grad()
                 pred = model(imgs)  # forward
                 if 'loss_ota' not in hyp or hyp['loss_ota'] == 1:
-                    loss, loss_items = compute_loss_ota([pre.to(map_device) for pre in pred], targets.to(map_device),
+                    loss, loss_items = compute_loss_ota([pre.to(map_device) for pre in pred],
+                                                        targets.to(map_device),
                                                         imgs.to(map_device))  # loss scaled by batch_size
                 else:
                     loss, loss_items = compute_loss([pre.to(map_device) for pre in pred],
@@ -403,8 +410,9 @@ def train(hyp, opt, tb_writer=None,
                 mloss = (mloss * i + loss_items.to(device)) / (i + 1)  # update mean losses
                 mem = '%.3gG' % (torch.cuda.memory_reserved() / 1E9 if torch.cuda.is_available() else 0)  # (GB)
                 s = ('%10s' * 2 + '%10.4g' * 6) % ('%g/%g' % (epoch,
-                                                              epochs - 1), mem, *mloss, targets.shape[0],
-                                                   imgs.shape[-1])
+                                                            epochs - 1), mem, 
+                                                            *mloss, targets.shape[0],
+                                                            imgs.shape[-1])
                 pbar.set_description(s)
 
                 # Plot
@@ -484,7 +492,7 @@ def train(hyp, opt, tb_writer=None,
                 ckpt = {
                     'model_version': model_version + 1,
                     'epoch': epoch,
-                    'best_fitness': best_fitness.tolist()[0],
+                    'best_fitness': best_fitness,
                     'training_results': results_file.read_text(),
                     'model': deepcopy(model.module if is_parallel(model) else model).half(),
                     'input_shape': list(imgs.shape[1:]) if isinstance(imgs.shape[1:], torch.Size) else imgs.shape[1:],
@@ -623,6 +631,7 @@ if __name__ == '__main__':
     parser.add_argument('--augment', action='store_true', help='using augment for training')
     parser.add_argument('--batch-size', type=int, default=16, help='total batch size for all GPUs')
     parser.add_argument('--img-size', nargs='+', type=int, default=[640, 640], help='[train, test] image sizes')
+    parser.add_argument('--single-channel', action='store_true', help='single channel image training')
     parser.add_argument('--rect', action='store_true', help='rectangular training')
     parser.add_argument('--resume', nargs='?', const=True, default=False, help='resume most recent training')
     parser.add_argument('--nosave', action='store_true', help='only save final checkpoint')

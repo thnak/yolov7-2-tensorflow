@@ -1452,6 +1452,7 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
     no = na * (nc + 5)  # number of outputs = anchors * (classes + 5)
 
     layers, save, c2 = [], [], ch[-1]  # layers, savelist, ch out
+    single_ch = c2 == 1
     # from, number, module, args
     for i, (f, n, m, args) in enumerate(d['backbone'] + d['head']):
         m = eval(m) if isinstance(m, str) else m  # eval strings
@@ -1473,7 +1474,7 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
                  Ghost, GhostCSPA, GhostCSPB, GhostCSPC,
                  SwinTransformerBlock, STCSPA, STCSPB, STCSPC,
                  SwinTransformer2Block, ST2CSPA, ST2CSPB, ST2CSPC, C3, C2f]:
-            c1, c2 = ch[f], args[0]
+            c1, c2 = ch[f], args[0]/3 if single_ch else args[0]
             if c2 != no:  # if not output
                 c2 = make_divisible(c2 * gw, 8)
 

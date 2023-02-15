@@ -143,23 +143,32 @@ def select_device(device='', batch_size=None):
         try:
             check_requirements('torch-directml')
             import torch_directml
-            s = f'{s}DirectML'
+            assert torch_directml.device_count() and torch_directml.is_available(), f'DirectML device unavailable, invalid device {device} requested'
+            device_ = torch_directml.default_device()
+            if int(device.split(':')[1]) < torch_directml.device_count():
+                device_ = int(device.split(':')[1])
+            s = f'{s}DirectML:{device_} {torch_directml.device_name(device_)}'
             logger.info(f'{s}')
-            return torch_directml.device(int(device.split(':')[1])), s
-        except ImportError as err:
-            logger.info(f'{err} init error switching')
-    if 'xla' in device.lower():
+            return torch_directml.device(device_), s
+        except ImportError as ie:
+            logger.exception(f'{ie.name}')
+        except Exception as ex:
+            logger.exception(f'{ex}')
+    if device.lower() in [f'xla:{x}' for x in range(10)]:
         try:
             check_requirements('torch==1.13.0')
             logger.info(f"https://storage.googleapis.com/tpu-pytorch/wheels/tpuvm/torch_xla-1.13-cp38-cp38-linux_x86_64.whl, torch_xla[tpuvm]")
+            logger.warning(f'training with xla device is under developing')
             import torch_xla.core.xla_model as xm
             s = f'{s}XLA'
             return xm.xla_device(), s
-        except ImportError as im:
-            logger.info(f'{im} init error switching')
+        except ImportError as ie:
+            logger.info(f'{ie.name}')
+        except Exception as ex:
+            logger.exception(f'{ex}')
     if torch.cuda.is_available():
-        device = device if device.isnumeric() and int(device) >= 0 and int(
-            device) < torch.cuda.device_count() else 'cpu'
+        if device.lower() in [f'cuda:{x}' for x in range(10)]:
+            device = device if int(device.split(':')[1]) < torch.cuda.device_count() else 'cpu'
     else:
         device = 'cpu'
 
@@ -168,8 +177,7 @@ def select_device(device='', batch_size=None):
         os.environ['CUDA_VISIBLE_DEVICES'] = '-1'  # force torch.cuda.is_available() = False
     elif device:  # non-cpu device requested
         # os.environ['CUDA_VISIBLE_DEVICES'] = device  # set environment variable
-        assert torch.cuda.is_available(), f'CUDA unavailable, invalid device {device} requested'  # check availability
-
+        assert torch.cuda.is_available(), f'CUDA device unavailable, invalid device {device} requested'
     cuda = not cpu and torch.cuda.is_available()
     if cuda:
         n = torch.cuda.device_count()
@@ -184,13 +192,12 @@ def select_device(device='', batch_size=None):
     s = s.encode().decode('ascii', 'ignore') if platform.system() == 'Windows' else s
     logger.info(s)  # emoji-safe
     return torch.device(f'cuda:{device}' if cuda else 'cpu'), s
-    # if torch_directml.is_available() is False else torch_directml.device()
 
 
-def time_synchronized():
+def time_synchronized(device=None):
     """pytorch-accurate time"""
     if torch.cuda.is_available():
-        torch.cuda.synchronize()
+        torch.cuda.synchronize(device=device)
     return time.time()
 
 
