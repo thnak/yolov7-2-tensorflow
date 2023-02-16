@@ -14,6 +14,7 @@ import torch.nn as nn
 import torch.nn.functional as functional
 from torch.optim.lr_scheduler import LambdaLR
 import torch.utils.data
+from torchvision import transforms
 import yaml
 from torch import autocast, float16, bfloat16, float32
 from torch.cuda.amp import GradScaler
@@ -102,6 +103,7 @@ def train(hyp, opt, tb_writer=None,
     # Model
     pretrained = weights.endswith('.pt')
     model_version = 0
+    transformer = transforms.ToPILImage() if opt.single_channel else None
     if pretrained:
         with torch_distributed_zero_first(rank):
             attempt_download(weights)  # download if not found locally
@@ -221,6 +223,7 @@ def train(hyp, opt, tb_writer=None,
                                                 seed=opt.seed,
                                                 image_weights=opt.image_weights,
                                                 quad=opt.quad,
+                                                single_channel=opt.single_channel,
                                                 prefix=colorstr('train: '))
         data_loader['dataloader'], data_loader['dataset'] = dataloader, dataset
     else:
@@ -245,6 +248,7 @@ def train(hyp, opt, tb_writer=None,
                                                rank=-1,
                                                world_size=opt.world_size,
                                                workers=opt.workers,
+                                               single_channel=opt.single_channel,
                                                pad=0.5, prefix=colorstr('val: '))[0]
             data_loader['val_dataloader'] = val_dataloader
         else:
@@ -262,6 +266,7 @@ def train(hyp, opt, tb_writer=None,
                                                     rank=-1,
                                                     world_size=opt.world_size,
                                                     workers=opt.workers,
+                                                    single_channel=opt.single_channel,
                                                     pad=0.5, prefix=colorstr('test: '))[0]
                 data_loader['test_dataloader'] = test_dataloader
             else:
@@ -422,7 +427,9 @@ def train(hyp, opt, tb_writer=None,
                         tb_writer.add_image(str(f), np.moveaxis(plot_images(
                             images=imgs, targets=targets, paths=paths, fname=f, names=names), -1, 0), ni)
                     Thread(target=plot_images, args=(
-                        imgs, targets, paths, f), daemon=True).start()
+                                                    imgs,
+                                                    targets,
+                                                    paths, f), daemon=True).start()
                 elif plots and ni == 10 and wandb_logger.wandb:
                     wandb_logger.log({"Mosaics": [wandb_logger.wandb.Image(str(x), caption=x.name) for x in
                                                   save_dir.glob('train*.jpg') if x.exists()]})
@@ -451,6 +458,7 @@ def train(hyp, opt, tb_writer=None,
                                        wandb_logger=wandb_logger,
                                        compute_loss=compute_loss if device.type != 'privateuseone' else None,
                                        is_coco=is_coco,
+                                       single_channel=opt.single_channel,
                                        v5_metric=opt.v5_metric)[:2]
 
                 # Write
@@ -549,6 +557,7 @@ def train(hyp, opt, tb_writer=None,
                                  iou_thres=0.7,
                                  weights=best,
                                  single_cls=opt.single_cls,
+                                 single_channel=opt.single_channel,
                                  dataloader=val_dataloader,
                                  save_dir=save_dir,
                                  save_json=is_coco,
@@ -574,6 +583,7 @@ def train(hyp, opt, tb_writer=None,
                                       weights=best,
                                       single_cls=opt.single_cls,
                                       dataloader=test_dataloader,
+                                      single_channel=opt.single_channel,
                                       save_dir=save_dir,
                                       save_json=is_coco,
                                       verbose=True,

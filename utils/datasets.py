@@ -16,6 +16,7 @@ from urllib.parse import urlparse
 import cv2
 import numpy as np
 import torch
+from torchvision import transforms
 import torch.nn.functional as F
 from PIL import Image, ExifTags
 from tqdm import tqdm
@@ -60,7 +61,7 @@ def seed_worker(worker_id):
     
 
 def create_dataloader(path, imgsz, batch_size, stride, opt, hyp=None, augment=False, cache='', pad=0.0, rect=False,
-                      rank=-1, world_size=1, workers=8, image_weights=False, quad=False, prefix='', shuffle = True, seed = 0):
+                      rank=-1, world_size=1, workers=8, image_weights=False, quad=False, single_channel=False, prefix='', shuffle = True, seed = 0):
     # Make sure only the first process in DDP process the dataset first, and the following others can use the cache
     if rect and shuffle:
         print('WARNING ⚠️ --rect is incompatible with DataLoader shuffle, setting shuffle=False')
@@ -75,6 +76,7 @@ def create_dataloader(path, imgsz, batch_size, stride, opt, hyp=None, augment=Fa
                                       stride=int(stride),
                                       pad=pad,
                                       image_weights=image_weights,
+                                      single_channel=single_channel,
                                       prefix=prefix)
 
     batch_size = min(batch_size, len(dataset))
@@ -386,7 +388,7 @@ def img2label_paths(img_paths):
 
 class LoadImagesAndLabels(Dataset):  # for training/testing
     def __init__(self, path, img_size=640, batch_size=16, augment=False, hyp=None, rect=False, image_weights=False,
-                 cache_images='ram', single_cls=False, stride=32, pad=0.0, prefix=''):
+                 cache_images='ram', single_cls=False, stride=32, pad=0.0, single_channel=False, prefix=''):
         
         self.img_size = img_size
         self.augment = augment
@@ -400,7 +402,8 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         self.cache_images = cache_images
         self.img_npy = []
         self.albumentations = Albumentations(hyp, rect=rect) if augment else None
-
+        self.single_channel = single_channel
+        self.transforms = transforms.Compose([transforms.ToTensor(), transforms.Grayscale(1)]) if single_channel else None
         try:
             f = []  # image files
             for p in path if isinstance(path, list) else [path]:
@@ -660,7 +663,12 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             labels_out[:, 1:] = torch.from_numpy(labels)
 
         # Convert
-        img = img[:, :, ::-1].transpose(2, 0, 1)  # BGR to RGB, to 3x416x416
+        img = img[:, :, ::-1]
+        if self.transforms:
+            img_tensor = self.transforms(np.ascontiguousarray(img).copy())
+            return img_tensor, labels_out, self.img_files[index], shapes
+        else:
+            img = img.transpose(2, 0, 1)  # BGR to RGB, to 3x416x416
         img = np.ascontiguousarray(img)
 
         return torch.from_numpy(img), labels_out, self.img_files[index], shapes
@@ -702,7 +710,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
 # Ancillary functions --------------------------------------------------------------------------------------------------
 def load_image(self, index):
     img = self.imgs[index]
-    imgnpy = self.img_npy[index] 
+    imgnpy = self.img_npy[index]
     imgnpy = imgnpy if isinstance(imgnpy, str) else 'imgnpy.npy'
     if img is None and os.path.exists(imgnpy) == False:
         path = self.img_files[index]
@@ -1075,7 +1083,7 @@ def random_perspective(img, targets=(), segments=(), degrees=10, translate=.1, s
     # Transform label coordinates
     n = len(targets)
     if n:
-        use_segments = any(x.any() for x in segments) and len(segment)
+        use_segments = any(x.any() for x in segments) and len(segments)
         new = np.zeros((n, 4))
         if use_segments:  # warp segments
             segments = resample_segments(segments)  # upsample

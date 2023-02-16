@@ -45,7 +45,8 @@ def test(data,
          name=None,
          task=None,
          exist_ok=None,
-         device=None):
+         device=None,
+         single_channel=False):
     # Initialize/load model and set device
     training = model is not None
     if training:  # called by train.py
@@ -65,7 +66,7 @@ def test(data,
         gs = max(int(model.stride.max()), 32)  # grid size (max stride)
         imgsz = check_img_size(imgsz, s=gs)  # check img_size
         if trace:
-            model = TracedModel(model, device, imgsz, saveTrace=False)
+            model = TracedModel(model, device, imgsz, saveTrace=False, single_channel=single_channel)
 
     # Half
     half = device.type in ['cuda'] and half_precision  # half precision only supported on CUDA
