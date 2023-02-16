@@ -128,7 +128,7 @@ def train(hyp, opt, tb_writer=None,
         nodes = len(ckpt['model'].yaml['head']) + len(ckpt['model'].yaml['backbone']) - 1
 
     else:
-        model = Model(opt.cfg, ch=3, nc=nc, anchors=hyp.get('anchors')).to(device)  # create
+        model = Model(opt.cfg, ch= 1 if opt.single_channel else 3, nc=nc, anchors=hyp.get('anchors')).to(device)  # create
         nodes = len(model.yaml['head']) + len(model.yaml['backbone']) - 1
 
     p5_model = True if nodes in [77, 105, 121] else False
@@ -384,7 +384,8 @@ def train(hyp, opt, tb_writer=None,
                         imgs, size=ns, mode='bilinear', align_corners=False, antialias=False)
 
             # Forward
-            with autocast(enabled=True if device.type in ['cpu', 'cuda'] else False, device_type=map_device):
+            with autocast(enabled=True if device.type in ['cpu', 'cuda'] else False,
+                          device_type='cuda' if device.type == 'cuda' else 'cpu'):
                 optimizer.zero_grad()
                 pred = model(imgs)  # forward
                 if 'loss_ota' not in hyp or hyp['loss_ota'] == 1:
@@ -498,7 +499,7 @@ def train(hyp, opt, tb_writer=None,
             # Save model
             if (not opt.nosave) or (final_epoch and opt.evolve < 1):  # if save
                 ckpt = {
-                    'model_version': model_version + 1,
+                    'model_version': model_version + 1 if not opt.resume else model_version,
                     'epoch': epoch,
                     'best_fitness': best_fitness,
                     'training_results': results_file.read_text(),
@@ -657,7 +658,7 @@ if __name__ == '__main__':
     parser.add_argument('--device', default='', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     parser.add_argument('--multi-scale', action='store_true', help='vary img-size +/- 50%')
     parser.add_argument('--single-cls', action='store_true', help='train multi-class data as single-class')
-    parser.add_argument('--optimizer', type=str, choices=['SGD', 'Adam', 'AdamW'], default='SGD', help='optimizer')
+    parser.add_argument('--optimizer', type=str, choices=['SGD', 'Adam', 'AdamW', 'Lion'], default='SGD', help='optimizer')
     parser.add_argument('--sync-bn', action='store_true', help='use SyncBatchNorm, only available in DDP mode')
     parser.add_argument('--local_rank', type=int, default=-1, help='DDP parameter, do not modify')
     parser.add_argument('--workers', type=int, default=512, help='maximum number of dataloader workers')

@@ -1453,6 +1453,8 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
 
     layers, save, c2 = [], [], ch[-1]  # layers, savelist, ch out
     single_ch = c2 == 1
+    if single_ch:
+        gw *= 3
     # from, number, module, args
     for i, (f, n, m, args) in enumerate(d['backbone'] + d['head']):
         m = eval(m) if isinstance(m, str) else m  # eval strings

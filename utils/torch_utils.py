@@ -14,6 +14,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision
+from torch.optim import Optimizer
+
 from utils.general import check_requirements, colorstr
 
 try:
@@ -126,6 +128,8 @@ def smart_optimizer(model, name='Adam', lr=0.001, momentum=0.9, decay=1e-5):
         optimizer = torch.optim.RMSprop(pg0, lr=lr, momentum=momentum)
     elif name == 'SGD':
         optimizer = torch.optim.SGD(pg0, lr=lr, momentum=momentum, nesterov=True)
+    elif name == 'Lion':
+        optimizer = Lion(pg0, lr=lr, betas=(momentum, 0.999))
     else:
         raise NotImplementedError(f'Optimizer {name} not implemented.')
 
@@ -413,7 +417,52 @@ class ModelEMA:
         # Update EMA attributes
         copy_attr(self.ema, model, include, exclude)
 
+class Lion(Optimizer):
+    # Based on - https://github.com/lucidrains/lion-pytorch/blob/main/lion_pytorch/lion_pytorch.py
+    def __init__(self, params, lr = 1e-4, betas = (0.9, 0.99), weight_decay = 0.0):
+        assert lr > 0.
+        assert all([0. <= beta <= 1. for beta in betas])
+        defaults = dict(
+            lr = lr,
+            betas = betas,
+            weight_decay = weight_decay
+        )
 
+        super().__init__(params, defaults)
+
+    @torch.no_grad()
+    def step(self, closure = None):
+        loss = None
+        if closure is not None:
+            with torch.enable_grad():
+                loss = closure()
+
+        for group in self.param_groups:
+            for p in group['params']:
+
+                grad = p.grad
+                if grad is None:
+                    continue
+
+                state = self.state[p]
+                lr, wd, beta1, beta2 = group['lr'], group['weight_decay'], *group['betas']
+
+                # stepweight decay
+                p.data.mul_(1 - lr * wd)
+
+                # init state - exponential moving average of gradient values
+                if len(state) == 0:
+                    state['exp_avg'] = torch.zeros_like(p)
+
+                exp_avg = state['exp_avg']
+
+                # weight update
+                update = exp_avg.clone().lerp_(grad, 1 - beta1)
+                p.add_(torch.sign(update), alpha = -lr)
+
+                exp_avg.lerp_(grad, 1 - beta2)
+
+        return loss
 class BatchNormXd(torch.nn.modules.batchnorm._BatchNorm):
     def _check_input_dim(self, input):
         """ The only difference between BatchNorm1d, BatchNorm2d, BatchNorm3d, etc

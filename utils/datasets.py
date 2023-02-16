@@ -441,13 +441,15 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             d = f"Scanning '{cache_path}' images and labels... {nf} found, {nm} background, {ne} empty, {nc} corrupted"
             tqdm(None, desc=prefix + d, total=n, initial=n)  # display cache results
         assert nf > 0 or not augment, f'{prefix}No labels in {cache_path}. Can not train without labels. See {help_url}'
+        self.imgs = [None] * (nf+nm)
+        self.img_npy = [None] * (nf+nm)
 
         # Read cache
         cache.pop('hash')  # remove hash
         cache.pop('version')  # remove version
         labels, shapes, self.segments = zip(*cache.values())
         self.labels = list(labels)
-        self.shapes = np.array(shapes, dtype=np.float64)
+        self.shapes = np.array(shapes, dtype=np.float32)
         self.img_files = list(cache.keys())  # update
         self.label_files = img2label_paths(cache.keys())  # update
         if single_cls:
@@ -486,8 +488,6 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             self.batch_shapes = np.ceil(np.array(shapes) * img_size / stride + pad).astype(np.int32) * stride
 
         # Cache images into memory for faster training (WARNING: large datasets may exceed system RAM)
-        self.imgs = [None] * n  
-        self.img_npy = [None] * n
         if self.cache_images in ['ram','disk']:
             if self.cache_images == 'ram' and not self.check_cache_ram(prefix=prefix):
                 self.cache_images = 'disk'
@@ -499,19 +499,10 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             self.img_hw0, self.img_hw = [None] * n, [None] * n
             results = ThreadPool().imap(lambda x: load_image(*x), zip(repeat(self), range(n)))
             pbar = tqdm(enumerate(results), total=n)
-            checkimgSizeStatus = False
             for i, x in pbar:
                 if self.cache_images == 'disk':
-                    if not self.img_npy[i].exists():
-                        np.save(self.img_npy[i].as_posix(), x[0])
-                    else:
-                        if not checkimgSizeStatus:
-                            testSize = np.load(self.img_npy[i])
-                            if self.img_size in testSize.shape[:2]:
-                                checkimgSizeStatus = True
-                            else:
-                                print(colored(f'You need to re-cache dataset by remove folder {self.im_cache_dir}','red'))
-                                exit()                           
+                    assert not self.img_npy[i].exists(), colored(f'You need to re-cache dataset by remove folder {self.im_cache_dir}','red')
+                    np.save(self.img_npy[i].as_posix(), x[0])
                     gb += os.path.getsize(self.img_npy[i])
                 else:
                     self.imgs[i], self.img_hw0[i], self.img_hw[i] = x
@@ -579,9 +570,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                         f"{nf} found, {nm} background, {ne} empty, {nc} corrupted"
         pbar.close()
 
-        if nf == 0:
-            print(f'{prefix}WARNING: No labels found in {path}. See {help_url}')
-
+        assert nf != 0, f'{prefix}WARNING: No labels found in {path}. See {help_url}'
         x['hash'] = get_hash(self.label_files + self.img_files)
         x['results'] = nf, nm, ne, nc, i + 1
         x['version'] = 0.1  # cache version
