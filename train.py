@@ -4,6 +4,7 @@ import math
 import os
 import random
 import csv
+import sys
 from copy import deepcopy
 from pathlib import Path
 from threading import Thread
@@ -20,7 +21,7 @@ from torch import autocast, float16, bfloat16, float32
 from torch.cuda.amp import GradScaler
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.tensorboard import SummaryWriter
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 from tools.test import test as tester
 from models.yolo import Model
@@ -225,6 +226,7 @@ def train(hyp, opt, tb_writer=None,
                                                 quad=opt.quad,
                                                 single_channel=opt.single_channel,
                                                 prefix=colorstr('train: '))
+
         data_loader['dataloader'], data_loader['dataset'] = dataloader, dataset
     else:
         dataloader, dataset = data_loader['dataloader'], data_loader['dataset']
@@ -293,7 +295,6 @@ def train(hyp, opt, tb_writer=None,
         # nn.Multihead Attention incompatibility with DDP https://github.com/pytorch/pytorch/issues/26698
         model = DDP(model, device_ids=[opt.local_rank], output_device=opt.local_rank,
                     find_unused_parameters=any(isinstance(layer, nn.MultiheadAttention) for layer in model.modules()))
-
     # Model parameters
     hyp['box'] *= 3. / nl  # scale to layers
     hyp['cls'] *= nc / 80. * 3. / nl  # scale to classes and layers
@@ -351,7 +352,7 @@ def train(hyp, opt, tb_writer=None,
         pbar = enumerate(dataloader)
         logger.info(('\n' + '%10s' * 8) % tag_results)
         if rank in [-1, 0]:
-            pbar = tqdm(pbar, total=nb)  # progress bar
+            pbar = tqdm(pbar, total=nb, mininterval=0.05, maxinterval=1, unit='batch')  # progress bar
 
         # batch -------------------------------------------------------------
         for i, (imgs, targets, paths, _) in pbar:
