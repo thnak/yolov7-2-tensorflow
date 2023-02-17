@@ -161,7 +161,8 @@ def select_device(device='', batch_size=None):
     if device.lower() in [f'xla:{x}' for x in range(10)]:
         try:
             check_requirements('torch==1.13.0')
-            logger.info(f"https://storage.googleapis.com/tpu-pytorch/wheels/tpuvm/torch_xla-1.13-cp38-cp38-linux_x86_64.whl, torch_xla[tpuvm]")
+            logger.info(
+                f"https://storage.googleapis.com/tpu-pytorch/wheels/tpuvm/torch_xla-1.13-cp38-cp38-linux_x86_64.whl, torch_xla[tpuvm]")
             logger.warning(f'training with xla device is under developing')
             import torch_xla.core.xla_model as xm
             s = f'{s}XLA'
@@ -172,7 +173,8 @@ def select_device(device='', batch_size=None):
             logger.exception(f'{ex}')
     if torch.cuda.is_available():
         if device.lower() in [f'cuda:{x}' for x in range(10)]:
-            device = device if int(device.split(':')[1]) < torch.cuda.device_count() else 'cpu'
+            device = device.split(':')[1] if int(device.split(':')[1]) < torch.cuda.device_count() else 'cpu'
+            os.environ['PIN_MEMORY'] = True if device.isnumeric() else False
     else:
         device = 'cpu'
 
@@ -417,21 +419,22 @@ class ModelEMA:
         # Update EMA attributes
         copy_attr(self.ema, model, include, exclude)
 
+
 class Lion(Optimizer):
     # Based on - https://github.com/lucidrains/lion-pytorch/blob/main/lion_pytorch/lion_pytorch.py
-    def __init__(self, params, lr = 1e-4, betas = (0.9, 0.99), weight_decay = 0.0):
+    def __init__(self, params, lr=1e-4, betas=(0.9, 0.99), weight_decay=0.0):
         assert lr > 0.
         assert all([0. <= beta <= 1. for beta in betas])
         defaults = dict(
-            lr = lr,
-            betas = betas,
-            weight_decay = weight_decay
+            lr=lr,
+            betas=betas,
+            weight_decay=weight_decay
         )
 
         super().__init__(params, defaults)
 
     @torch.no_grad()
-    def step(self, closure = None):
+    def step(self, closure=None):
         loss = None
         if closure is not None:
             with torch.enable_grad():
@@ -458,11 +461,13 @@ class Lion(Optimizer):
 
                 # weight update
                 update = exp_avg.clone().lerp_(grad, 1 - beta1)
-                p.add_(torch.sign(update), alpha = -lr)
+                p.add_(torch.sign(update), alpha=-lr)
 
                 exp_avg.lerp_(grad, 1 - beta2)
 
         return loss
+
+
 class BatchNormXd(torch.nn.modules.batchnorm._BatchNorm):
     def _check_input_dim(self, input):
         """ The only difference between BatchNorm1d, BatchNorm2d, BatchNorm3d, etc

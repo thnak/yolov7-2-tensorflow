@@ -215,6 +215,7 @@ if __name__ == '__main__':
             if opt.onnx_opset > 11:
                 logging.info(
                     f'{prefix} onnx opset tested for version 11, newer version may have poor performance for ONNXRUNTIME in DmlExecutionProvider')
+            torch.onnx.disable_log()
             torch.onnx.export(model, img, f, verbose=opt.v,
                               opset_version=opt.onnx_opset,
                               input_names=['images'],

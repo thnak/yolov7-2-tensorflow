@@ -19,6 +19,7 @@ import pkg_resources as pkg
 import torch.backends.cudnn as cudnn
 from utils.google_utils import gsutil_getsize
 from utils.metrics import fitness
+
 # Settings
 torch.set_printoptions(linewidth=320, precision=5, profile='long')
 np.set_printoptions(linewidth=320, formatter={'float_kind': '{:11.5g}'.format})  # format short g, %precision=5
@@ -28,11 +29,13 @@ pd.options.display.max_columns = 10
 FILE = Path(__file__).resolve()
 ROOT = FILE.parents[1]  # YOLOv5 root directory
 
+
 def set_logging(rank=-1, filename=None, filemode=None):
     logging.basicConfig(
-        filename=filename,filemode=filemode,
+        filename=filename, filemode=filemode,
         format="%(message)s",
         level=logging.INFO if rank in [-1, 0] else logging.WARN)
+
 
 def init_torch_seeds(seed=0):
     # Speed-reproducibility tradeoff https://pytorch.org/docs/stable/notes/randomness.html
@@ -41,7 +44,8 @@ def init_torch_seeds(seed=0):
         cudnn.benchmark, cudnn.deterministic = False, True
     else:  # faster, less reproducible
         cudnn.benchmark, cudnn.deterministic = True, False
-        
+
+
 def init_seeds(seed=0):
     """Initialize random number generator (RNG) seeds"""
     random.seed(seed)
@@ -96,6 +100,7 @@ def check_git_status():
     except Exception as e:
         print(e)
 
+
 def check_python(minimum='3.7.0'):
     # Check current python version vs. required python version
     check_version(platform.python_version(), minimum, name='Python ', hard=True)
@@ -111,6 +116,7 @@ def check_version(current='0.0.0', minimum='0.0.0', name='version ', pinned=Fals
     if verbose and not result:
         print(s)
     return result
+
 
 def check_requirements(requirements=ROOT / 'requirements.txt', exclude=(), install=True, cmds=''):
     # Check installed dependencies meet YOLOv5 requirements (pass *.txt file or list of packages or single package str)
@@ -410,8 +416,6 @@ def bbox_iou(box1, box2, x1y1x2y2=True, GIoU=False, DIoU=False, CIoU=False, eps=
         return iou  # IoU
 
 
-
-
 def bbox_alpha_iou(box1, box2, x1y1x2y2=False, GIoU=False, DIoU=False, CIoU=False, alpha=2, eps=1e-9):
     """Returns tsqrt_he IoU of box1 to box2. box1 is 4, box2 is nx4"""
     box2 = box2.T
@@ -437,7 +441,7 @@ def bbox_alpha_iou(box1, box2, x1y1x2y2=False, GIoU=False, DIoU=False, CIoU=Fals
 
     # change iou into pow(iou+eps)
     # iou = inter / union
-    iou = torch.pow(inter/union + eps, alpha)
+    iou = torch.pow(inter / union + eps, alpha)
     # beta = 2 * alpha
     if GIoU or DIoU or CIoU:
         cw = torch.max(b1_x2, b2_x2) - torch.min(b1_x1, b2_x1)  # convex (smallest enclosing box) width
@@ -458,10 +462,10 @@ def bbox_alpha_iou(box1, box2, x1y1x2y2=False, GIoU=False, DIoU=False, CIoU=Fals
         else:  # GIoU https://arxiv.org/pdf/1902.09630.pdf
             # c_area = cw * ch + eps  # convex area
             # return iou - (c_area - union) / c_area  # GIoU
-            c_area = torch.max(cw * ch + eps, union) # convex area
+            c_area = torch.max(cw * ch + eps, union)  # convex area
             return iou - torch.pow((c_area - union) / c_area + eps, alpha)  # GIoU
     else:
-        return iou # torch.log(iou+eps) or iou
+        return iou  # torch.log(iou+eps) or iou
 
 
 def box_iou(box1, box2):
@@ -516,7 +520,7 @@ def box_giou(box1, box2):
 
     area1 = box_area(box1.T)
     area2 = box_area(box2.T)
-    
+
     inter = (torch.min(box1[:, None, 2:], box2[:, 2:]) - torch.max(box1[:, None, :2], box2[:, :2])).clamp(0).prod(2)
     union = (area1[:, None] + area2 - inter)
 
@@ -551,7 +555,7 @@ def box_ciou(box1, box2, eps: float = 1e-7):
 
     area1 = box_area(box1.T)
     area2 = box_area(box2.T)
-    
+
     inter = (torch.min(box1[:, None, 2:], box2[:, 2:]) - torch.max(box1[:, None, :2], box2[:, :2])).clamp(0).prod(2)
     union = (area1[:, None] + area2 - inter)
 
@@ -603,7 +607,7 @@ def box_diou(box1, box2, eps: float = 1e-7):
 
     area1 = box_area(box1.T)
     area2 = box_area(box2.T)
-    
+
     inter = (torch.min(box1[:, None, 2:], box2[:, 2:]) - torch.max(box1[:, None, :2], box2[:, :2])).clamp(0).prod(2)
     union = (area1[:, None] + area2 - inter)
 
@@ -663,15 +667,15 @@ def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45, classes=Non
             v[:, 4] = 1.0  # conf
             v[range(len(l)), l[:, 0].long() + 5] = 1.0  # cls
             x = torch.cat((x, v), 0)
-        
+
         # If none remain process next image
         if not x.shape[0]:
             continue
         x = x[x[:, 4].argsort(descending=True)[:max_nms]]
         # Compute conf
         if nc == 1:
-            x[:, 5:] = x[:, 4:5] # for models with one class, cls_loss is 0 and cls_conf is always 0.5,
-                                 # so there is no need to multiplicate.
+            x[:, 5:] = x[:, 4:5]  # for models with one class, cls_loss is 0 and cls_conf is always 0.5,
+            # so there is no need to multiplicate.
         else:
             x[:, 5:] *= x[:, 4:5]  # conf = obj_conf * cls_conf
 
@@ -694,7 +698,7 @@ def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45, classes=Non
         n = x.shape[0]  # number of boxes
         if not n:  # no boxes
             continue
-        
+
         # Batched NMS
         c = x[:, 5:6] * (0 if agnostic else max_wh)  # classes
         boxes, scores = x[:, :4] + c, x[:, 4]  # boxes (offset by class), scores
@@ -716,15 +720,16 @@ def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45, classes=Non
     return output
 
 
-def non_max_suppression_kpt(prediction, conf_thres=0.25, iou_thres=0.45, classes=None, agnostic=False, multi_label=False,
-                        labels=(), kpt_label=False, nc=None, nkpt=None):
+def non_max_suppression_kpt(prediction, conf_thres=0.25, iou_thres=0.45, classes=None, agnostic=False,
+                            multi_label=False,
+                            labels=(), kpt_label=False, nc=None, nkpt=None):
     """Runs Non-Maximum Suppression (NMS) on inference results
 
     Returns:
          list of detections, on (n,6) tensor per image [xyxy, conf, cls]
     """
     if nc is None:
-        nc = prediction.shape[2] - 5  if not kpt_label else prediction.shape[2] - 56 # number of classes
+        nc = prediction.shape[2] - 5 if not kpt_label else prediction.shape[2] - 56  # number of classes
     xc = prediction[..., 4] > conf_thres  # candidates
 
     # Settings
@@ -737,7 +742,7 @@ def non_max_suppression_kpt(prediction, conf_thres=0.25, iou_thres=0.45, classes
     merge = False  # use merge-NMS
 
     t = time.time()
-    output = [torch.zeros((0,6), device=prediction.device)] * prediction.shape[0]
+    output = [torch.zeros((0, 6), device=prediction.device)] * prediction.shape[0]
     for xi, x in enumerate(prediction):  # image index, image inference
         # Apply constraints
         # x[((x[..., 2:4] < min_wh) | (x[..., 2:4] > max_wh)).any(1), 4] = 0  # width-height
@@ -757,7 +762,7 @@ def non_max_suppression_kpt(prediction, conf_thres=0.25, iou_thres=0.45, classes
             continue
 
         # Compute conf
-        x[:, 5:5+nc] *= x[:, 4:5]  # conf = obj_conf * cls_conf
+        x[:, 5:5 + nc] *= x[:, 4:5]  # conf = obj_conf * cls_conf
 
         # Box (center x, center y, width, height) to (x1, y1, x2, y2)
         box = xywh2xyxy(x[:, :4])
@@ -774,7 +779,6 @@ def non_max_suppression_kpt(prediction, conf_thres=0.25, iou_thres=0.45, classes
                 kpts = x[:, 6:]
                 conf, j = x[:, 5:6].max(1, keepdim=True)
                 x = torch.cat((box, conf, j.float(), kpts), 1)[conf.view(-1) > conf_thres]
-
 
         # Filter by class
         if classes is not None:
@@ -827,7 +831,7 @@ def strip_optimizer(f='best.pt', s='', halfModel=False):  # from utils.general i
         p.requires_grad = False
     torch.save(x, s or f)
     mb = os.path.getsize(s or f) / 1E6  # filesize
-    print(colorstr('Optimizer:'),f" stripped from {f},{(' saved as %s,' % s) if s else ''} {mb:.3f}MB")
+    print(colorstr('Optimizer:'), f" stripped from {f},{(' saved as %s,' % s) if s else ''} {mb:.3f}MB")
 
 
 def print_mutation(hyp, results, yaml_file='hyp_evolved.yaml', bucket=''):
@@ -908,9 +912,11 @@ def increment_path(path, exist_ok=True, sep=''):
         n = max(i) + 1 if i else 2  # increment number
         return f"{path}{sep}{n}"  # update path
 
+
 class BackgroundForegroundColors():
     """Custom color for bbox and text"""
-    def __init__(self,names:tuple):
+
+    def __init__(self, names: tuple):
         """_summary_
 
         Args:
@@ -1029,7 +1035,7 @@ class BackgroundForegroundColors():
             a = random.randint(0, len(self.COLOR) - 1)
             self.clor.append(self.COLOR[a])
             self.COLOR.remove(self.COLOR[a])
-        
+
     def getval(self, index):
         """get text color, bbox color
         arg: index of class name, labels
@@ -1038,15 +1044,18 @@ class BackgroundForegroundColors():
         textColor = self.clor[index][1]
         bkColor = self.clor[index][0]
         return textColor, bkColor
+
     def len(self):
         """return len of COLOR[]"""
         return len(self.COLOR)
-    
+
+
 def yaml_save(file='data.yaml', data={}):
     """Single-line safe yaml saving"""
     with open(file, 'w') as f:
         yaml.safe_dump({k: str(v) if isinstance(v, Path) else v for k, v in data.items()}, f, sort_keys=False)
-    
+
+
 def check_version(current='0.0.0', minimum='0.0.0', name='version ', pinned=False, hard=False, verbose=False):
     """Check version vs. required version"""
     import pkg_resources as pkg

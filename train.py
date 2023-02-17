@@ -86,8 +86,10 @@ def train(hyp, opt, tb_writer=None,
         opt.hyp = hyp  # add hyperparameters
         run_id = torch.load(weights, map_location=map_device).get(
             'wandb_id') if weights.endswith('.pt') and os.path.isfile(weights) else None
-        wandb_logger = WandbLogger(
-            opt, Path(opt.save_dir).stem, run_id, data_dict)
+        wandb_logger = WandbLogger(opt,
+                                   Path(opt.save_dir).stem,
+                                   run_id,
+                                   data_dict)
         loggers['wandb'] = wandb_logger.wandb
         data_dict = wandb_logger.data_dict
         if wandb_logger.wandb:
@@ -105,6 +107,7 @@ def train(hyp, opt, tb_writer=None,
     pretrained = weights.endswith('.pt')
     model_version = 0
     transformer = transforms.ToPILImage() if opt.single_channel else None
+    nodes, nodes2 = 0, 0
     if pretrained:
         with torch_distributed_zero_first(rank):
             attempt_download(weights)  # download if not found locally
@@ -127,12 +130,17 @@ def train(hyp, opt, tb_writer=None,
             len(state_dict), len(model.state_dict()), weights, ckpt['best_fitness'],
             model_version if model_version != 0 else 'Init new model'))  # report
         nodes = len(ckpt['model'].yaml['head']) + len(ckpt['model'].yaml['backbone']) - 1
-
+        p5_model = True if nodes in [77, 105, 121] else False
+        nodes2 = len(model.yaml['head']) + len(model.yaml['backbone']) - 1
+        assert nodes == nodes2, f'Please paste the same model branch,' \
+                                f' pre-trained model from {"P5" if p5_model else "P6"} branch and new model ' \
+                                f'from {"P5" if not p5_model else "P6"}'
     else:
         model = Model(opt.cfg, ch= 1 if opt.single_channel else 3, nc=nc, anchors=hyp.get('anchors')).to(device)  # create
         nodes = len(model.yaml['head']) + len(model.yaml['backbone']) - 1
 
     p5_model = True if nodes in [77, 105, 121] else False
+    del nodes, nodes2
     with torch_distributed_zero_first(rank):
         check_dataset(data_dict)  # check
     train_path = data_dict['train']
