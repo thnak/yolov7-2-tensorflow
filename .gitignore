@@ -6,7 +6,11 @@ models/*.onnx
 models/*.pb
 models/best_web_model/
 models/best_openvino_model/
-models/best_saved_model
+models/best_saved_model/
+*_web_model/
+*_saved_model/
+*_openvino_model/
+*.pb
 *.txt
 *.png
 *.jpg
@@ -14,10 +18,9 @@ models/best_saved_model
 *.xml
 *.txt
 *.pt
+*.onnx
 TrainRes/train
 TrainRes/val
-best_openvino_model/
-best_web_model/
 tre.py
 build/
 wandb/

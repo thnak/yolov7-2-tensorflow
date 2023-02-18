@@ -10,12 +10,11 @@ from pathlib import Path
 from threading import Thread
 from datetime import datetime
 import numpy as np
+import torch
 import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as functional
 from torch.optim.lr_scheduler import LambdaLR
-import torch.utils.data
-from torchvision import transforms
 import yaml
 from torch import autocast, float16, bfloat16, float32
 from torch.cuda.amp import GradScaler
@@ -34,7 +33,7 @@ from utils.google_utils import attempt_download
 from utils.loss import ComputeLoss, ComputeLossOTA, ComputeLossAuxOTA
 from utils.plots import plot_images, plot_results, plot_evolution
 from utils.torch_utils import ModelEMA, select_device, intersect_dicts, torch_distributed_zero_first, is_parallel, \
-    time_synchronized, smart_optimizer
+    time_synchronized, smart_optimizer, save_model
 from utils.wandb_logging.wandb_utils import WandbLogger, check_wandb_resume
 # from utils.autobatch import check_train_batch_size
 from utils.re_parameteration import Re_parameterization
@@ -43,8 +42,10 @@ logger = logging.getLogger(__name__)
 
 
 def train(hyp, opt, tb_writer=None,
-          data_loader={'dataloader': None, 'dataset': None, 'val_dataloader': None, 'test_dataloader': None}):
+          data_loader=None):
     # Save run settings
+    if data_loader is None:
+        data_loader = {'dataloader': None, 'dataset': None, 'val_dataloader': None, 'test_dataloader': None}
     save_dir, epochs, batch_size, total_batch_size, weights, rank, freeze = \
         Path(opt.save_dir), opt.epochs, opt.batch_size, opt.total_batch_size, opt.weights, opt.global_rank, opt.freeze
     wdir = save_dir / 'weights'
@@ -106,7 +107,6 @@ def train(hyp, opt, tb_writer=None,
     # Model
     pretrained = weights.endswith('.pt')
     model_version = 0
-    transformer = transforms.ToPILImage() if opt.single_channel else None
     nodes, nodes2 = 0, 0
     if pretrained:
         with torch_distributed_zero_first(rank):
@@ -128,7 +128,7 @@ def train(hyp, opt, tb_writer=None,
         model_version = ckpt['model_version'] if 'model_version' in ckpt else 0
         logger.info('Transferred %g/%g items from: %s, best fitness: %s, version: %s' % (
             len(state_dict), len(model.state_dict()), weights, ckpt['best_fitness'],
-            model_version if model_version != 0 else 'Init new model'))  # report
+            model_version if (model_version != 0 and not opt.resume) else 'Init new model'))  # report
         nodes = len(ckpt['model'].yaml['head']) + len(ckpt['model'].yaml['backbone']) - 1
         p5_model = True if nodes in [77, 105, 121] else False
         nodes2 = len(model.yaml['head']) + len(model.yaml['backbone']) - 1
@@ -136,11 +136,11 @@ def train(hyp, opt, tb_writer=None,
                                 f' pre-trained model from {"P5" if p5_model else "P6"} branch and new model ' \
                                 f'from {"P5" if not p5_model else "P6"}'
     else:
-        model = Model(opt.cfg, ch= 1 if opt.single_channel else 3, nc=nc, anchors=hyp.get('anchors')).to(device)  # create
+        model = Model(opt.cfg, ch=1 if opt.single_channel else 3, nc=nc, anchors=hyp.get('anchors')).to(
+            device)  # create
         nodes = len(model.yaml['head']) + len(model.yaml['backbone']) - 1
 
     p5_model = True if nodes in [77, 105, 121] else False
-    del nodes, nodes2
     with torch_distributed_zero_first(rank):
         check_dataset(data_dict)  # check
     train_path = data_dict['train']
@@ -425,9 +425,9 @@ def train(hyp, opt, tb_writer=None,
                 mloss = (mloss * i + loss_items.to(device)) / (i + 1)  # update mean losses
                 mem = '%.3gG' % (torch.cuda.memory_reserved() / 1E9 if torch.cuda.is_available() else 0)  # (GB)
                 s = ('%10s' * 2 + '%10.4g' * 6) % ('%g/%g' % (epoch,
-                                                            epochs - 1), mem, 
-                                                            *mloss, targets.shape[0],
-                                                            imgs.shape[-1])
+                                                              epochs - 1), mem,
+                                                   *mloss, targets.shape[0],
+                                                   imgs.shape[-1])
                 pbar.set_description(s)
 
                 # Plot
@@ -437,9 +437,9 @@ def train(hyp, opt, tb_writer=None,
                         tb_writer.add_image(str(f), np.moveaxis(plot_images(
                             images=imgs, targets=targets, paths=paths, fname=f, names=names), -1, 0), ni)
                     Thread(target=plot_images, args=(
-                                                    imgs,
-                                                    targets,
-                                                    paths, f), daemon=True).start()
+                        imgs,
+                        targets,
+                        paths, f), daemon=True).start()
                 elif plots and ni == 10 and wandb_logger.wandb:
                     wandb_logger.log({"Mosaics": [wandb_logger.wandb.Image(str(x), caption=x.name) for x in
                                                   save_dir.glob('train*.jpg') if x.exists()]})
@@ -524,25 +524,20 @@ def train(hyp, opt, tb_writer=None,
                     'training_opt': vars(opt),
                     'training_date': datetime.now().isoformat("#")
                 }
-
-                # Save last, best and delete
-                torch.save(ckpt, last)
-                if best_fitness == fi:
-                    torch.save(ckpt, best)
-                if (best_fitness == fi) and (epoch >= 200):
-                    torch.save(ckpt, wdir / 'best_{:03d}.pt'.format(epoch))
-                if epoch == 0:
-                    torch.save(ckpt, wdir / 'epoch_{:03d}.pt'.format(epoch))
-                elif ((epoch + 1) % 25) == 0:
-                    torch.save(ckpt, wdir / 'epoch_{:03d}.pt'.format(epoch))
-                elif epoch >= (epochs - 5):
-                    torch.save(ckpt, wdir / 'epoch_{:03d}.pt'.format(epoch))
-                if wandb_logger.wandb:
-                    if ((epoch + 1) % opt.save_period == 0 and not final_epoch) and opt.save_period != -1:
-                        wandb_logger.log_model(
-                            last.parent, opt, epoch, fi, best_model=best_fitness == fi)
+                saver = Thread(target=save_model, args=(ckpt,
+                                                        last,
+                                                        best,
+                                                        best_fitness,
+                                                        fi,
+                                                        epoch,
+                                                        epochs,
+                                                        wdir,
+                                                        wandb_logger,
+                                                        opt), daemon=True)
+                saver.start()
                 del ckpt
-
+                if final_epoch:
+                    saver.join()
         # end epoch ----------------------------------------------------------------------------------------------------
     # end training
     if rank in [-1, 0]:
@@ -667,7 +662,8 @@ if __name__ == '__main__':
     parser.add_argument('--device', default='', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     parser.add_argument('--multi-scale', action='store_true', help='vary img-size +/- 50%')
     parser.add_argument('--single-cls', action='store_true', help='train multi-class data as single-class')
-    parser.add_argument('--optimizer', type=str, choices=['SGD', 'Adam', 'AdamW', 'Lion'], default='SGD', help='optimizer')
+    parser.add_argument('--optimizer', type=str, choices=['SGD', 'Adam', 'AdamW', 'Lion'], default='SGD',
+                        help='optimizer')
     parser.add_argument('--sync-bn', action='store_true', help='use SyncBatchNorm, only available in DDP mode')
     parser.add_argument('--local_rank', type=int, default=-1, help='DDP parameter, do not modify')
     parser.add_argument('--workers', type=int, default=512, help='maximum number of dataloader workers')

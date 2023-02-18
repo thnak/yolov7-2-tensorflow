@@ -18,7 +18,6 @@ from copy import deepcopy
 sys.path.append('./')  # to run '$ python *.py' files in subdirectories
 logger = logging.getLogger(__name__)
 
-
 try:
     import thop  # for FLOPS computation
 except ImportError:
@@ -65,7 +64,7 @@ class Detect(nn.Module):
                     y[..., 0:2] = (y[..., 0:2] * 2. - 0.5 +
                                    self.grid[i]) * self.stride[i]  # xy
                     y[..., 2:4] = (y[..., 2:4] * 2) ** 2 * \
-                        self.anchor_grid[i]  # wh
+                                  self.anchor_grid[i]  # wh
                 else:
                     # y.tensor_split((2, 4, 5), 4)  # torch 1.8.0
                     xy, wh, conf = y.split((2, 2, self.nc + 1), 4)
@@ -81,7 +80,7 @@ class Detect(nn.Module):
             out = torch.cat(z, 1)
         elif self.include_nms:
             z = self.convert(z)
-            out = (z, )
+            out = (z,)
         elif self.concat:
             out = torch.cat(z, 1)
         else:
@@ -152,7 +151,7 @@ class IDetect(nn.Module):
                 y[..., 0:2] = (y[..., 0:2] * 2. - 0.5 +
                                self.grid[i]) * self.stride[i]  # xy
                 y[..., 2:4] = (y[..., 2:4] * 2) ** 2 * \
-                    self.anchor_grid[i]  # wh
+                              self.anchor_grid[i]  # wh
                 z.append(y.view(bs, -1, self.no))
 
         return x if self.training else (torch.cat(z, 1), x)
@@ -175,13 +174,13 @@ class IDetect(nn.Module):
                     y[..., 0:2] = (y[..., 0:2] * 2. - 0.5 +
                                    self.grid[i]) * self.stride[i]  # xy
                     y[..., 2:4] = (y[..., 2:4] * 2) ** 2 * \
-                        self.anchor_grid[i]  # wh
+                                  self.anchor_grid[i]  # wh
                 else:
                     # y.tensor_split((2, 4, 5), 4)  # torch 1.8.0
                     xy, wh, conf = y.split((2, 2, self.nc + 1), 4)
                     # new xy
                     xy = xy * (2. * self.stride[i]) + \
-                        (self.stride[i] * (self.grid[i] - 0.5))
+                         (self.stride[i] * (self.grid[i] - 0.5))
                     wh = wh ** 2 * (4 * self.anchor_grid[i].data)  # new wh
                     y = torch.cat((xy, wh, conf), 4)
                 z.append(y.view(bs, -1, self.no))
@@ -192,7 +191,7 @@ class IDetect(nn.Module):
             out = torch.cat(z, 1)
         elif self.include_nms:
             z = self.convert(z)
-            out = (z, )
+            out = (z,)
         elif self.concat:
             out = torch.cat(z, 1)
         else:
@@ -246,8 +245,8 @@ class IKeypoint(nn.Module):
         self.dw_conv_kpt = dw_conv_kpt
         # number of outputs per anchor for box and class
         self.no_det = (nc + 5)
-        self.no_kpt = 3*self.nkpt  # number of outputs per anchor for keypoints
-        self.no = self.no_det+self.no_kpt
+        self.no_kpt = 3 * self.nkpt  # number of outputs per anchor for keypoints
+        self.no = self.no_det + self.no_kpt
         self.nl = len(anchors)  # number of detection layers
         self.na = len(anchors[0]) // 2  # number of anchors
         self.grid = [torch.zeros(1)] * self.nl  # init grid
@@ -306,14 +305,16 @@ class IKeypoint(nn.Module):
 
                 if self.inplace:
                     xy = (y[..., 0:2] * 2. - 0.5 + self.grid[i]) * \
-                        self.stride[i]  # xy
+                         self.stride[i]  # xy
                     wh = (y[..., 2:4] * 2) ** 2 * \
-                        self.anchor_grid[i].view(1, self.na, 1, 1, 2)  # wh
+                         self.anchor_grid[i].view(1, self.na, 1, 1, 2)  # wh
                     if self.nkpt != 0:
                         x_kpt[..., 0::3] = (
-                            x_kpt[..., ::3] * 2. - 0.5 + kpt_grid_x.repeat(1, 1, 1, 1, 17)) * self.stride[i]  # xy
+                                                   x_kpt[..., ::3] * 2. - 0.5 + kpt_grid_x.repeat(1, 1, 1, 1, 17)) * \
+                                           self.stride[i]  # xy
                         x_kpt[..., 1::3] = (
-                            x_kpt[..., 1::3] * 2. - 0.5 + kpt_grid_y.repeat(1, 1, 1, 1, 17)) * self.stride[i]  # xy
+                                                   x_kpt[..., 1::3] * 2. - 0.5 + kpt_grid_y.repeat(1, 1, 1, 1, 17)) * \
+                                           self.stride[i]  # xy
                         # x_kpt[..., 0::3] = (x_kpt[..., ::3] + kpt_grid_x.repeat(1,1,1,1,17)) * self.stride[i]  # xy
                         # x_kpt[..., 1::3] = (x_kpt[..., 1::3] + kpt_grid_y.repeat(1,1,1,1,17)) * self.stride[i]  # xy
                         # print('=============')
@@ -330,7 +331,7 @@ class IKeypoint(nn.Module):
 
                 else:  # for YOLOv5 on AWS Inferentia https://github.com/ultralytics/yolov5/pull/2953
                     xy = (y[..., 0:2] * 2. - 0.5 + self.grid[i]) * \
-                        self.stride[i]  # xy
+                         self.stride[i]  # xy
                     wh = (y[..., 2:4] * 2) ** 2 * self.anchor_grid[i]  # wh
                     if self.nkpt != 0:
                         y[..., 6:] = (y[..., 6:] * 2. - 0.5 + self.grid[i].repeat(
@@ -367,7 +368,7 @@ class IAuxDetect(nn.Module):
         self.register_buffer('anchor_grid', a.clone().view(self.nl, 1, -1, 1, 1, 2))  # shape(nl,1,na,1,1,2)
         self.m = nn.ModuleList(nn.Conv2d(x, self.no * self.na, 1) for x in ch[:self.nl])  # output conv
         self.m2 = nn.ModuleList(nn.Conv2d(x, self.no * self.na, 1) for x in ch[self.nl:])  # output conv
-        
+
         self.ia = nn.ModuleList(ImplicitA(x) for x in ch[:self.nl])
         self.im = nn.ModuleList(ImplicitM(self.no * self.na) for _ in ch[:self.nl])
 
@@ -380,9 +381,9 @@ class IAuxDetect(nn.Module):
             x[i] = self.im[i](x[i])
             bs, _, ny, nx = x[i].shape  # x(bs,255,20,20) to x(bs,3,20,20,85)
             x[i] = x[i].view(bs, self.na, self.no, ny, nx).permute(0, 1, 3, 4, 2).contiguous()
-            
-            x[i+self.nl] = self.m2[i](x[i+self.nl])
-            x[i+self.nl] = x[i+self.nl].view(bs, self.na, self.no, ny, nx).permute(0, 1, 3, 4, 2).contiguous()
+
+            x[i + self.nl] = self.m2[i](x[i + self.nl])
+            x[i + self.nl] = x[i + self.nl].view(bs, self.na, self.no, ny, nx).permute(0, 1, 3, 4, 2).contiguous()
 
             if not self.training:  # inference
                 if self.grid[i].shape[2:4] != x[i].shape[2:4]:
@@ -430,27 +431,28 @@ class IAuxDetect(nn.Module):
             out = torch.cat(z, 1)
         elif self.include_nms:
             z = self.convert(z)
-            out = (z, )
+            out = (z,)
         elif self.concat:
-            out = torch.cat(z, 1)            
+            out = torch.cat(z, 1)
         else:
             out = (torch.cat(z, 1), x)
 
         return out
-    
+
     def fuse(self):
         print("IAuxDetect.fuse")
         # fuse ImplicitA and Convolution
         for i in range(len(self.m)):
-            c1,c2,_,_ = self.m[i].weight.shape
-            c1_,c2_, _,_ = self.ia[i].implicit.shape
-            self.m[i].bias += torch.matmul(self.m[i].weight.reshape(c1,c2),self.ia[i].implicit.reshape(c2_,c1_)).squeeze(1)
+            c1, c2, _, _ = self.m[i].weight.shape
+            c1_, c2_, _, _ = self.ia[i].implicit.shape
+            self.m[i].bias += torch.matmul(self.m[i].weight.reshape(c1, c2),
+                                           self.ia[i].implicit.reshape(c2_, c1_)).squeeze(1)
 
         # fuse ImplicitM and Convolution
         for i in range(len(self.m)):
-            c1,c2, _,_ = self.im[i].implicit.shape
+            c1, c2, _, _ = self.im[i].implicit.shape
             self.m[i].bias *= self.im[i].implicit.reshape(c2)
-            self.m[i].weight *= self.im[i].implicit.transpose(0,1)
+            self.m[i].weight *= self.im[i].implicit.transpose(0, 1)
 
     @staticmethod
     def _make_grid(nx=20, ny=20):
@@ -464,10 +466,11 @@ class IAuxDetect(nn.Module):
         score = z[:, :, 5:]
         score *= conf
         convert_matrix = torch.tensor([[1, 0, 1, 0], [0, 1, 0, 1], [-0.5, 0, 0.5, 0], [0, -0.5, 0, 0.5]],
-                                           dtype=torch.float32,
-                                           device=z.device)
-        box @= convert_matrix                          
+                                      dtype=torch.float32,
+                                      device=z.device)
+        box @= convert_matrix
         return (box, score)
+
 
 class IBin(nn.Module):
     stride = None  # strides computed during build
@@ -485,7 +488,7 @@ class IBin(nn.Module):
             bin_count=self.bin_count, min=0.0, max=4.0)
         # classes, x,y,obj
         self.no = nc + 3 + \
-            self.w_bin_sigmoid.get_length() + self.h_bin_sigmoid.get_length()   # w-bce, h-bce
+                  self.w_bin_sigmoid.get_length() + self.h_bin_sigmoid.get_length()  # w-bce, h-bce
         # + self.x_bin_sigmoid.get_length() + self.y_bin_sigmoid.get_length()
 
         self.nl = len(anchors)  # number of detection layers
@@ -665,13 +668,14 @@ class Model(nn.Module):
                 self.traced = False
 
             if self.traced:
-                if isinstance(m, Detect) or isinstance(m, IDetect) or isinstance(m, IAuxDetect) or isinstance(m, IKeypoint):
+                if isinstance(m, Detect) or isinstance(m, IDetect) or isinstance(m, IAuxDetect) or isinstance(m,
+                                                                                                              IKeypoint):
                     break
 
             if profile:
                 c = isinstance(m, (Detect, IDetect, IAuxDetect, IBin))
                 o = thop.profile(m, inputs=(x.copy() if c else x,), verbose=False)[
-                    0] / 1E9 * 2 if thop else 0  # FLOPS
+                        0] / 1E9 * 2 if thop else 0  # FLOPS
                 for _ in range(10):
                     m(x.copy() if c else x)
                 t = time_synchronized()
@@ -728,14 +732,14 @@ class Model(nn.Module):
         bc = m.bin_count
         for mi, s in zip(m.m, m.stride):  # from
             b = mi.bias.view(m.na, -1)  # conv.bias(255) to (3,85)
-            old = b[:, (0, 1, 2, bc+3)].data
-            obj_idx = 2*bc+4
+            old = b[:, (0, 1, 2, bc + 3)].data
+            obj_idx = 2 * bc + 4
             b[:, :obj_idx].data += math.log(0.6 / (bc + 1 - 0.99))
             # obj (8 objects per 640 image)
             b[:, obj_idx].data += math.log(8 / (640 / s) ** 2)
-            b[:, (obj_idx+1):].data += math.log(0.6 / (m.nc - 0.99)
-                                                ) if cf is None else torch.log(cf / cf.sum())  # cls
-            b[:, (0, 1, 2, bc+3)].data = old
+            b[:, (obj_idx + 1):].data += math.log(0.6 / (m.nc - 0.99)
+                                                  ) if cf is None else torch.log(cf / cf.sum())  # cls
+            b[:, (0, 1, 2, bc + 3)].data = old
             mi.bias = torch.nn.Parameter(b.view(-1), requires_grad=True)
 
     # initialize biases into Detect(), cf is class frequency
@@ -800,7 +804,7 @@ class Model(nn.Module):
         print('Adding autoShape... ')
         m = autoShape(self)  # wrap model
         copy_attr(m, self, include=('yaml', 'nc', 'hyp', 'names',
-                  'stride'), exclude=())  # copy attributes
+                                    'stride'), exclude=())  # copy attributes
         return m
 
     def info(self, verbose=False, img_size=640):  # print model information
@@ -906,7 +910,7 @@ class ONNX_Engine(object):
         #         'device_id': 0,
         #         'arena_extend_strategy': 'kNextPowerOfTwo',
         #         'cudnn_conv1d_pad_to_nc1d': True,
-            # 'cudnn_conv_use_max_workspace': '2',
+        # 'cudnn_conv_use_max_workspace': '2',
         #         'gpu_mem_limit': self.GB,
         #         'cudnn_conv_algo_search': 'EXHAUSTIVE',
         #         'do_copy_in_default_stream': True,
@@ -941,7 +945,7 @@ class ONNX_Engine(object):
             self.nc = int(meta['nc'])
             self.rectangle = self.imgsz[0] != self.imgsz[1]
             if not self.rectangle:
-                self.isLandscape = self.imgsz[0] < self.imgsz[1] #h,c
+                self.isLandscape = self.imgsz[0] < self.imgsz[1]  # h,c
             self.opset = int(meta['opset version'])
             self.is_end2end = meta['ort-nms'] == 'True'
             if self.opset > 12:
@@ -987,11 +991,11 @@ class ONNX_Engine(object):
         return torch.from_numpy(x).to(self.device) if isinstance(x, np.ndarray) else x
 
     def xyxy2xywh(self, x, dim):
-        y = [0]*4
-        y[0] = ((x[0] + x[2]) / 2)/dim[1]  # x center
-        y[1] = ((x[1] + x[3]) / 2)/dim[0]  # y center
-        y[2] = (x[2] - x[0])/dim[1]  # width
-        y[3] = (x[3] - x[1])/dim[0]  # height
+        y = [0] * 4
+        y[0] = ((x[0] + x[2]) / 2) / dim[1]  # x center
+        y[1] = ((x[1] + x[3]) / 2) / dim[0]  # y center
+        y[2] = (x[2] - x[0]) / dim[1]  # width
+        y[3] = (x[3] - x[1]) / dim[0]  # height
         return y
 
     def end2end(self, outputs, ori_images, dwdh, ratio, fps, bfc, frames=0):
@@ -1009,7 +1013,7 @@ class ONNX_Engine(object):
             if image[int(batch_id)] is None:
                 image[int(batch_id)] = ori_images[int(batch_id)]
             box = np.array([x0, y0, x1, y1])
-            box -= np.array(dwdhs[int(batch_id)]*2)
+            box -= np.array(dwdhs[int(batch_id)] * 2)
             box /= ratios[int(batch_id)][0]
             box = box.round().astype(np.int32).tolist()
             cls_id = int(cls_id)
@@ -1017,7 +1021,7 @@ class ONNX_Engine(object):
             if score < self.confThres:
                 continue
             name = self.names[cls_id]
-            name += ' '+str(score)
+            name += ' ' + str(score)
             bbox[int(batch_id)] = self.xyxy2xywh(box, image[int(batch_id)].shape[:2])
             txtcolor, bboxcolor = bfc.getval(index=cls_id)
             image[int(batch_id)] = plot_one_box(box, image[int(batch_id)],
@@ -1029,23 +1033,26 @@ class ONNX_Engine(object):
                 image[index] = plot_one_box(None, ori_images[index],
                                             txtColor=txtcolor2,
                                             bboxColor=bboxcolor2, label=None,
-                                            frameinfo=[f'FPS: {fps}', f'Total object: {int(len(outputs)/ len(ori_images))}', frames])
+                                            frameinfo=[f'FPS: {fps}',
+                                                       f'Total object: {int(len(outputs) / len(ori_images))}', frames])
             else:
                 image[index] = plot_one_box(None, image[index],
                                             txtColor=txtcolor2,
                                             bboxColor=bboxcolor2, label=None,
-                                            frameinfo=[f'FPS: {fps}', f'Total object: {int(len(outputs)/ len(ori_images))}', frames])
+                                            frameinfo=[f'FPS: {fps}',
+                                                       f'Total object: {int(len(outputs) / len(ori_images))}', frames])
         return image, bbox
 
     def warmup(self, num=10):
         imgsz = (self.batch_size, self.session.get_inputs()[0].shape[1], self.imgsz[0], self.imgsz[1])
-        im = np.ones(imgsz, dtype= np.float16 if self.half else np.float32)
-        if self.session.get_providers()[0] in ['CUDAExecutionProvider', 'TensorrtExecutionProvider', 'DmlExecutionProvider']:
+        im = np.ones(imgsz, dtype=np.float16 if self.half else np.float32)
+        if self.session.get_providers()[0] in ['CUDAExecutionProvider', 'TensorrtExecutionProvider',
+                                               'DmlExecutionProvider']:
             t0 = time_synchronized()
             logger.info(f'\n{self.prefix} warming up... batch-size {self.batch_size}, image shape {imgsz}\n')
             for _ in range(num):
                 self.infer(im)
-            return ((time_synchronized() - t0)/num)/self.batch_size
+            return ((time_synchronized() - t0) / num) / self.batch_size
 
     def non_max_suppression(self):
         # prediction = self.prediction
@@ -1100,7 +1107,7 @@ class ONNX_Engine(object):
             if self.multi_label_nms:
                 i, j = (x[:, 5:mi] > self.confThres).nonzero(as_tuple=False).T
                 x = torch.cat((box[i], x[i, 5 + j, None],
-                              j[:, None].float(), mask[i]), 1)
+                               j[:, None].float(), mask[i]), 1)
             else:  # best class only
                 conf, j = x[:, 5:mi].max(1, keepdim=True)
                 x = torch.cat((box, conf, j.float(), mask), 1)[
@@ -1279,18 +1286,19 @@ class TensorRT_Engine(object):
             t2 = time_synchronized()
             if end2end:
                 num, final_boxes, final_scores, final_cls_inds = data
-                final_boxes = np.reshape(final_boxes/ratio, (-1, 4))
+                final_boxes = np.reshape(final_boxes / ratio, (-1, 4))
                 dets = np.concatenate([final_boxes[:num[0]], np.array(final_scores)[
-                                      :num[0]].reshape(-1, 1), np.array(final_cls_inds)[:num[0]].reshape(-1, 1)], axis=-1)
+                                                             :num[0]].reshape(-1, 1),
+                                       np.array(final_cls_inds)[:num[0]].reshape(-1, 1)], axis=-1)
             else:
                 predictions = np.reshape(
-                    data, (1, -1, int(5+self.n_classes)))[0]
+                    data, (1, -1, int(5 + self.n_classes)))[0]
                 dets = self.postprocess(predictions, ratio)
-            logging.info(f'{self.prefix} FPS: {round(fps,3)}, ' +
-                         f'nms: {round(time_synchronized() - t2,3)}' if end2end else 'postprocess:'+f' {round(time_synchronized() - t2,3)}')
+            logging.info(f'{self.prefix} FPS: {round(fps, 3)}, ' +
+                         f'nms: {round(time_synchronized() - t2, 3)}' if end2end else 'postprocess:' + f' {round(time_synchronized() - t2, 3)}')
             if dets is not None:
                 final_boxes, final_scores, final_cls_inds = dets[:,
-                                                                 :4], dets[:, 4], dets[:, 5]
+                                                            :4], dets[:, 4], dets[:, 5]
                 frame = self.vis(frame, final_boxes, final_scores,
                                  final_cls_inds, names=self.names)
             if not noSave:
@@ -1299,8 +1307,8 @@ class TensorRT_Engine(object):
             ffmpeg.stopRecorder()
         cap.release()
 
-        logging.info(f'{self.prefix} Finished! '+f'save at {video_outputPath} ' if not noSave else '' +
-                     f'total {round(time_synchronized() - timeStart, 2)} second, avg FPS: {round(sum(avg)/len(avg),3)}')
+        logging.info(f'{self.prefix} Finished! ' + f'save at {video_outputPath} ' if not noSave else '' +
+                                                                                                     f'total {round(time_synchronized() - timeStart, 2)} second, avg FPS: {round(sum(avg) / len(avg), 3)}')
 
     def inference(self, origin_img, end2end=False):
         """ detect single image
@@ -1312,16 +1320,17 @@ class TensorRT_Engine(object):
         logging.info(f'speed: {time_synchronized() - t1}s')
         if end2end:
             num, final_boxes, final_scores, final_cls_inds = data
-            final_boxes = np.reshape(final_boxes/ratio, (-1, 4))
+            final_boxes = np.reshape(final_boxes / ratio, (-1, 4))
             dets = np.concatenate([final_boxes[:num[0]], np.array(final_scores)[
-                                  :num[0]].reshape(-1, 1), np.array(final_cls_inds)[:num[0]].reshape(-1, 1)], axis=-1)
+                                                         :num[0]].reshape(-1, 1),
+                                   np.array(final_cls_inds)[:num[0]].reshape(-1, 1)], axis=-1)
         else:
-            predictions = np.reshape(data, (1, -1, int(5+self.n_classes)))[0]
+            predictions = np.reshape(data, (1, -1, int(5 + self.n_classes)))[0]
             dets = self.postprocess(predictions, ratio)
 
         if dets is not None:
             final_boxes, final_scores, final_cls_inds = dets[:,
-                                                             :4], dets[:, 4], dets[:, 5]
+                                                        :4], dets[:, 4], dets[:, 5]
             origin_img = self.vis(origin_img, final_boxes,
                                   final_scores, final_cls_inds, names=self.names)
         return origin_img
@@ -1350,7 +1359,7 @@ class TensorRT_Engine(object):
             t1 = self.time.perf_counter() - t1
             avgT.append(t1)
         logging.info(
-            f'{self.prefix} Warming up with {(sum(avgT)/len(avgT)/10)}FPS (etc)')
+            f'{self.prefix} Warming up with {(sum(avgT) / len(avgT) / 10)}FPS (etc)')
 
     def nms(self, boxes, scores):
         """Single class NMS implemented in Numpy."""
@@ -1407,9 +1416,9 @@ class TensorRT_Engine(object):
         img = np.array(image)
         r = min(input_size[0] / img.shape[0], input_size[1] / img.shape[1])
         resized_img = self.cv2.resize(img, (int(img.shape[1] * r), int(
-            img.shape[0] * r)), interpolation=self.cv2.INTER_LINEAR,).astype(np.float32)
+            img.shape[0] * r)), interpolation=self.cv2.INTER_LINEAR, ).astype(np.float32)
         padded_img[: int(img.shape[0] * r),
-                   : int(img.shape[1] * r)] = resized_img
+        : int(img.shape[1] * r)] = resized_img
         padded_img = padded_img[:, :, ::-1]
         padded_img /= 255.0
 
@@ -1436,9 +1445,11 @@ class TensorRT_Engine(object):
             c1, c2 = (x0, y0), (x1, y1)
             c2 = c1[0] + txt_size[0], c1[1] - txt_size[1] - 3
             self.cv2.drawContours(img, [np.array([(c1[0] + txt_size[0], c1[1] - txt_size[1] - 3), (c1[0] +
-                                  txt_size[0], c1[1]), (c1[0] + txt_size[0] + txt_size[1] + 3, c1[1])])], 0, txt_bk_color, -1, 16)
+                                                                                                   txt_size[0], c1[1]),
+                                                  (c1[0] + txt_size[0] + txt_size[1] + 3, c1[1])])], 0, txt_bk_color,
+                                  -1, 16)
             self.cv2.rectangle(img, c1, c2, txt_bk_color, -
-                               1, self.cv2.LINE_AA)  # filled
+            1, self.cv2.LINE_AA)  # filled
             self.cv2.putText(img, text, (c1[0], c1[1] - 2), 0, 0.4,
                              txt_color, thickness=1, lineType=self.cv2.LINE_AA)
         return img
@@ -1448,7 +1459,7 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
     logger.info('\n%3s%18s%3s%10s  %-40s%-30s' %
                 ('', 'from', 'n', 'params', 'module', 'arguments'))
     anchors, nc, gd, gw = d['anchors'], d['nc'], d['depth_multiple'], d['width_multiple']
-    na = (len(anchors[0]) // 2) if isinstance(anchors,list) else anchors  # number of anchors
+    na = (len(anchors[0]) // 2) if isinstance(anchors, list) else anchors  # number of anchors
     no = na * (nc + 5)  # number of outputs = anchors * (classes + 5)
 
     layers, save, c2 = [], [], ch[-1]  # layers, savelist, ch out
@@ -1461,7 +1472,7 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
         for j, a in enumerate(args):
             try:
                 args[j] = eval(a) if isinstance(a, str) else a  # eval strings
-            except:
+            except NameError:
                 pass
 
         n = max(round(n * gd), 1) if n > 1 else n  # depth gain
@@ -1476,7 +1487,7 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
                  Ghost, GhostCSPA, GhostCSPB, GhostCSPC,
                  SwinTransformerBlock, STCSPA, STCSPB, STCSPC,
                  SwinTransformer2Block, ST2CSPA, ST2CSPB, ST2CSPC, C3, C2f]:
-            c1, c2 = ch[f], args[0]/3 if single_ch else args[0]
+            c1, c2 = ch[f], args[0] / 3 if single_ch else args[0]
             if c2 != no:  # if not output
                 c2 = make_divisible(c2 * gw, 8)
 
@@ -1495,9 +1506,7 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
                 n = 1
         elif m is nn.BatchNorm2d:
             args = [ch[f]]
-        elif m is Concat:
-            c2 = sum([ch[x] for x in f])
-        elif m is Chuncat:
+        elif m in [Concat, Chuncat]:
             c2 = sum([ch[x] for x in f])
         elif m is Shortcut:
             c2 = ch[f[0]]
@@ -1516,14 +1525,13 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
         else:
             c2 = ch[f]
 
-        m_ = nn.Sequential(*[m(*args) for _ in range(n)]
-                           ) if n > 1 else m(*args)  # module
+        m_ = nn.Sequential(*[m(*args) for _ in range(n)]) if n > 1 else m(*args)  # module
         t = str(m)[8:-2].replace('__main__.', '')  # module type
-        np = sum([x.numel() for x in m_.parameters()])  # number params
+        nparam = sum([x.numel() for x in m_.parameters()])  # number params
         # attach index, 'from' index, type, number params
-        m_.i, m_.f, m_.type, m_.np = i, f, t, np
+        m_.i, m_.f, m_.type, m_.np = i, f, t, nparam
         logger.info('%3s%18s%3s%10.0f  %-40s%-30s' %
-                    (i, f, n, np, t, args))  # print
+                    (i, f, n, nparam, t, args))  # print
         save.extend(x % i for x in ([f] if isinstance(
             f, int) else f) if x != -1)  # append to savelist
         layers.append(m_)

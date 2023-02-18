@@ -29,16 +29,21 @@ from tensorflow import keras
 import logging
 import inspect
 from typing import Optional
-from models.common import C3, SPP, SPPF, Bottleneck, BottleneckCSP,SP, C3x, Concat, Conv, CrossConv, DWConv, DWConvTranspose2d, Focus, autopad, MP, Shortcut,\
-                        Chuncat, Foldcut,ReOrg, Expand, Contract
+from models.common import C3, SPP, SPPF, Bottleneck, BottleneckCSP, SP, C3x, Concat, Conv, CrossConv, DWConv, \
+    DWConvTranspose2d, Focus, autopad, MP, Shortcut, \
+    Chuncat, Foldcut, ReOrg, Expand, Contract
 from models.experimental import MixConv2d, attempt_load
-from models.yolo import Detect, Segment, IDetect,  RobustConv, RobustConv2, GhostConv, RepConv, RepConv_OREPA, DownC, Stem, GhostStem, \
-                        SPPCSPC, GhostSPPCSPC, BottleneckCSPA, BottleneckCSPB, BottleneckCSPC, RepBottleneck, RepBottleneckCSPA, RepBottleneckCSPB, RepBottleneckCSPC, \
-                        Res, ResCSPA, ResCSPB, ResCSPC, RepRes, RepResCSPA, RepResCSPB, RepResCSPC, ResX, ResXCSPA, ResXCSPB, ResXCSPC, \
-                        RepResX, RepResXCSPA, RepResXCSPB, RepResXCSPC, Ghost, GhostCSPA, GhostCSPB, GhostCSPC,SwinTransformerBlock, STCSPA, STCSPB, STCSPC,\
-                        SwinTransformer2Block, ST2CSPA, ST2CSPB, ST2CSPC, IAuxDetect, IBin, IKeypoint
+from models.yolo import Detect, Segment, IDetect, RobustConv, RobustConv2, GhostConv, RepConv, RepConv_OREPA, DownC, \
+    Stem, GhostStem, \
+    SPPCSPC, GhostSPPCSPC, BottleneckCSPA, BottleneckCSPB, BottleneckCSPC, RepBottleneck, RepBottleneckCSPA, \
+    RepBottleneckCSPB, RepBottleneckCSPC, \
+    Res, ResCSPA, ResCSPB, ResCSPC, RepRes, RepResCSPA, RepResCSPB, RepResCSPC, ResX, ResXCSPA, ResXCSPB, ResXCSPC, \
+    RepResX, RepResXCSPA, RepResXCSPB, RepResXCSPC, Ghost, GhostCSPA, GhostCSPB, GhostCSPC, SwinTransformerBlock, \
+    STCSPA, STCSPB, STCSPC, \
+    SwinTransformer2Block, ST2CSPA, ST2CSPB, ST2CSPC, IAuxDetect, IBin, IKeypoint
 from utils.activations import SiLU, Hardswish
-from utils.general import  make_divisible, colorstr
+from utils.general import make_divisible, colorstr
+
 
 def print_args(args: Optional[dict] = None, show_file=True, show_func=False):
     x = inspect.currentframe().f_back  # previous frame
@@ -52,8 +57,43 @@ def print_args(args: Optional[dict] = None, show_file=True, show_func=False):
         file = Path(file).stem
     s = (f'{file}: ' if show_file else '') + (f'{func}: ' if show_func else '')
     LOGGER.info(colorstr(s) + ', '.join(f'{k}={v}' for k, v in args.items()))
-    
+
+
 LOGGER = logging.getLogger(__name__)
+
+
+class TFSPPCSPC(keras.layers.Layer):
+    """CSP https://github.com/WongKinYiu/CrossStagePartialNetworks"""
+
+    def __init__(self, c1, c2, n=1, shortcut=False, g=1, e=0.5, k=(5, 9, 13), w=None):
+        super(TFSPPCSPC, self).__init__()
+        c_ = int(2 * c2 * e)  # hidden channels
+        print(f'debug/{w}')
+        print(f'debug/{k}')
+        self.cv1 = TFConv(c1, c_, 1, 1, w=w.cv1)
+        self.cv2 = TFConv(c1, c_, 1, 1, w=w.cv2)
+        self.cv3 = TFConv(c_, c_, 3, 1, w=w.cv3)
+        self.cv4 = TFConv(c_, c_, 1, 1, w=w.cv4)
+        # self.m = nn.ModuleList([nn.MaxPool2d(kernel_size=x, stride=1, padding=x // 2, w) for i,x in enumerate(k)])
+        self.m = [keras.layers.MaxPool2D(pool_size=x, strides=1, padding='SAME') for x in k]
+        self.cv5 = TFConv(4 * c_, c_, 1, 1, w=w.cv5)
+        self.cv6 = TFConv(c_, c_, 3, 1, w=w.cv6)
+        self.cv7 = TFConv(2 * c_, c2, 1, 1, w=w.cv7)
+
+    def forward(self, x):
+        x1 = self.cv4(self.cv3(self.cv1(x)))
+        y1 = self.cv6(self.cv5(tf.concat([x1] + [m(x1) for m in self.m], 1)))
+        y2 = self.cv2(x)
+        return self.cv7(tf.concat((y1, y2), dim=1))
+
+
+class TFReOrg(keras.layers.Layer):
+    def __init__(self, w=None):
+        super(TFReOrg, self).__init__()
+
+    def call(self, x):  # x(b,c,w,h) -> y(b,4c,w/2,h/2)
+        return tf.concat([x[..., ::2, ::2], x[..., 1::2, ::2], x[..., ::2, 1::2], x[..., 1::2, 1::2]], 1)
+
 
 class TFBN(keras.layers.Layer):
     # TensorFlow BatchNormalization wrapper
@@ -69,13 +109,15 @@ class TFBN(keras.layers.Layer):
     def call(self, inputs):
         return self.bn(inputs)
 
+
 class TFMP(keras.layers.Layer):
     def __init__(self, k=2, w=None):
         super(TFMP, self).__init__()
-        self.m = keras.layers.MaxPool2D(pool_size=k, strides=k, padding='SAME')
-        
+        self.m = keras.layers.MaxPool2D(pool_size=k, strides=k, padding='valid')
+
     def call(self, x):
         return self.m(x)
+
 
 class TFSP(keras.layers.Layer):
     def __init__(self, k=3, s=1, w=None):
@@ -84,7 +126,8 @@ class TFSP(keras.layers.Layer):
 
     def call(self, x):
         return self.m(x)
-    
+
+
 class TFImplicitA(keras.layers.Layer):
     def __init__(self, channel, mean=0., std=.02, w=None):
         super(TFImplicitA, self).__init__()
@@ -96,9 +139,10 @@ class TFImplicitA(keras.layers.Layer):
 
     def call(self, x):
         return self.implicit + x
-    
+
+
 class TFImplicitM(keras.layers.Layer):
-    def __init__(self, channel, mean=1., std=.02,W=None):
+    def __init__(self, channel, mean=1., std=.02, W=None):
         super(TFImplicitM, self).__init__()
         self.channel = channel
         self.mean = mean
@@ -108,6 +152,7 @@ class TFImplicitM(keras.layers.Layer):
 
     def call(self, x):
         return self.implicit * x
+
 
 class TFPad(keras.layers.Layer):
     # Pad inputs in spatial dimensions 1 and 2
@@ -120,6 +165,7 @@ class TFPad(keras.layers.Layer):
 
     def call(self, inputs):
         return tf.pad(inputs, self.pad, mode='constant', constant_values=0)
+
 
 class TFConv(keras.layers.Layer):
     # Standard convolution
@@ -136,7 +182,8 @@ class TFConv(keras.layers.Layer):
             padding='SAME' if s == 1 else 'VALID',
             use_bias=not hasattr(w, 'bn'),
             kernel_initializer=keras.initializers.Constant(w.conv.weight.permute(2, 3, 1, 0).cpu().detach().numpy()),
-            bias_initializer='zeros' if hasattr(w, 'bn') else keras.initializers.Constant(w.conv.bias.cpu().detach().numpy()))
+            bias_initializer='zeros' if hasattr(w, 'bn') else keras.initializers.Constant(
+                w.conv.bias.cpu().detach().numpy()))
         self.conv = conv if s == 1 else keras.Sequential([TFPad(autopad(k, p)), conv])
         self.bn = TFBN(w.bn) if hasattr(w, 'bn') else tf.identity
         self.act = activations(w.act) if act else tf.identity
@@ -144,8 +191,10 @@ class TFConv(keras.layers.Layer):
     def call(self, inputs):
         return self.act(self.bn(self.conv(inputs)))
 
+
 class TFDWConv(keras.layers.Layer):
     """Depthwise convolution"""
+
     def __init__(self, c1, c2, k=1, s=1, p=None, act=True, w=None):
         # ch_in, ch_out, weights, kernel, stride, padding, groups
         super().__init__()
@@ -164,6 +213,7 @@ class TFDWConv(keras.layers.Layer):
 
     def call(self, inputs):
         return self.act(self.bn(self.conv(inputs)))
+
 
 class TFDWConvTranspose2d(keras.layers.Layer):
     # Depthwise ConvTranspose2d
@@ -239,7 +289,8 @@ class TFConv2d(keras.layers.Layer):
                                         use_bias=bias,
                                         kernel_initializer=keras.initializers.Constant(
                                             w.weight.permute(2, 3, 1, 0).detach().detach().cpu().numpy()),
-                                        bias_initializer=keras.initializers.Constant(w.bias.detach().detach().cpu().numpy()) if bias else None)
+                                        bias_initializer=keras.initializers.Constant(
+                                            w.bias.detach().detach().cpu().numpy()) if bias else None)
 
     def call(self, inputs):
         return self.conv(inputs)
@@ -263,7 +314,8 @@ class TFBottleneckCSP(keras.layers.Layer):
         y1 = self.cv3(self.m(self.cv1(inputs)))
         y2 = self.cv2(inputs)
         return self.cv4(self.act(self.bn(tf.concat((y1, y2), axis=3))))
-    
+
+
 class TFC3(keras.layers.Layer):
     # CSP Bottleneck with 3 convolutions
     def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5, w=None):
@@ -372,8 +424,6 @@ class TFDetect(keras.layers.Layer):
         return tf.cast(tf.reshape(tf.stack([xv, yv], 2), [1, 1, ny * nx, 2]), dtype=tf.float32)
 
 
-
-
 class TFSegment(TFDetect):
     # YOLOv5 Segment head for segmentation models
     def __init__(self, nc=80, anchors=(), nm=32, npr=256, ch=(), imgsz=(640, 640), w=None):
@@ -420,6 +470,7 @@ class TFUpsample(keras.layers.Layer):
     def call(self, inputs):
         return self.upsample(inputs)
 
+
 class TFConcat(keras.layers.Layer):
     # TF version of torch.concat()
     def __init__(self, dimension=1, w=None):
@@ -429,7 +480,8 @@ class TFConcat(keras.layers.Layer):
 
     def call(self, inputs):
         return tf.concat(inputs, self.d)
-    
+
+
 def parse_model(d, ch, model, imgsz):  # model_dict, input_channels(3)
     LOGGER.info('\n%3s%18s%3s%10s  %-40s%-30s' % ('', 'from', 'n', 'params', 'module', 'arguments'))
     anchors, nc, gd, gw = d['anchors'], d['nc'], d['depth_multiple'], d['width_multiple']
@@ -447,14 +499,14 @@ def parse_model(d, ch, model, imgsz):  # model_dict, input_channels(3)
                 pass
 
         n = max(round(n * gd), 1) if n > 1 else n  # depth gain
-        if m in [nn.Conv2d, Conv, RobustConv, RobustConv2, DWConv, GhostConv, RepConv, RepConv_OREPA, DownC, 
-                 SPP, SPPF, SPPCSPC, GhostSPPCSPC, MixConv2d, Focus, Stem, GhostStem, CrossConv, 
-                 Bottleneck, BottleneckCSPA, BottleneckCSPB, BottleneckCSPC, 
-                 RepBottleneck, RepBottleneckCSPA, RepBottleneckCSPB, RepBottleneckCSPC,  
-                 Res, ResCSPA, ResCSPB, ResCSPC, 
-                 RepRes, RepResCSPA, RepResCSPB, RepResCSPC, 
-                 ResX, ResXCSPA, ResXCSPB, ResXCSPC, 
-                 RepResX, RepResXCSPA, RepResXCSPB, RepResXCSPC, 
+        if m in [nn.Conv2d, Conv, RobustConv, RobustConv2, DWConv, GhostConv, RepConv, RepConv_OREPA, DownC,
+                 SPP, SPPF, SPPCSPC, GhostSPPCSPC, MixConv2d, Focus, Stem, GhostStem, CrossConv,
+                 Bottleneck, BottleneckCSPA, BottleneckCSPB, BottleneckCSPC,
+                 RepBottleneck, RepBottleneckCSPA, RepBottleneckCSPB, RepBottleneckCSPC,
+                 Res, ResCSPA, ResCSPB, ResCSPC,
+                 RepRes, RepResCSPA, RepResCSPB, RepResCSPC,
+                 ResX, ResXCSPA, ResXCSPB, ResXCSPC,
+                 RepResX, RepResXCSPA, RepResXCSPB, RepResXCSPC,
                  Ghost, GhostCSPA, GhostCSPB, GhostCSPC,
                  SwinTransformerBlock, STCSPA, STCSPB, STCSPC,
                  SwinTransformer2Block, ST2CSPA, ST2CSPB, ST2CSPC, C3]:
@@ -463,12 +515,12 @@ def parse_model(d, ch, model, imgsz):  # model_dict, input_channels(3)
                 c2 = make_divisible(c2 * gw, 8)
 
             args = [c1, c2, *args[1:]]
-            if m in [DownC, SPPCSPC, GhostSPPCSPC, 
-                     BottleneckCSPA, BottleneckCSPB, BottleneckCSPC, 
-                     RepBottleneckCSPA, RepBottleneckCSPB, RepBottleneckCSPC, 
-                     ResCSPA, ResCSPB, ResCSPC, 
-                     RepResCSPA, RepResCSPB, RepResCSPC, 
-                     ResXCSPA, ResXCSPB, ResXCSPC, 
+            if m in [DownC, SPPCSPC, GhostSPPCSPC,
+                     BottleneckCSPA, BottleneckCSPB, BottleneckCSPC,
+                     RepBottleneckCSPA, RepBottleneckCSPB, RepBottleneckCSPC,
+                     ResCSPA, ResCSPB, ResCSPC,
+                     RepResCSPA, RepResCSPB, RepResCSPC,
+                     ResXCSPA, ResXCSPB, ResXCSPC,
                      RepResXCSPA, RepResXCSPB, RepResXCSPC,
                      GhostCSPA, GhostCSPB, GhostCSPC,
                      STCSPA, STCSPB, STCSPC,
@@ -477,27 +529,20 @@ def parse_model(d, ch, model, imgsz):  # model_dict, input_channels(3)
                 n = 1
         elif m is nn.BatchNorm2d:
             args = [ch[f]]
-        elif m is Concat:
-            c2 = sum(ch[-1 if x == -1 else x + 1] for x in f)
-        elif m is Chuncat:
+        elif m in [Concat, Chuncat]:
             c2 = sum(ch[-1 if x == -1 else x + 1] for x in f)
         elif m is Shortcut:
             c2 = ch[f[0]]
         elif m is Foldcut:
             c2 = ch[f] // 2
         elif m in [Detect, IAuxDetect, IBin, IKeypoint]:
-            args.append([ch[x] for x in f])
+            args.append([ch[x + 1] for x in f])
             if isinstance(args[1], int):  # number of anchors
                 args[1] = [list(range(args[1] * 2))] * len(f)
+            args.append(imgsz)
         elif m in [IDetect]:
             LOGGER.info(f'Please retrain the model, {m} is unsupported')
             sys.exit()
-        elif m is ReOrg:
-            c2 = ch[f] * 4
-        elif m is Contract:
-            c2 = ch[f] * args[0] ** 2
-        elif m is Expand:
-            c2 = ch[f] // args[0] ** 2
         else:
             c2 = ch[f]
         tf_m = eval('TF' + m_str.replace('nn.', ''))
@@ -505,13 +550,14 @@ def parse_model(d, ch, model, imgsz):  # model_dict, input_channels(3)
             else tf_m(*args, w=model.model[i])  # module
         torch_m = nn.Sequential(*[m(*args) for _ in range(n)]) if n > 1 else m(*args)  # module
         t = str(m)[8:-2].replace('__main__.', '')  # module type
-        np = sum([x.numel() for x in torch_m.parameters()])  # number params
+        nparam = sum([x.numel() for x in torch_m.parameters()])  # number params
         m_.i, m_.f, m_.type, m_.np = i, f, t, np  # attach index, 'from' index, type, number params
-        LOGGER.info('%3s%18s%3s%10.0f  %-40s%-30s' % (i, f, n, np, t, args))  # print
+        LOGGER.info('%3s%18s%3s%10.0f  %-40s%-30s' % (i, f, n, nparam, t, args))  # print
         save.extend(x % i for x in ([f] if isinstance(f, int) else f) if x != -1)  # append to savelist
         layers.append(m_)
         ch.append(c2)
     return keras.Sequential(layers), sorted(save)
+
 
 class TFModel:
     # TF YOLOv5 model
@@ -617,7 +663,6 @@ class AgnosticNMS(keras.layers.Layer):
         return padded_boxes, padded_scores, padded_classes, valid_detections
 
 
-
 def activations(act=nn.SiLU):
     """Returns TF activation from input PyTorch activation"""
     if isinstance(act, nn.LeakyReLU):
@@ -641,7 +686,7 @@ def activations(act=nn.SiLU):
     elif isinstance(act, nn.GELU):
         return lambda x: tf.keras.activations.gelu(x)
     elif isinstance(act, nn.PReLU):
-        return lambda x: tf.keras.activations.relu(x,alpha=0.25)
+        return lambda x: tf.keras.activations.relu(x, alpha=0.25)
     elif isinstance(act, nn.Softmax):
         return lambda x: tf.keras.activations.softmax(x)
     elif isinstance(act, nn.Softsign):
