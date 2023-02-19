@@ -28,7 +28,7 @@ pd.options.display.max_columns = 10
 # os.environ['NUMEXPR_MAX_THREADS'] = str(os.cpu_count())  # NumExpr max threads
 FILE = Path(__file__).resolve()
 ROOT = FILE.parents[1]  # YOLOv5 root directory
-
+TQDM_BAR_FORMAT = '{l_bar}{bar:10}{r_bar}'  # tqdm bar format
 
 def set_logging(rank=-1, filename=None, filemode=None):
     logging.basicConfig(

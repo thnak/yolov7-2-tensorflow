@@ -174,7 +174,6 @@ def select_device(device='', batch_size=None):
     if torch.cuda.is_available():
         if device.lower() in [f'cuda:{x}' for x in range(10)]:
             device = device.split(':')[1] if int(device.split(':')[1]) < torch.cuda.device_count() else 'cpu'
-            os.environ['PIN_MEMORY'] = True if device.isnumeric() else False
     else:
         device = 'cpu'
 
@@ -527,7 +526,6 @@ class TracedModel(nn.Module):
         rand_example = torch.rand(1, 1 if single_channel else 3, img_size, img_size)
 
         traced_script_module = torch.jit.trace(self.model, rand_example, strict=False)
-        # traced_script_module = torch.jit.script(self.model)
         if saveTrace:
             traced_script_module.save("traced_model.pt")
         print("traced_script_module saved! ")
@@ -542,19 +540,22 @@ class TracedModel(nn.Module):
         return out
 
 
-def save_model(ckpt={}, last=None, best=None, best_fitness=None, fi=None, epoch=0, epochs=0, wdir=None, wandb_logger=None, opt=None):
-    torch.save(ckpt, last)
-    if best_fitness == fi:
-        torch.save(ckpt, best)
-    if (best_fitness == fi) and (epoch >= 200):
-        torch.save(ckpt, wdir / 'best_{:03d}.pt'.format(epoch))
-    if epoch == 0:
-        torch.save(ckpt, wdir / 'epoch_{:03d}.pt'.format(epoch))
-    elif ((epoch + 1) % 25) == 0:
-        torch.save(ckpt, wdir / 'epoch_{:03d}.pt'.format(epoch))
-    elif epoch >= (epochs - 5):
-        torch.save(ckpt, wdir / 'epoch_{:03d}.pt'.format(epoch))
-    if wandb_logger.wandb:
-        if ((epoch + 1) % opt.save_period == 0 and not final_epoch) and opt.save_period != -1:
-            wandb_logger.log_model(
-                last.parent, opt, epoch, fi, best_model=best_fitness == fi)
+def save_model(ckpt=None, last=None, best=None, best_fitness=None, fi=None, epoch=0, epochs=0, wdir=None, wandb_logger=None, opt=None):
+    if ckpt is not None:
+        torch.save(ckpt, last)
+        if best_fitness == fi:
+            torch.save(ckpt, best)
+        if (best_fitness == fi) and (epoch >= 200):
+            torch.save(ckpt, wdir / 'best_{:03d}.pt'.format(epoch))
+        if epoch == 0:
+            torch.save(ckpt, wdir / 'epoch_{:03d}.pt'.format(epoch))
+        elif ((epoch + 1) % 25) == 0:
+            torch.save(ckpt, wdir / 'epoch_{:03d}.pt'.format(epoch))
+        elif epoch >= (epochs - 5):
+            torch.save(ckpt, wdir / 'epoch_{:03d}.pt'.format(epoch))
+        if wandb_logger.wandb:
+            if ((epoch + 1) % opt.save_period == 0 and not final_epoch) and opt.save_period != -1:
+                wandb_logger.log_model(
+                    last.parent, opt, epoch, fi, best_model=best_fitness == fi)
+    else:
+        print(f'User warning: Nothing to save.')

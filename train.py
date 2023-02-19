@@ -4,7 +4,9 @@ import math
 import os
 import random
 import csv
+import subprocess
 import sys
+import threading
 from copy import deepcopy
 from pathlib import Path
 from threading import Thread
@@ -28,7 +30,7 @@ from utils.autoanchor import check_anchors
 from utils.datasets import create_dataloader
 from utils.general import labels_to_class_weights, increment_path, labels_to_image_weights, init_seeds, \
     fitness, strip_optimizer, get_latest_run, check_dataset, check_file, check_img_size, \
-    print_mutation, set_logging, one_cycle, colorstr
+    print_mutation, set_logging, one_cycle, colorstr, TQDM_BAR_FORMAT
 from utils.google_utils import attempt_download
 from utils.loss import ComputeLoss, ComputeLossOTA, ComputeLossAuxOTA
 from utils.plots import plot_images, plot_results, plot_evolution
@@ -358,9 +360,10 @@ def train(hyp, opt, tb_writer=None,
         if rank != -1:
             dataloader.sampler.set_epoch(epoch)
         pbar = enumerate(dataloader)
-        logger.info(('\n' + '%10s' * 8) % tag_results)
+        logger.info(('\n' + '%11s' * 8) % tag_results)
         if rank in [-1, 0]:
-            pbar = tqdm(pbar, total=nb, mininterval=0.05, maxinterval=1, unit='batch')  # progress bar
+            pbar = tqdm(pbar, total=nb, mininterval=0.05, maxinterval=1, unit='batch',
+                        bar_format=TQDM_BAR_FORMAT)  # progress bar
 
         # batch -------------------------------------------------------------
         for i, (imgs, targets, paths, _) in pbar:
@@ -424,10 +427,7 @@ def train(hyp, opt, tb_writer=None,
             if rank in [-1, 0]:
                 mloss = (mloss * i + loss_items.to(device)) / (i + 1)  # update mean losses
                 mem = '%.3gG' % (torch.cuda.memory_reserved() / 1E9 if torch.cuda.is_available() else 0)  # (GB)
-                s = ('%10s' * 2 + '%10.4g' * 6) % ('%g/%g' % (epoch,
-                                                              epochs - 1), mem,
-                                                   *mloss, targets.shape[0],
-                                                   imgs.shape[-1])
+                s = ('%11s' * 2 + '%11.4g' * 6) % (f'{epoch}/{epochs - 1}', mem, *mloss, targets.shape[0], imgs.shape[-1])
                 pbar.set_description(s)
 
                 # Plot
@@ -732,15 +732,14 @@ if __name__ == '__main__':
         tb_writer = None  # init loggers
         if opt.global_rank in [-1, 0]:
             prefix = colorstr('tensorboard: ')
-            logger.info(
-                f"{prefix}Start with 'tensorboard --logdir {opt.project}', view at http://localhost:6006/")
             try:
                 tb_writer = SummaryWriter(opt.save_dir)  # Tensorboard
-                logger.warning(f'{prefix}Init success')
-            except:
+                tensorboard_lauch = threading.Thread(target=lambda: os.system(f'tensorboard --bind_all --logdir {opt.project}'), daemon=True).start()
+                logger.info(
+                    f"{prefix}Starting...")
+            except Exception as ex:
                 tb_writer = None
                 logger.warning(f'{prefix}Init error')
-
         train(hyp, opt, tb_writer=tb_writer)
     # Evolve hyperparameters (optional)
     else:
