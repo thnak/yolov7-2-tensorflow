@@ -90,7 +90,7 @@ def create_dataloader(path, imgsz, batch_size, stride, opt, hyp=None, augment=Fa
     try:
         import torch_directml
         nd_dml = torch_directml.device_count()
-    except:
+    except Exception:
         pass
     nd = nd_dml if nd_dml else torch.cuda.device_count()
     nw = min(
@@ -418,7 +418,7 @@ def img2label_paths(img_paths):
 
 class LoadImagesAndLabels(Dataset):  # for training/testing
     version = 0.1
-
+    image_8bit = True
     def __init__(self, path, img_size=640, batch_size=16, augment=False, hyp=None, rect=False, image_weights=False,
                  cache_images='ram', single_cls=False, stride=32, pad=0.0, single_channel=False, prefix=''):
 
@@ -519,7 +519,6 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                     shapes[i] = [1, 1 / mini]
 
             self.batch_shapes = np.ceil(np.array(shapes) * img_size / stride + pad).astype(np.int32) * stride
-
         # Cache images into memory for faster training (WARNING: large datasets may exceed system RAM)
         if self.cache_images in ['ram', 'disk']:
             if self.cache_images == 'ram' and not self.check_cache_ram(prefix=prefix):
@@ -531,7 +530,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             gb = 0  # Gigabytes of cached images
             self.img_hw0, self.img_hw = [None] * n, [None] * n
             results = ThreadPool().map(self.load_image, range(n))
-            pbar = tqdm(enumerate(results), total=n, mininterval=0.05, maxinterval=1, unit='image', bar_format=TQDM_BAR_FORMAT)
+            pbar = tqdm(enumerate(results), total=n, mininterval=0.1, maxinterval=1, unit='image', bar_format=TQDM_BAR_FORMAT)
             checkimgSizeStatus = False
             for i, x in pbar:
                 if self.cache_images == 'disk':
@@ -550,13 +549,12 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                 pbar.desc = f'{prefix}Caching images ({gb / 1E9:.3f}GB {self.cache_images.upper()})'
             pbar.close()
 
-    def check_cache_ram(self, prefix='', safety_margin=1):
+    def check_cache_ram(self, prefix='', safety_margin=1.5):
         b, gb = 0, 1 << 30
-        for _ in range(int(self.n / 10)):
-            im = cv2.imread(self.img_files[_])  # sample image
-            ratio = self.img_size / max(im.shape[0], im.shape[1])  # max(h, w)  # ratio
-            b += im.nbytes * ratio ** 2
-        b *= 10
+        tem = int(self.stride * ((self.img_size / self.stride) - 1))
+        img_sz = [self.img_size] * 2 if not self.rect else [self.img_size, tem]
+        num = np.zeros((*img_sz, 3), dtype=np.uint8 if self.image_8bit else np.uint16)
+        b = num.nbytes * len(self.img_files)
         mem = psutil.virtual_memory()
         cache = True if b < (mem.available * safety_margin) else False  # to cache or not to cache, that is the question
         print(f"{prefix}{b / gb:.3f}GB RAM required (estimate), "
@@ -629,7 +627,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         imgnpy = imgnpy if isinstance(imgnpy, str) else 'imgnpy.npy'
         if img is None and os.path.exists(imgnpy) is False:
             path = self.img_files[index]
-            img = cv2.imread(path)
+            img = cv2.imread(path).astype(np.uint8 if self.image_8bit else np.uint16)
             assert img is not None, 'Image Not Found ' + path
             h0, w0 = img.shape[:2]
             r = self.img_size / max(h0, w0)
@@ -725,7 +723,6 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         else:
             img = img.transpose(2, 0, 1)  # BGR to RGB, to 3x416x416
         img = np.ascontiguousarray(img)
-
         return torch.from_numpy(img), labels_out, self.img_files[index], shapes
 
     @staticmethod

@@ -678,6 +678,7 @@ if __name__ == '__main__':
                         help='Freeze layers: backbone of yolov7=50, first3=0 1 2')
     parser.add_argument('--v5-metric', action='store_true', help='assume maximum recall as 1.0 in AP calculation')
     parser.add_argument('--seed', type=int, default=0, help='Global training seed')
+    parser.add_argument('--tensorboard', action='store_true', help='Start with Tensorboard')
     opt = parser.parse_args()
 
     # Set DDP variables
@@ -733,13 +734,14 @@ if __name__ == '__main__':
         if opt.global_rank in [-1, 0]:
             prefix = colorstr('tensorboard: ')
             try:
+                assert opt.tensorboard, 'not using Tensorboard'
                 tb_writer = SummaryWriter(opt.save_dir)  # Tensorboard
                 tensorboard_lauch = threading.Thread(target=lambda: os.system(f'tensorboard --bind_all --logdir {opt.project}'), daemon=True).start()
                 logger.info(
                     f"{prefix}Starting...")
             except Exception as ex:
                 tb_writer = None
-                logger.warning(f'{prefix}Init error')
+                logger.warning(f'{prefix}Init error, {ex}')
         train(hyp, opt, tb_writer=tb_writer)
     # Evolve hyperparameters (optional)
     else:
