@@ -43,13 +43,16 @@ def _tf_to_tflite(tf_model_path: Path, output_path: Path):
 
 
 def torch_to_tflite(torch_model_path: Path, img_size: List[int], output_dir: Path):
+    output_dir = output_dir if isinstance(output_dir, Path) else Path(output_dir)
+    torch_model_path = torch_model_path if isinstance(torch_model_path, Path) else Path(torch_model_path)
     output_dir.mkdir(parents=True, exist_ok=True)
     onnx_model_path = output_dir / f"{torch_model_path.stem}.onnx"
     tf_model_path = output_dir / f"{torch_model_path.stem}.pb"
     _torch_to_onnx(torch_model_path, img_size, onnx_model_path)
     _onnx_to_tf(onnx_model_path, tf_model_path)
     _tf_to_tflite(tf_model_path, output_dir / f"{torch_model_path.stem}.tflite")
-
+    keras_model = tf.saved_model.load("D:/Users/Documents/GitHub/YoLov7/runs/train/exp/weights/deploy_bestnew.tflite/deploy_best.pb/", tags=None, options=None)
+    return keras_model
 
 def parse_args(cli_args=sys.argv[1:]):
     parser = argparse.ArgumentParser()

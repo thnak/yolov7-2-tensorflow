@@ -6,7 +6,10 @@ from pathlib import Path
 import re
 import torch
 import platform
+
 MACOS = platform.system() == 'Darwin'  # macOS environment
+
+
 def yaml_save(file='data.yaml', data={}):
     # Single-line safe yaml saving
     with open(file, 'w') as f:
@@ -25,16 +28,17 @@ def export_openvino(file_, metadata, half, prefix='OpenVINO:'):
     yaml_save(Path(f) / file.with_suffix('.yaml').name, metadata)  # add metadata.yaml
     return f, None
 
+
 def export_tfjs(file_, names, prefix='TensorFlow.js:'):
     check_requirements('tensorflowjs')
     import tensorflowjs as tfjs
     print(f'\n{prefix} starting export with tensorflowjs {tfjs.__version__}...')
     file = Path(file_)
     f_web = str(file).replace('.pt', '_web_model')  # js dir
-    f_pb = str(file).replace('.pt','.pb')  # *.pb path
+    f_pb = str(file).replace('.pt', '.pb')  # *.pb path
     f_json = f'{f_web}/model.json'  # *.json path
     f_labels = f'{f_web}/labels.txt'
-    
+
     cmd = f'tensorflowjs_converter --input_format=tf_frozen_model ' \
           f'--output_node_names=Identity,Identity_1,Identity_2,Identity_3 {f_pb} {f_web}'
     subprocess.run(cmd.split())
@@ -46,14 +50,15 @@ def export_tfjs(file_, names, prefix='TensorFlow.js:'):
             r'"Identity.?.?": {"name": "Identity.?.?"}, '
             r'"Identity.?.?": {"name": "Identity.?.?"}, '
             r'"Identity.?.?": {"name": "Identity.?.?"}}}', r'{"outputs": {"Identity": {"name": "Identity"}, '
-            r'"Identity_1": {"name": "Identity_1"}, '
-            r'"Identity_2": {"name": "Identity_2"}, '
-            r'"Identity_3": {"name": "Identity_3"}}}', json)
+                                                           r'"Identity_1": {"name": "Identity_1"}, '
+                                                           r'"Identity_2": {"name": "Identity_2"}, '
+                                                           r'"Identity_3": {"name": "Identity_3"}}}', json)
         j.write(subst)
-    with open(f_labels,'w') as f:
+    with open(f_labels, 'w') as f:
         for name in names:
             f.writelines(name)
     return f_web, None
+
 
 def export_pb(keras_model, file, prefix='TensorFlow GraphDef:'):
     import tensorflow as tf
@@ -68,6 +73,7 @@ def export_pb(keras_model, file, prefix='TensorFlow GraphDef:'):
     frozen_func.graph.as_graph_def()
     tf.io.write_graph(graph_or_graph_def=frozen_func.graph, logdir=str(f.parent), name=f.name, as_text=False)
     return f, None
+
 
 def export_saved_model(model,
                        im,
@@ -94,7 +100,7 @@ def export_saved_model(model,
     print(f'\n{prefix} starting export with tensorflow {tf.__version__}...')
     f = str(file).replace('.pt', '_saved_model')
     batch_size, ch, *imgsz = list(im.shape)  # BCHW
-    
+
     tf_model = TFModel(cfg=model['model'].yaml, model=model['model'], nc=len(model['model'].names), imgsz=imgsz)
     im = tf.zeros((batch_size, *imgsz, ch))  # BHWC order for TensorFlow
     _ = tf_model.predict(im, tf_nms, agnostic_nms, topk_per_class, topk_all, iou_thres, conf_thres)
@@ -118,5 +124,3 @@ def export_saved_model(model,
                             options=tf.saved_model.SaveOptions(experimental_custom_gradients=False) if check_version(
                                 tf.__version__, '2.6') else tf.saved_model.SaveOptions())
     return f, keras_model
-
-
