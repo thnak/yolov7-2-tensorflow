@@ -1,6 +1,6 @@
 
 <div align="left">
-  <p>training support on windows computer systems with DirectML backend use '--device dml' to train</p>
+  <p>use '--device dml:0' to train</p>
 
 </div>
 
