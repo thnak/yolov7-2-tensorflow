@@ -419,6 +419,7 @@ def img2label_paths(img_paths):
 class LoadImagesAndLabels(Dataset):  # for training/testing
     version = 0.1
     image_8bit = True
+
     def __init__(self, path, img_size=640, batch_size=16, augment=False, hyp=None, rect=False, image_weights=False,
                  cache_images='ram', single_cls=False, stride=32, pad=0.0, single_channel=False, prefix=''):
 
@@ -530,7 +531,8 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             gb = 0  # Gigabytes of cached images
             self.img_hw0, self.img_hw = [None] * n, [None] * n
             results = ThreadPool().map(self.load_image, range(n))
-            pbar = tqdm(enumerate(results), total=n, mininterval=0.1, maxinterval=1, unit='image', bar_format=TQDM_BAR_FORMAT)
+            pbar = tqdm(enumerate(results), total=n, mininterval=0.1, maxinterval=1, unit='image',
+                        bar_format=TQDM_BAR_FORMAT)
             checkimgSizeStatus = False
             for i, x in pbar:
                 if self.cache_images == 'disk':
@@ -647,8 +649,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
     def __getitem__(self, index):
         index = self.indices[index]  # linear, shuffled, or image_weights
 
-        hyp = self.hyp
-        mosaic = True if self.mosaic and random.random() < hyp['mosaic'] else False
+        mosaic = True if self.mosaic and random.random() < self.hyp['mosaic'] else False
         if mosaic:
             # Load mosaic
             if random.random() < 0.8:
@@ -658,7 +659,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             shapes = None
 
             # MixUp https://arxiv.org/pdf/1710.09412.pdf
-            if random.random() < hyp['mixup']:
+            if random.random() < self.hyp['mixup']:
                 if random.random() < 0.8:
                     img2, labels2 = load_mosaic(self, random.randint(0, len(self.labels) - 1))
                 else:
@@ -682,18 +683,18 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             # Augment imagespace
             if not mosaic:
                 img, labels = random_perspective(img, labels,
-                                                 degrees=hyp['degrees'],
-                                                 translate=hyp['translate'],
-                                                 scale=hyp['scale'],
-                                                 shear=hyp['shear'],
-                                                 perspective=hyp['perspective'])
+                                                 degrees=self.hyp['degrees'],
+                                                 translate=self.hyp['translate'],
+                                                 scale=self.hyp['scale'],
+                                                 shear=self.hyp['shear'],
+                                                 perspective=self.hyp['perspective'])
             img, labels = self.albumentations(img, labels)
             nL = len(labels)
 
-            if random.random() < hyp['cutout']:
+            if random.random() < self.hyp['cutout']:
                 img, labels = cutout(img, labels)
 
-            if random.random() < hyp['paste_in']:
+            if random.random() < self.hyp['paste_in']:
                 sample_labels, sample_images, sample_masks = [], [], []
                 while len(sample_labels) < 30:
                     sample_labels_, sample_images_, sample_masks_ = load_samples(self, random.randint(0,
@@ -758,10 +759,9 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
 
         return torch.stack(img4, 0), torch.cat(label4, 0), path4, shapes4
 
-    # Ancillary functions --------------------------------------------------------------------------------------------------
 
     def load_mosaic(self, index):
-        # loads images in a 4-mosaic
+        """loads images in a 4-mosaic"""
         labels4, segments4 = [], []
         s = self.img_size
         yc, xc = [int(random.uniform(-x, 2 * s + x)) for x in self.mosaic_border]  # mosaic center x, y
@@ -801,11 +801,6 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         labels4 = np.concatenate(labels4, 0)
         for x in (labels4[:, 1:], *segments4):
             np.clip(x, 0, 2 * s, out=x)  # clip when using random_perspective()
-        # img4, labels4 = replicate(img4, labels4)  # replicate
-
-        # Augment
-        # img4, labels4, segments4 = remove_background(img4, labels4, segments4)
-        # sample_segments(img4, labels4, segments4, probability=self.hyp['copy_paste'])
         img4, labels4, segments4 = copy_paste(img4, labels4, segments4, probability=self.hyp['copy_paste'])
         img4, labels4 = random_perspective(img4, labels4, segments4,
                                            degrees=self.hyp['degrees'],

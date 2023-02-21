@@ -58,8 +58,7 @@ if __name__ == '__main__':
                       for x in opt.include)
     graphDef = any(x in ['saved_model', 'grapdef', 'tfjs', 'tflite']
                    for x in opt.include)
-    pt2tsf = any(x in ['pt2tsf', 'grapdef', 'tfjs', 'tflite'] for x in opt.include)
-    pt2tsf = not graphDef
+
     t = time.time()
     opt.weights = [os.path.realpath(x) for x in opt.weights] if isinstance(
         opt.weights, (tuple, list)) else [os.path.realpath(opt.weights)]
@@ -293,19 +292,6 @@ if __name__ == '__main__':
                     f'{prefix} export success✅, saved as: {outputpath}')
                 filenames.append(outputpath)
             except Exception as e:
-                logging.info(f'{prefix} export failure❌: {e}')
-        if pt2tsf:
-            saved_Model = False
-            prefix = colorstr('TensorFlow SavedModel:')
-            logging.info(f'{prefix} Starting export...')
-            try:
-                from tools.pytorch2tensorflow import torch_to_tflite
-                outputpath = weight.replace('.pt', 'new.tflite', -1)
-                s_models = torch_to_tflite(weight, img_size=input_shape[1:], output_dir=outputpath)
-                logging.info(
-                    f'{prefix} export success✅, saved as: {outputpath}')
-                filenames.append(outputpath)
-            except Exception as ex:
                 logging.info(f'{prefix} export failure❌: {e}')
 
         if saved_Model:

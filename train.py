@@ -605,22 +605,19 @@ def train(hyp, opt, tb_writer=None,
         final = best if best.exists() else last  # final model
         for f in last, best:
             if f.exists():
-                strip_optimizer(f)
-                strip_optimizer(f, str(f).replace(
-                    'best.pt', 'striped.pt'), halfModel=True)
+                strip_optimizer(f, halfModel=True)
                 if 'best.pt' in str(f):
                     output_path = str(f)
-                    output_path = output_path.replace(
-                        'best.pt', 'deploy_best.pt')
-                    output_path = output_path.replace(
-                        'last.pt', 'deploy_best.pt')
+                    output_path = output_path.replace('best.pt',
+                                                      'deploy_best.pt')
                     try:
                         if opt.evolve <= 1:
                             Re_parameterization(inputWeightPath=str(f),
                                                 outputWeightPath=output_path,
                                                 device=map_device)
                     except Exception as ex:
-                        print(ex)
+                        prefix = colorstr('reparamater: ')
+                        logging.error(f'{prefix}{ex}')
         if opt.bucket:
             os.system(f'gsutil cp {final} gs://{opt.bucket}/weights')  # upload
         if wandb_logger.wandb and opt.evolve <= 1:  # Log the stripped model

@@ -55,8 +55,11 @@ def export_tfjs(file_, names, prefix='TensorFlow.js:'):
                                                            r'"Identity_3": {"name": "Identity_3"}}}', json)
         j.write(subst)
     with open(f_labels, 'w') as f:
-        for name in names:
-            f.writelines(name)
+        labels_ = ''
+        for x in names:
+            labels_ += f'{x}\n'
+        labels_ = labels_[:-1]
+        f.writelines(labels_)
     return f_web, None
 
 

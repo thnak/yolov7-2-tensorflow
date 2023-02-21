@@ -1,6 +1,16 @@
-model-tiny-640-: False
-model-640: False
-model-tiny-1280: False
-model-1280: False
+model-tiny-640-: ✅
+model-640: ❌
+model-tiny-1280: ❌
+model-1280: ❌
 fix rectangle training ✅
-auto batch not available for now
+auto batch not available for now ❌
+tensorflowjs support (tiny only) ✅
+tensorflowjs export for larger models include module TFRepConv,... ❌
+tensorflow lite support ❌
+tensorflow lite quantization ❌
+tensorRuntime ✅
+tensorRuntime with dynamic batch❌
+fix detect.py when detect with .pt engine ❌
+detect with onnx engine, dynamic batch available ✅
+add support for Windows (training, inference)✅
+fix detect.py being black screen when end of video from RTSP camera, Streaming Platform ❌

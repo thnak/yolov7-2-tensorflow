@@ -406,17 +406,17 @@ class TFDetect(keras.layers.Layer):
             x[i] = tf.reshape(x[i], [-1, ny * nx, self.na, self.no])
 
             if not self.training:  # inference
-                y = tf.sigmoid(x[i])
+                y = x[i]
                 grid = tf.transpose(self.grid[i], [0, 2, 1, 3]) - 0.5
                 anchor_grid = tf.transpose(self.anchor_grid[i], [0, 2, 1, 3]) * 4
-                xy = y[..., 0:2] * (2. * self.stride[i]) + (self.stride[i] * (grid - 0.5))
-                wh = y[..., 2:4] ** 2 * (4 * anchor_grid)  # new wh
+                xy = (tf.sigmoid(y[..., 0:2]) * 2. + grid) * self.stride[i]  # xy
+                wh = tf.sigmoid(y[..., 2:4]) ** 2 * anchor_grid  # wh
                 # Normalize xywh to 0-1 to reduce calibration error
                 xy /= tf.constant([[self.imgsz[1], self.imgsz[0]]], dtype=tf.float32)
                 wh /= tf.constant([[self.imgsz[1], self.imgsz[0]]], dtype=tf.float32)
-                y = tf.concat([xy, wh, y[..., 4:5 + self.nc], y[..., 5 + self.nc:]], -1)
+                y = tf.concat([xy, wh, tf.sigmoid(y[..., 4:5 + self.nc]), y[..., 5 + self.nc:]], -1)
                 z.append(tf.reshape(y, [-1, self.na * nx * ny, self.no]))
-        return tf.transpose(x, [0, 2, 1, 3]) if self.training else (tf.concat(z, 1),)
+        return tf.transpose(x, [0, 2, 1, 3]) if self.training else (tf.concat(z, 1),x)
 
     @staticmethod
     def _make_grid(nx=20, ny=20):
@@ -535,17 +535,14 @@ def parse_model(d, ch, model, imgsz):  # model_dict, input_channels(3)
             c2 = ch[f[0]]
         elif m is Foldcut:
             c2 = ch[f] // 2
-        elif m in [Detect, IAuxDetect, IBin, IKeypoint]:
+        elif m in [Detect, IDetect, IAuxDetect, IBin, IKeypoint]:
             args.append([ch[x + 1] for x in f])
             if isinstance(args[1], int):  # number of anchors
                 args[1] = [list(range(args[1] * 2))] * len(f)
             args.append(imgsz)
-        elif m in [IDetect]:
-            LOGGER.info(f'Please retrain the model, {m} is unsupported')
-            sys.exit()
         else:
             c2 = ch[f]
-        tf_m = eval('TF' + m_str.replace('nn.', ''))
+        tf_m = eval('TF' + m_str.replace('IDetect', 'Detect').replace('nn.', ''))
         m_ = keras.Sequential([tf_m(*args, w=model.model[i][j]) for j in range(n)]) if n > 1 \
             else tf_m(*args, w=model.model[i])  # module
         torch_m = nn.Sequential(*[m(*args) for _ in range(n)]) if n > 1 else m(*args)  # module
