@@ -21,7 +21,7 @@ def Re_parameterization(inputWeightPath='v7-tiny-training.pt',
         else:
             print(f'{prefix} P5 model: {model_named[nodes]}')
         nc = ckpt['model'].nc
-        model_recfg = eval(str(ckpt['model'].yaml).replace('IDetect', 'Detect').replace('IAuxDetect', 'AuxDetect'))
+        model_recfg = eval(str(ckpt['model'].yaml).replace('IDetect', 'Detect').replace('IAuxDetect', 'Detect'))
         model = Model(model_recfg, ch=3, nc=nc).to(device).float()
         anchors = len(ckpt['model'].model[-1].anchor_grid.squeeze()[0])
         # d6:: 166, e6:: 144, e6e:: 265, x:: 122

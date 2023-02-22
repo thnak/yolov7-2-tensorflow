@@ -56,7 +56,7 @@ if __name__ == '__main__':
     coreML = any(x in ['coreml'] for x in opt.include)
     saved_Model = any(x in ['saved_model', 'tfjs', 'tflite']
                       for x in opt.include)
-    graphDef = any(x in ['saved_model', 'grapdef', 'tfjs', 'tflite']
+    graphDef = any(x in ['saved_model', 'grapdef', 'tflite']
                    for x in opt.include)
 
     t = time.time()
@@ -69,7 +69,7 @@ if __name__ == '__main__':
         model = attempt_load(weight, map_location=map_device).to(map_device)  # load FP32 model
         ckpt = torch.load(weight, map_location=map_device)
 
-        ckpt['best_fitness'] = ckpt['best_fitness'] if 'best_fitness' in ckpt else 'unknown'
+        ckpt['best_fitness'] = ckpt['best_fitness'] if 'best_fitness' in ckpt else -1
         ckpt['best_fitness'] = ckpt['best_fitness'].tolist()[0] if isinstance(ckpt['best_fitness'], np.ndarray) else ckpt['best_fitness']
         best_fitness = str(ckpt['best_fitness'])
         
@@ -79,13 +79,15 @@ if __name__ == '__main__':
         gs = int(max(model.stride))  # grid size (max stride)
 
         input_shape = ckpt['input_shape'] if 'input_shape' in ckpt else [3,640,640]
-        img = torch.zeros(opt.batch_size, *input_shape).to(map_device)
+        img = torch.zeros(opt.batch_size, *input_shape, device=map_device)
         model.eval()
-        if device.type in ['cuda', 'dml'] and opt.fp16:
+        if device.type in ['cuda'] and opt.fp16:
             img, model = img.half(), model.half()
             logging.info(
                 f'Export with shape {input_shape}, FP16, best fitness: {best_fitness}')
         else:
+            if opt.fp16:
+                logging.warning(f'Export with fp16 only support for CUDA device, yours {device.type}')
             logging.info(
                 f'Export with shape {input_shape}, FP32, best fitness: {best_fitness}')
         # Update model
@@ -98,8 +100,6 @@ if __name__ == '__main__':
                     m.act = SiLU()
                 elif isinstance(m, (models.yolo.Detect, models.yolo.IDetect, models.yolo.IKeypoint, models.yolo.IAuxDetect, models.yolo.IBin)):
                     m.dynamic = opt.dynamic
-            # elif isinstance(m, models.yolo.Detect):
-            #     m.forward = m.forward_export  # assign forward (optional)
 
         model.model[-1].export = False  # set Detect() layer grid export
         y = model(img)  # dry run
@@ -122,7 +122,7 @@ if __name__ == '__main__':
                 logging.info(f'{prefix} export success✅, saved as {f}')
                 filenames.append(f)
             except Exception as e:
-                logging.info(f'{prefix} export failure❌: {e}')
+                logging.info(f'{prefix} export failure❌:\n{e}')
             # CoreML export
         if coreML:
             try:
@@ -165,7 +165,7 @@ if __name__ == '__main__':
                     f'{prefix} TorchScript-Lite export success✅, saved as {f}')
                 filenames.append(f)
             except Exception as e:
-                logging.info(f'{prefix} export failure❌: {e}')
+                logging.info(f'{prefix} export failure❌:\n{e}')
         if ONNX:
             prefix = colorstr('ONNX:')
             import onnx
@@ -292,7 +292,7 @@ if __name__ == '__main__':
                     f'{prefix} export success✅, saved as: {outputpath}')
                 filenames.append(outputpath)
             except Exception as e:
-                logging.info(f'{prefix} export failure❌: {e}')
+                logging.info(f'{prefix} export failure❌:\n{e}')
 
         if saved_Model:
             prefix = colorstr('TensorFlow SavedModel:')
@@ -314,45 +314,35 @@ if __name__ == '__main__':
             prefix = colorstr('TensorFlow GraphDef:')
             try:
                 from tools.auxexport import export_pb
-                outputpath, _ = export_pb(s_models, weight, prefix=prefix)
+                outputpath = export_pb(s_models, weight, prefix=prefix)[0]
                 logging.info(
                     f'{prefix} export success✅, saved as {outputpath}')
                 filenames.append(outputpath)
             except Exception as e:
-                logging.info(f'{prefix} export failure❌: {e}')
+                logging.info(f'{prefix} export failure❌:\n{e}')
+
         if tensorFlowjs:
             prefix = colorstr('TensorFlow.js:')
             try:
                 from tools.auxexport import export_tfjs
-                outputpath, _ = export_tfjs(
-                    file_=weight, names=labels, prefix=prefix)
+                outputpath = export_tfjs(file_=weight,
+                                         names=labels,
+                                         prefix=prefix)[0]
                 logging.info(
                     f'{prefix} export success✅, saved as {outputpath}')
                 filenames.append(outputpath)
             except Exception as e:
-                logging.info(f'{prefix} export failure❌: {e}')
+                logging.info(f'{prefix} export failure❌:\n{e}')
 
         if tensorFlowLite:
             prefix = colorstr('Tensorflow lite:')
             try:
-                import tensorflow as tf
-                f = weight.replace('.pt', '.pb')
-                fo = weight.replace('.pt', '.tflite')
-                if os.path.exists(fo):
-
-                    converter = tf.lite.TFLiteConverter.from_saved_model(
-                        f'{f}')
-                    tf_lite = converter.convert()
-                    if tf_lite:
-                        with open(fo, 'wb') as fi:
-                            fi.write(tf_lite)
-                        filenames.append(fo)
-                        logging.info(
-                            f'{prefix} export finished, save as:  {fo}')
-                    else:
-                        logging.info(f'{prefix} export failure❌: {fo}')
+                from tools.auxexport import export_tflite
+                outputpath = export_tflite(s_models, img, weight, False, prefix=prefix)[0]
+                logging.info(f'{prefix} export success✅, saved as {outputpath}')
             except Exception as e:
-                logging.info(f'{prefix} export failure❌: {e}')
+                logging.info(f'{prefix} export failure❌:\n{e}')
+
         if len(filenames):
             print('\n')
             prefix = colorstr('Export:')

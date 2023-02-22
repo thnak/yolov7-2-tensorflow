@@ -104,7 +104,7 @@ def export_saved_model(model,
     f = str(file).replace('.pt', '_saved_model')
     batch_size, ch, *imgsz = list(im.shape)  # BCHW
 
-    tf_model = TFModel(cfg=model['model'].yaml, model=model['model'], nc=len(model['model'].names), imgsz=imgsz)
+    tf_model = TFModel(cfg=model['model'].yaml, model=model['model'].cpu(), nc=len(model['model'].names), imgsz=imgsz)
     im = tf.zeros((batch_size, *imgsz, ch))  # BHWC order for TensorFlow
     _ = tf_model.predict(im, tf_nms, agnostic_nms, topk_per_class, topk_all, iou_thres, conf_thres)
     inputs = tf.keras.Input(shape=(*imgsz, ch), batch_size=None if dynamic else batch_size)
@@ -127,3 +127,33 @@ def export_saved_model(model,
                             options=tf.saved_model.SaveOptions(experimental_custom_gradients=False) if check_version(
                                 tf.__version__, '2.6') else tf.saved_model.SaveOptions())
     return f, keras_model
+
+
+def export_tflite(keras_model, im, file, int8, data=None, nms=False, agnostic_nms=False, prefix='TensorFlow Lite:'):
+    # YOLOv5 TensorFlow Lite export
+    import tensorflow as tf
+
+    print(f'\n{prefix} starting export with tensorflow {tf.__version__}...')
+    batch_size, ch, *imgsz = list(im.shape)  # BCHW
+    f = str(file).replace('.pt', '-fp16.tflite')
+
+    converter = tf.lite.TFLiteConverter.from_keras_model(keras_model)
+    converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS]
+    converter.target_spec.supported_types = [tf.float32]
+    converter.optimizations = [tf.lite.Optimize.DEFAULT]
+    if int8:
+        from models.tf import representative_dataset_gen
+        dataset = LoadImages(check_dataset(check_yaml(data))['train'], img_size=imgsz, auto=False)
+        converter.representative_dataset = lambda: representative_dataset_gen(dataset, ncalib=100)
+        converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
+        converter.target_spec.supported_types = []
+        converter.inference_input_type = tf.uint8  # or tf.int8
+        converter.inference_output_type = tf.uint8  # or tf.int8
+        converter.experimental_new_quantizer = True
+        f = str(file).replace('.pt', '-int8.tflite')
+    if nms or agnostic_nms:
+        converter.target_spec.supported_ops.append(tf.lite.OpsSet.SELECT_TF_OPS)
+
+    tflite_model = converter.convert()
+    open(f, "wb").write(tflite_model)
+    return f, None

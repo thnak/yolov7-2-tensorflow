@@ -516,7 +516,7 @@ class RepConv(nn.Module):
     # Represented convolution
     # https://arxiv.org/abs/2101.03697
 
-    def __init__(self, c1, c2, k=3, s=1, p=None, g=1, act=True, deploy=False):
+    def __init__(self, c1, c2, k=3, s=1, p=None, g=1, d=1, act=True, deploy=False):
         super(RepConv, self).__init__()
 
         self.deploy = deploy
@@ -525,20 +525,19 @@ class RepConv(nn.Module):
         self.out_channels = c2
 
         assert k == 3
-        assert autopad(k, p) == 1
+        assert autopad(k, p, d) == 1
 
-        padding_11 = autopad(k, p) - k // 2
+        padding_11 = autopad(k, p, d) - k // 2
 
         self.act = nn.SiLU() if act is True else (act if isinstance(act, nn.Module) else nn.Identity())
 
         if deploy:
-            self.rbr_reparam = nn.Conv2d(c1, c2, k, s, autopad(k, p), groups=g, bias=True)
+            self.rbr_reparam = nn.Conv2d(c1, c2, k, s, autopad(k, p, d), groups=g, bias=True)
 
         else:
             self.rbr_identity = (nn.BatchNorm2d(num_features=c1) if c2 == c1 and s == 1 else None)
-
             self.rbr_dense = nn.Sequential(
-                nn.Conv2d(c1, c2, k, s, autopad(k, p), groups=g, bias=False),
+                nn.Conv2d(c1, c2, k, s, autopad(k, p, d), groups=g, bias=False),
                 nn.BatchNorm2d(num_features=c2),
             )
 

@@ -416,6 +416,11 @@ def img2label_paths(img_paths):
     return ['txt'.join(x.replace(sa, sb, 1).rsplit(x.split('.')[-1], 1)) for x in img_paths]
 
 
+def gb2mb(inp0):
+    value = round(inp0 / 1E9, 3)
+    return f'{value}GB' if value > 1 else f'{value * 1000}MB'
+
+
 class LoadImagesAndLabels(Dataset):  # for training/testing
     version = 0.1
     image_8bit = True
@@ -548,19 +553,18 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                 else:
                     self.imgs[i], self.img_hw0[i], self.img_hw[i] = x
                     gb += self.imgs[i].nbytes
-                pbar.desc = f'{prefix}Caching images ({gb / 1E9:.3f}GB {self.cache_images.upper()})'
+                pbar.desc = f'{prefix}Caching images {gb2mb(gb)} {self.cache_images.upper()}'
             pbar.close()
 
     def check_cache_ram(self, prefix='', safety_margin=1.5):
-        b, gb = 0, 1 << 30
         tem = int(self.stride * ((self.img_size / self.stride) - 1))
         img_sz = [self.img_size] * 2 if not self.rect else [self.img_size, tem]
         num = np.zeros((*img_sz, 3), dtype=np.uint8 if self.image_8bit else np.uint16)
         b = num.nbytes * len(self.img_files)
         mem = psutil.virtual_memory()
         cache = True if b < (mem.available * safety_margin) else False  # to cache or not to cache, that is the question
-        print(f"{prefix}{b / gb:.3f}GB RAM required (estimate), "
-              f"{mem.available / gb:.3f}/{mem.total / gb:.3f}GB available, "
+        print(f"{prefix}{gb2mb(b)} RAM required (estimate), "
+              f"{gb2mb(mem.available)}/{gb2mb(mem.total)} available, "
               f"{'caching images on RAM💾, reduce img-size to reduce the cache size' if cache else 'caching images DISK💽, reduce img-size to reduce the cache size'}")
         return cache
 
@@ -758,7 +762,6 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             l[:, 0] = i  # add target image index for build_targets()
 
         return torch.stack(img4, 0), torch.cat(label4, 0), path4, shapes4
-
 
     def load_mosaic(self, index):
         """loads images in a 4-mosaic"""

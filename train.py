@@ -132,17 +132,14 @@ def train(hyp, opt, tb_writer=None,
             len(state_dict), len(model.state_dict()), weights, ckpt['best_fitness'],
             model_version if (model_version != 0 and not opt.resume) else 'Init new model'))  # report
         nodes = len(ckpt['model'].yaml['head']) + len(ckpt['model'].yaml['backbone']) - 1
-        p5_model = True if nodes in [77, 105, 121] else False
-        nodes2 = len(model.yaml['head']) + len(model.yaml['backbone']) - 1
-        assert nodes == nodes2, f'Please paste the same model branch,' \
-                                f' pre-trained model from {"P5" if p5_model else "P6"} branch and new model ' \
-                                f'from {"P5" if not p5_model else "P6"}'
+        nodes2 = model.num_nodes()
+        assert nodes == nodes2, f'Please paste the same model cfg branch like P5vsP5 or P6vsP6'
     else:
-        model = Model(opt.cfg, ch=1 if opt.single_channel else 3, nc=nc, anchors=hyp.get('anchors')).to(
-            device)  # create
-        nodes = len(model.yaml['head']) + len(model.yaml['backbone']) - 1
-
-    p5_model = True if nodes in [77, 105, 121] else False
+        model = Model(opt.cfg,
+                      ch=1 if opt.single_channel else 3,
+                      nc=nc,
+                      anchors=hyp.get('anchors')).to(device)  # create
+    p5_model = model.is_p5()
     with torch_distributed_zero_first(rank):
         check_dataset(data_dict)  # check
     train_path = data_dict['train']
@@ -392,8 +389,10 @@ def train(hyp, opt, tb_writer=None,
                 if sf != 1:
                     # new shape (stretched to gs-multiple)
                     ns = [math.ceil(x * sf / gs) * gs for x in imgs.shape[2:]]
-                    imgs = functional.interpolate(
-                        imgs, size=ns, mode='bilinear', align_corners=False, antialias=False)
+                    imgs = functional.interpolate(imgs, size=ns,
+                                                  mode='bilinear',
+                                                  align_corners=False,
+                                                  antialias=False)
 
             # Forward
             with autocast(enabled=True if device.type in ['cpu', 'cuda'] else False,
@@ -508,6 +507,7 @@ def train(hyp, opt, tb_writer=None,
             # Save model
             if (not opt.nosave) or (final_epoch and opt.evolve < 1):  # if save
                 ckpt = {
+                    'p5': p5_model,
                     'model_version': model_version + 1 if not opt.resume else model_version,
                     'epoch': epoch,
                     'best_fitness': best_fitness,
@@ -520,7 +520,7 @@ def train(hyp, opt, tb_writer=None,
                     'optimizer': optimizer.state_dict(),
                     'wandb_id': wandb_logger.wandb_run.id if wandb_logger.wandb else None,
                     'hyp': hyp,
-                    'git': git_status,
+                    'train_gitstatus': git_status,
                     'training_opt': vars(opt),
                     'training_date': datetime.now().isoformat("#")
                 }

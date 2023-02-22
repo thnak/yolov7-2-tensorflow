@@ -334,7 +334,7 @@ class IKeypoint(nn.Module):
                             (1, 1, 1, 1, self.nkpt))) * self.stride[i]  # xy
                     y = torch.cat((xy, wh, y[..., 4:]), -1)
 
-                z.append(y.view(bs, -1, self.no))
+                z.append(y.view(bs, self.na * nx * ny, self.no))
 
         return x if self.training else (torch.cat(z, 1), x)
 
@@ -394,7 +394,7 @@ class IAuxDetect(nn.Module):
                     xy = xy * (2. * self.stride[i]) + (self.stride[i] * (self.grid[i] - 0.5))  # new xy
                     wh = wh ** 2 * (4 * self.anchor_grid[i].data)  # new wh
                     y = torch.cat((xy, wh, conf), 4)
-                z.append(y.view(bs, -1, self.no))
+                z.append(y.view(bs, self.na * nx * ny, self.no))
 
         return x if self.training else (torch.cat(z, 1), x[:self.nl])
 
@@ -419,7 +419,7 @@ class IAuxDetect(nn.Module):
                     xy = (y[..., 0:2] * 2. - 0.5 + self.grid[i]) * self.stride[i]  # xy
                     wh = (y[..., 2:4] * 2) ** 2 * self.anchor_grid[i].data  # wh
                     y = torch.cat((xy, wh, y[..., 4:]), -1)
-                z.append(y.view(bs, -1, self.no))
+                z.append(y.view(bs, self.na * nx * ny, self.no))
 
         if self.training:
             out = x
@@ -806,6 +806,13 @@ class Model(nn.Module):
     def info(self, verbose=False, img_size=640):  # print model information
         return model_info(self, verbose, img_size)
 
+    def is_p5(self):
+        nodes = len(self.yaml['backbone']) + len(self.yaml['head']) - 1
+        return nodes in [77, 105, 121]
+
+    def num_nodes(self):
+        return len(self.yaml['backbone']) + len(self.yaml['head']) - 1
+
 
 class ONNX_Engine(object):
     """ONNX Engine class for inference with onnxruntime"""
@@ -814,23 +821,8 @@ class ONNX_Engine(object):
                  confThres=0.25, iouThres=0.45, device=None,
                  classes_nms=None, agnostic_nms=False, multi_label_nms=False,
                  max_det_nms=300, maxWorkSpace=2, prefix='', ):
-        """initial an ONNX Engine
 
-        Args:
-            ONNX_EnginePath (str, optional): _description_. Defaults to ''.
-            mydataset (_type_, optional): _description_. Defaults to None.
-            confThres (float, optional): _description_. Defaults to 0.25.
-            iouThres (float, optional): _description_. Defaults to 0.45.
-            device (_type_, optional): _description_. Defaults to torch.device('cpu').
-            classes_nms (_type_, optional): _description_. Defaults to None.
-            agnostic_nms (bool, optional): _description_. Defaults to False.
-            multi_label_nms (bool, optional): _description_. Defaults to False.
-            labels (tuple, optional): _description_. Defaults to ().
-            max_det_nms (int, optional): _description_. Defaults to 300.
-            nm (int, optional): _description_. Defaults to 0.
-            maxWorkSpace (int, optional): _description_. Defaults to 2GB.
-        """
-        self.prefix = prefix
+        self.prefix = prefix or colorstr('ONNX engine:')
         self.confThres = confThres
         self.iouThres = iouThres
         self.classes_nms = classes_nms
@@ -844,29 +836,14 @@ class ONNX_Engine(object):
         self.device = torch.device('cpu') if device is None else device
         nvidia_GPUDevices = torch.cuda.is_available()
         is_x64 = True if '64' in platform.architecture()[0] else False
-
+        assert is_x64, f'{prefix} not support for 32bit device'
         operating_system = platform.system()
         amd_GPUdevices = True if 'AMD' in platform.machine() else False
         nvidia_GPUDevices = torch.cuda.is_available()
         intel_Devicess = True if 'Intel' in platform.machine() else False
         cpu_device = False
-        if operating_system == 'Windows':
-            if is_x64 and amd_GPUdevices:
-                check_requirements(['onnxruntime-directml==1.13.1'])
-            elif is_x64 and nvidia_GPUDevices:
-                check_requirements(['onnxruntime-gpu==1.13.1'])
-            elif is_x64 and intel_Devicess:
-                check_requirements(['onnxruntime-openvino'])
-            elif is_x64 is False and amd_GPUdevices is False:
-                logger.warning(
-                    f'{prefix} Onnxruntime for x86 platform require AMD GPU devices')
-                exit()
-            elif is_x64 and amd_GPUdevices is False and nvidia_GPUDevices is False:
-                cpu_device = True
-                check_requirements(['onnxruntime==1.13.1'])
-            else:
-                logger.warning(f'{prefix} system not ')
-                exit()
+        if operating_system in ['Windows']:
+            check_requirements(['onnxruntime-directml==1.13.1'])
         elif operating_system == 'Linux':
             if is_x64 and nvidia_GPUDevices:
                 check_requirements(['onnxruntime-gpu==1.13.1'])
@@ -875,9 +852,6 @@ class ONNX_Engine(object):
             elif is_x64:
                 cpu_device = True
                 check_requirements(['onnxruntime==1.13.1'])
-            elif is_x64 is False:
-                logger.warning(f'{prefix} system not ')
-                exit()
 
         import onnxruntime as onnxrt
         self.runTime = onnxrt
@@ -928,7 +902,7 @@ class ONNX_Engine(object):
         self.imgsz = self.imgsz if isinstance(self.imgsz[0], int) else [640, 640]
         self.batch_size = self.session.get_inputs()[0].shape[0]
         self.batch_size = 0 if self.batch_size == 'batch' else self.batch_size
-        self.dynamic_batch = True if self.batch_size == 0 else False
+        self.dynamic_batch = self.batch_size == 0
         self.half = self.session.get_inputs()[0].type == "tensor(float16)"
 
         self.output_names = [x.name for x in self.session.get_outputs()]
@@ -936,21 +910,27 @@ class ONNX_Engine(object):
 
         self.names, self.nc, self.stride, self.rectangle = None, None, None, False
         meta = self.session.get_modelmeta().custom_metadata_map
-        if 'stride' in meta:
-            self.stride, self.names = int(meta['stride']), eval(meta['names'])
-            self.nc = int(meta['nc'])
-            self.rectangle = self.imgsz[0] != self.imgsz[1]
-            if not self.rectangle:
-                self.isLandscape = self.imgsz[0] < self.imgsz[1]  # h,c
-            self.opset = int(meta['opset version'])
-            self.is_end2end = meta['ort-nms'] == 'True'
-            if self.opset > 12:
-                logger.warning(
-                    f'{prefix} onnx opset tested for version 12, newer version may have poor performance for ONNXRUNTIME in DmlExecutionProvider')
-        else:
-            logger.error(
-                f'{prefix} The model engine was exported with wrong format, please re-export the model')
-            exit()
+
+        self.best_fitness = meta['best_fitness'] if 'best_fitness' in meta else -1.
+        self.best_fitness = self.best_fitness if isinstance(self.best_fitness, (float, int)) else -1
+        self.export_gitstatus = str(meta['export_gitstatus']) if 'export_gitstatus' in meta else 'unknow'
+        self.stride = int(meta['stride']) if 'stride' in meta else 32
+        self.names = eval(meta['names']) if 'names' in meta else ['nonamed'] * 1000
+        self.nc = int(meta['nc']) if 'nc' in meta else len(self.names)
+        self.export_date = str(meta['export_date']) if 'export_date' in meta else 'YYYY-MM-DD#hh:mm:ss.0000'
+        self.exporting_opt = eval(meta['exporting_opt']) if 'exporting_opt' in meta else None
+        self.model_version = eval(meta['model_version']) if 'model_version' in meta else -1
+        self.training_results = str(meta['training_results']) if 'training_results' in meta else '-1'
+        self.wandb_id = str(meta['wandb_id']) if 'wandb_id' in meta else '---'
+        self.train_gitstatus = str(meta['train_gitstatus']) if 'train_gitstatus' in meta else '-'
+        self.export_gitstatus = str(meta['export_gitstatus']) if 'export_gitstatus' in meta else '-'
+        self.rectangle = self.imgsz[0] != self.imgsz[1]
+        self.isLandscape = self.imgsz[0] < self.imgsz[1]  # h,c
+        self.is_end2end = self.exporting_opt['max_hw'] and self.exporting_opt['end2end']
+        self.p5 = 'p5_model' in meta
+
+    def get_infor(self):
+        print(f'{self.prefix}\n{vars(self)}')
 
     def preproc_for_infer(self, im):
         im = torch.from_numpy(im).to(self.device)
@@ -998,7 +978,7 @@ class ONNX_Engine(object):
         image = [None] * len(ori_images)
         bbox = [None] * len(ori_images)
         txtcolor2, bboxcolor2 = bfc.getval(index=0)
-        if isinstance(dwdh, (list)):
+        if isinstance(dwdh, list):
             dwdhs = dwdh
             ratios = ratio
         else:
@@ -1045,7 +1025,7 @@ class ONNX_Engine(object):
         if self.session.get_providers()[0] in ['CUDAExecutionProvider', 'TensorrtExecutionProvider',
                                                'DmlExecutionProvider']:
             t0 = time_synchronized()
-            logger.info(f'\n{self.prefix} warming up... batch-size {self.batch_size}, image shape {imgsz}\n')
+            logger.info(f'\n{self.prefix} warming up... image shape {im.shape}\n')
             for _ in range(num):
                 self.infer(im)
             return ((time_synchronized() - t0) / num) / self.batch_size
@@ -1151,15 +1131,7 @@ class TensorRT_Engine(object):
     """
 
     def __init__(self, TensorRT_EnginePath, confThres=0.5, iouThres=0.45, prefix=''):
-        """initial a TensorRT Engine
 
-        Args:
-            TensortRT_EnginePath (str, optional): _description_. Defaults to ''.
-            names (_type_, optional): _description_. Defaults to None.
-            imgsz (tuple, optional): _description_. Defaults to (640,640).
-            confThres (float, optional): _description_. Defaults to 0.5.
-            iouThres (float, optional): _description_. Defaults to 0.45.
-        """
         import tensorrt as trt
         import pycuda.driver as cuda
         import pycuda.autoinit
@@ -1181,17 +1153,7 @@ class TensorRT_Engine(object):
         runtime = self.trt.Runtime(logger)
         self.trt.init_libnvinfer_plugins(
             logger, '')  # initialize TensorRT plugins
-        # try:
-        #     with open(TensorRT_EnginePath, "rb") as f:
-        #         serialized_engine = np.load(f)
-        #         metadata = np.load(f)
-        # except IOError:
-        #     logging.warning(f'Error: {IOError}, the item is required')
-        #     exit()
-        # self.names = metadata["names"]
-        # self.stride = metadata["stride"]
-        # self.nc = metadata["nc"]
-        # self.rectangle = metadata['rectangle']
+
         try:
             if os.path.exists('mydataset.yaml'):
                 with open('mydataset.yaml', 'r') as dataset_cls_name:

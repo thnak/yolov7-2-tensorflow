@@ -229,7 +229,6 @@ def inferWithDynamicBatch(enginePath,opt, save=''):
         
     BFC = BackgroundForegroundColors(names= model.names)
     model.batch_size = opt.batch_size if model.batch_size == 0 else model.batch_size
-    print(f'{prefix}: {vars(model)}\n')
     t1_2_t2 = threading.Event()
     t2_2_t1 = threading.Event()
     t2_2_t3 = threading.Event()
@@ -413,9 +412,7 @@ if __name__ == '__main__':
     parser.add_argument('--no-check', action='store_true', help='don`t check requirements')
     
     opt = parser.parse_args()
-    if not opt.no_check:
-        check_requirements()
-        check_git_status()
+
     save_dir = Path(increment_path(Path(opt.project) / opt.name, exist_ok=opt.exist_ok))  # increment run
     (save_dir / 'labels' if opt.save_txt else save_dir).mkdir(parents=True, exist_ok=True)  # make dir
     
