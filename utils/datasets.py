@@ -633,7 +633,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         imgnpy = imgnpy if isinstance(imgnpy, str) else 'imgnpy.npy'
         if img is None and os.path.exists(imgnpy) is False:
             path = self.img_files[index]
-            img = cv2.imread(path).astype(np.uint8 if self.image_8bit else np.uint16)
+            img = cv2.imread(path)
             assert img is not None, 'Image Not Found ' + path
             h0, w0 = img.shape[:2]
             r = self.img_size / max(h0, w0)

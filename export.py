@@ -56,7 +56,7 @@ if __name__ == '__main__':
     coreML = any(x in ['coreml'] for x in opt.include)
     saved_Model = any(x in ['saved_model', 'tfjs', 'tflite']
                       for x in opt.include)
-    graphDef = any(x in ['saved_model', 'grapdef', 'tflite']
+    graphDef = any(x in ['saved_model', 'grapdef', 'tfjs', 'tflite']
                    for x in opt.include)
 
     t = time.time()
@@ -324,6 +324,7 @@ if __name__ == '__main__':
         if tensorFlowjs:
             prefix = colorstr('TensorFlow.js:')
             try:
+                check_requirements('tensorflowjs')
                 from tools.auxexport import export_tfjs
                 outputpath = export_tfjs(file_=weight,
                                          names=labels,

@@ -19,11 +19,8 @@ from utils.torch_utils import time_synchronized
 
 
 ##### basic ####
-def autopad(k, p=None, d=1):  # kernel, padding, dilation
+def autopad(k, p=None):  # kernel, padding
     # Pad to 'same' shape outputs
-    if isinstance(d, int):
-        if d > 1:
-            k = d * (k - 1) + 1 if isinstance(k, int) else [d * (x - 1) + 1 for x in k]  # actual kernel-size
     if p is None:
         p = k // 2 if isinstance(k, int) else [x // 2 for x in k]  # auto-pad
     return p
@@ -99,11 +96,10 @@ class Foldcut(nn.Module):
 
 
 class Conv(nn.Module):
-    """Standard convolution"""
-
-    def __init__(self, c1, c2, k=1, s=1, p=None, g=1, d=1, act=True):  # ch_in, ch_out, kernel, stride, padding, groups
+    # Standard convolution
+    def __init__(self, c1, c2, k=1, s=1, p=None, g=1, act=True):  # ch_in, ch_out, kernel, stride, padding, groups
         super(Conv, self).__init__()
-        self.conv = nn.Conv2d(c1, c2, k, s, autopad(k, p, d), groups=g, dilation=d, bias=False)
+        self.conv = nn.Conv2d(c1, c2, k, s, autopad(k, p), groups=g, bias=False)
         self.bn = nn.BatchNorm2d(c2)
         self.act = nn.SiLU() if act is True else (act if isinstance(act, nn.Module) else nn.Identity())
 
@@ -516,7 +512,7 @@ class RepConv(nn.Module):
     # Represented convolution
     # https://arxiv.org/abs/2101.03697
 
-    def __init__(self, c1, c2, k=3, s=1, p=None, g=1, d=1, act=True, deploy=False):
+    def __init__(self, c1, c2, k=3, s=1, p=None, g=1, act=True, deploy=False):
         super(RepConv, self).__init__()
 
         self.deploy = deploy
@@ -525,19 +521,18 @@ class RepConv(nn.Module):
         self.out_channels = c2
 
         assert k == 3
-        assert autopad(k, p, d) == 1
+        assert autopad(k, p) == 1
 
-        padding_11 = autopad(k, p, d) - k // 2
-
+        padding_11 = autopad(k, p) - k // 2
         self.act = nn.SiLU() if act is True else (act if isinstance(act, nn.Module) else nn.Identity())
 
         if deploy:
-            self.rbr_reparam = nn.Conv2d(c1, c2, k, s, autopad(k, p, d), groups=g, bias=True)
+            self.rbr_reparam = nn.Conv2d(c1, c2, k, s, autopad(k, p), groups=g, bias=True)
 
         else:
             self.rbr_identity = (nn.BatchNorm2d(num_features=c1) if c2 == c1 and s == 1 else None)
             self.rbr_dense = nn.Sequential(
-                nn.Conv2d(c1, c2, k, s, autopad(k, p, d), groups=g, bias=False),
+                nn.Conv2d(c1, c2, k, s, autopad(k, p), groups=g, bias=False),
                 nn.BatchNorm2d(num_features=c2),
             )
 
@@ -1084,170 +1079,6 @@ class NMS(nn.Module):
         return non_max_suppression(x[0], conf_thres=self.conf, iou_thres=self.iou, classes=self.classes)
 
 
-class autoShape(nn.Module):
-    """input-robust model wrapper for passing cv2/np/PIL/torch inputs. Includes preprocessing, inference and NMS"""
-    conf = 0.25  # NMS confidence threshold
-    iou = 0.45  # NMS IoU threshold
-    classes = None  # (optional list) filter by class
-
-    def __init__(self, model):
-        super(autoShape, self).__init__()
-        self.model = model.eval()
-
-    def autoshape(self):
-        print('autoShape already enabled, skipping... ')  # model already converted to model.autoshape()
-        return self
-
-    @torch.no_grad()
-    def forward(self, imgs, size=640, augment=False, profile=False):
-        """Inference from various sources. For height=640, width=1280, RGB images example inputs are:
-           filename:   imgs = 'data/samples/zidane.jpg'
-           URI:             = 'https://github.com/ultralytics/yolov5/releases/download/v1.0/zidane.jpg'
-           OpenCV:          = cv2.imread('image.jpg')[:,:,::-1]  # HWC BGR to RGB x(640,1280,3)
-           PIL:             = Image.open('image.jpg')  # HWC x(640,1280,3)
-           numpy:           = np.zeros((640,1280,3))  # HWC
-           torch:           = torch.zeros(16,3,320,640)  # BCHW (scaled to size=640, 0-1 values)
-           multiple:        = [Image.open('image1.jpg'), Image.open('image2.jpg'), ...]  # list of images"""
-
-        t = [time_synchronized()]
-        p = next(self.model.parameters())  # for device and type
-        if isinstance(imgs, torch.Tensor):  # torch
-            with amp.autocast(enabled=p.device.type != 'cpu'):
-                return self.model(imgs.to(p.device).type_as(p), augment, profile)  # inference
-
-        # Pre-process
-        n, imgs = (len(imgs), imgs) if isinstance(imgs, list) else (1, [imgs])  # number of images, list of images
-        shape0, shape1, files = [], [], []  # image and inference shapes, filenames
-        for i, im in enumerate(imgs):
-            f = f'image{i}'  # filename
-            if isinstance(im, str):  # filename or uri
-                im, f = np.asarray(Image.open(requests.get(im, stream=True).raw if im.startswith('http') else im)), im
-            elif isinstance(im, Image.Image):  # PIL Image
-                im, f = np.asarray(im), getattr(im, 'filename', f) or f
-            files.append(Path(f).with_suffix('.jpg').name)
-            if im.shape[0] < 5:  # image in CHW
-                im = im.transpose((1, 2, 0))  # reverse dataloader .transpose(2, 0, 1)
-            im = im[:, :, :3] if im.ndim == 3 else np.tile(im[:, :, None], 3)  # enforce 3ch input
-            s = im.shape[:2]  # HWC
-            shape0.append(s)  # image shape
-            g = (size / max(s))  # gain
-            shape1.append([int(y * g) for y in s])
-            imgs[i] = im  # update
-        shape1 = [make_divisible(x, int(self.stride.max())) for x in np.stack(shape1, 0).max(0)]  # inference shape
-        x = [letterbox(im, new_shape=shape1, auto=False)[0] for im in imgs]  # pad
-        x = np.stack(x, 0) if n > 1 else x[0][None]  # stack
-        x = np.ascontiguousarray(x.transpose((0, 3, 1, 2)))  # BHWC to BCHW
-        x = torch.from_numpy(x).to(p.device).type_as(p) / 255.  # uint8 to fp16/32
-        t.append(time_synchronized())
-
-        with amp.autocast(enabled=p.device.type != 'cpu'):
-            # Inference
-            y = self.model(x, augment, profile)[0]  # forward
-            t.append(time_synchronized())
-
-            # Post-process
-            y = non_max_suppression(y, conf_thres=self.conf, iou_thres=self.iou, classes=self.classes)  # NMS
-            for i in range(n):
-                scale_coords(shape1, y[i][:, :4], shape0[i])
-
-            t.append(time_synchronized())
-            return Detections(imgs, y, files, t, self.names, x.shape)
-
-
-class Detections:
-    """detections class for YOLOv5 inference results"""
-
-    def __init__(self, imgs, pred, files, times=None, names=None, shape=None):
-        super(Detections, self).__init__()
-        d = pred[0].device  # device
-        gn = [torch.tensor([*[im.shape[i] for i in [1, 0, 1, 0]], 1., 1.], device=d) for im in imgs]  # normalizations
-        self.imgs = imgs  # list of images as numpy arrays
-        self.pred = pred  # list of tensors pred[0] = (xyxy, conf, cls)
-        self.names = names  # class names
-        self.files = files  # image filenames
-        self.xyxy = pred  # xyxy pixels
-        self.xywh = [xyxy2xywh(x) for x in pred]  # xywh pixels
-        self.xyxyn = [x / g for x, g in zip(self.xyxy, gn)]  # xyxy normalized
-        self.xywhn = [x / g for x, g in zip(self.xywh, gn)]  # xywh normalized
-        self.n = len(self.pred)  # number of images (batch size)
-        self.t = tuple((times[i + 1] - times[i]) * 1000 / self.n for i in range(3))  # timestamps (ms)
-        self.s = shape  # inference BCHW shape
-
-    def display(self, pprint=False, show=False, save=False, render=False, save_dir=''):
-        colors = color_list()
-        for i, (img, pred) in enumerate(zip(self.imgs, self.pred)):
-            str = f'image {i + 1}/{len(self.pred)}: {img.shape[0]}x{img.shape[1]} '
-            if pred is not None:
-                for c in pred[:, -1].unique():
-                    n = (pred[:, -1] == c).sum()  # detections per class
-                    str += f"{n} {self.names[int(c)]}{'s' * (n > 1)}, "  # add to string
-                if show or save or render:
-                    for *box, conf, cls in pred:  # xyxy, confidence, class
-                        label = f'{self.names[int(cls)]} {conf:.2f}'
-                        plot_one_box(box, img, label=label, color=colors[int(cls) % 10])
-            img = Image.fromarray(img.astype(np.uint8)) if isinstance(img, np.ndarray) else img  # from np
-            if pprint:
-                print(str.rstrip(', '))
-            if show:
-                img.show(self.files[i])  # show
-            if save:
-                f = self.files[i]
-                img.save(Path(save_dir) / f)  # save
-                print(f"{'Saved' * (i == 0)} {f}", end=',' if i < self.n - 1 else f' to {save_dir}\n')
-            if render:
-                self.imgs[i] = np.asarray(img)
-
-    def print(self):
-        self.display(pprint=True)  # print results
-        print(f'Speed: %.1fms pre-process, %.1fms inference, %.1fms NMS per image at shape {tuple(self.s)}' % self.t)
-
-    def show(self):
-        self.display(show=True)  # show results
-
-    def save(self, save_dir='runs/hub/exp'):
-        save_dir = increment_path(save_dir, exist_ok=save_dir != 'runs/hub/exp')  # increment save_dir
-        Path(save_dir).mkdir(parents=True, exist_ok=True)
-        self.display(save=True, save_dir=save_dir)  # save results
-
-    def render(self):
-        self.display(render=True)  # render results
-        return self.imgs
-
-    def pandas(self):
-        # return detections as pandas DataFrames, i.e. print(results.pandas().xyxy[0])
-        new = copy(self)  # return copy
-        ca = 'xmin', 'ymin', 'xmax', 'ymax', 'confidence', 'class', 'name'  # xyxy columns
-        cb = 'xcenter', 'ycenter', 'width', 'height', 'confidence', 'class', 'name'  # xywh columns
-        for k, c in zip(['xyxy', 'xyxyn', 'xywh', 'xywhn'], [ca, ca, cb, cb]):
-            a = [[x[:5] + [int(x[5]), self.names[int(x[5])]] for x in x.tolist()] for x in getattr(self, k)]  # update
-            setattr(new, k, [pd.DataFrame(x, columns=c) for x in a])
-        return new
-
-    def tolist(self):
-        # return a list of Detections objects, i.e. 'for result in results.tolist():'
-        x = [Detections([self.imgs[i]], [self.pred[i]], self.names, self.s) for i in range(self.n)]
-        for d in x:
-            for k in ['imgs', 'pred', 'xyxy', 'xyxyn', 'xywh', 'xywhn']:
-                setattr(d, k, getattr(d, k)[0])  # pop out of list
-        return x
-
-    def __len__(self):
-        return self.n
-
-
-class Proto(nn.Module):
-    # """YOLOv5 mask Proto module for segmentation models"""
-    def __init__(self, c1, c_=256, c2=32):  # ch_in, number of protos, number of masks
-        super().__init__()
-        self.cv1 = Conv(c1, c_, k=3)
-        self.upsample = nn.Upsample(scale_factor=2, mode='nearest')
-        self.cv2 = Conv(c_, c_, k=3)
-        self.cv3 = Conv(c_, c2)
-
-    def forward(self, x):
-        return self.cv3(self.cv2(self.upsample(self.cv1(x))))
-
-
 class Classify(nn.Module):
     """Classification head, i.e. x(b,c1,20,20) to x(b,c2)"""
 
@@ -1282,11 +1113,19 @@ class ConvBN(nn.Module):
         else:
             self.nonlinear = nonlinear
         if deploy:
-            self.conv = nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size,
-                                  stride=stride, padding=padding, dilation=dilation, groups=groups, bias=True)
+            self.conv = nn.Conv2d(in_channels=in_channels,
+                                  out_channels=out_channels,
+                                  kernel_size=kernel_size,
+                                  stride=stride, padding=padding,
+                                  dilation=dilation, groups=groups,
+                                  bias=True)
         else:
-            self.conv = nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size,
-                                  stride=stride, padding=padding, dilation=dilation, groups=groups, bias=False)
+            self.conv = nn.Conv2d(in_channels=in_channels,
+                                  out_channels=out_channels,
+                                  kernel_size=kernel_size,
+                                  stride=stride, padding=padding,
+                                  dilation=dilation, groups=groups,
+                                  bias=False)
             self.bn = nn.BatchNorm2d(num_features=out_channels)
 
     def forward(self, x):
@@ -1346,8 +1185,8 @@ class OREPA_3x3_RepConv(nn.Module):
             self.weight_rbr_pfir_conv = nn.Parameter(torch.Tensor(out_channels, int(in_channels / self.groups), 1, 1))
             nn.init.kaiming_uniform_(self.weight_rbr_avg_conv, a=1.0)
             nn.init.kaiming_uniform_(self.weight_rbr_pfir_conv, a=1.0)
-            self.weight_rbr_avg_conv.data
-            self.weight_rbr_pfir_conv.data
+            self.weight_rbr_avg_conv.data = None
+            self.weight_rbr_pfir_conv.data = None
             self.register_buffer('weight_rbr_avg_avg',
                                  torch.ones(kernel_size, kernel_size).mul(1.0 / kernel_size / kernel_size))
             self.branch_counter += 1
@@ -1555,7 +1394,7 @@ class RepConv_OREPA(nn.Module):
                                             1:2] ** 2).sum()  # The L2 loss of the "circle" of weights in 3x3 kernel. Use regular L2 on them.
         eq_kernel = K3[:, :, 1:2, 1:2] * t3 + K1 * t1  # The equivalent resultant central point of 3x3 kernel.
         l2_loss_eq_kernel = (eq_kernel ** 2 / (
-                    t3 ** 2 + t1 ** 2)).sum()  # Normalize for an L2 coefficient comparable to regular L2.
+                t3 ** 2 + t1 ** 2)).sum()  # Normalize for an L2 coefficient comparable to regular L2.
         return l2_loss_eq_kernel + l2_loss_circle
 
     def get_equivalent_kernel_bias(self):
@@ -1929,9 +1768,11 @@ class STCSPC(nn.Module):
 class WindowAttention_v2(nn.Module):
 
     def __init__(self, dim, window_size, num_heads, qkv_bias=True, attn_drop=0., proj_drop=0.,
-                 pretrained_window_size=[0, 0]):
+                 pretrained_window_size=None):
 
         super().__init__()
+        if pretrained_window_size is None:
+            pretrained_window_size = [0, 0]
         self.dim = dim
         self.window_size = window_size  # Wh, Ww
         self.pretrained_window_size = pretrained_window_size
