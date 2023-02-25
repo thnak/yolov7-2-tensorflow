@@ -30,6 +30,7 @@ FILE = Path(__file__).resolve()
 ROOT = FILE.parents[1]  # YOLOv5 root directory
 TQDM_BAR_FORMAT = '{l_bar}{bar:10}{r_bar}'  # tqdm bar format
 
+
 def set_logging(rank=-1, filename=None, filemode=None):
     logging.basicConfig(
         filename=filename, filemode=filemode,
@@ -173,17 +174,17 @@ def check_imshow():
         return False
 
 
-def check_file(file):
-    """Search for file if not found
-        return file
-    """
-    if Path(file).is_file() or file == '':
-        return file
-    else:
-        files = glob.glob('./**/' + file, recursive=True)  # find file
-        assert len(files), f'File Not Found: {file}'  # assert file was found
-        assert len(files) == 1, f"Multiple files match '{file}', specify exact path: {files}"  # assert unique
-        return files[0]  # return file
+# def check_file(file):
+#     """Search for file if not found
+#         return file
+#     """
+#     if Path(file).is_file() or file == '':
+#         return file
+#     else:
+#         files = glob.glob('./**/' + file, recursive=True)  # find file
+#         assert len(files), f'File Not Found: {file}'  # assert file was found
+#         assert len(files) == 1, f"Multiple files match '{file}', specify exact path: {files}"  # assert unique
+#         return files[0]  # return file
 
 
 def check_dataset(dict):
@@ -209,6 +210,50 @@ def check_dataset(dict):
                 print('Dataset autodownload %s\n' % ('success' if r == 0 else 'failure'))  # analyze return value
             else:
                 raise Exception('Dataset not found.')
+
+
+def check_suffix(file='yolov5s.pt', suffix=('.pt',), msg=''):
+    # Check file(s) for acceptable suffix
+    if file and suffix:
+        if isinstance(suffix, str):
+            suffix = [suffix]
+        for f in file if isinstance(file, (list, tuple)) else [file]:
+            s = Path(f).suffix.lower()  # file suffix
+            if len(s):
+                assert s in suffix, f"{msg}{f} acceptable suffix is {suffix}"
+
+
+def check_yaml(file, suffix=('.yaml', '.yml')):
+    # Search/download YAML file (if necessary) and return path, checking suffix
+    return check_file(file, suffix)
+
+
+def check_file(file, suffix=''):
+    # Search/download file (if necessary) and return path
+    check_suffix(file, suffix)  # optional
+    file = str(file)  # convert to str()
+    if os.path.isfile(file) or not file:  # exists
+        return file
+    elif file.startswith(('http:/', 'https:/')):  # download
+        url = file  # warning: Pathlib turns :// -> :/
+        file = Path(urllib.parse.unquote(file).split('?')[0]).name  # '%2F' to '/', split https://url.com/file.txt?auth
+        if os.path.isfile(file):
+            LOGGER.info(f'Found {url} locally at {file}')  # file already exists
+        else:
+            LOGGER.info(f'Downloading {url} to {file}...')
+            torch.hub.download_url_to_file(url, file)
+            assert Path(file).exists() and Path(file).stat().st_size > 0, f'File download failed: {url}'  # check
+        return file
+    elif file.startswith('clearml://'):  # ClearML Dataset ID
+        assert 'clearml' in sys.modules, "ClearML is not installed, so cannot use ClearML dataset. Try running 'pip install clearml'."
+        return file
+    else:  # search
+        files = []
+        for d in 'data', 'models', 'utils':  # search directories
+            files.extend(glob.glob(str(ROOT / d / '**' / file), recursive=True))  # find file
+        assert len(files), f'File not found: {file}'  # assert file was found
+        assert len(files) == 1, f"Multiple files match '{file}', specify exact path: {files}"  # assert unique
+        return files[0]  # return file
 
 
 def make_divisible(x, divisor):

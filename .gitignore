@@ -19,6 +19,7 @@ models/best_saved_model/
 *.txt
 *.pt
 *.onnx
+*.tflite
 TrainRes/train
 TrainRes/val
 tre.py

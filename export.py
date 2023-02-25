@@ -15,35 +15,38 @@ import warnings
 import logging
 import os
 import numpy as np
-sys.path.append('./')  # to run '$ python *.py' files in subdirectories
 
+sys.path.append('./')  # to run '$ python *.py' files in subdirectories
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--weights', nargs='+', type=str,default=['./best.pt'], help='weights path')
+    parser.add_argument('--weights', nargs='+', type=str, default=['./best.pt'], help='weights path')
     parser.add_argument('--batch-size', type=int, default=1, help='batch size')
-    parser.add_argument('--dynamic', action='store_true',help='dynamic ONNX axes')
-    parser.add_argument('--dynamic-batch', action='store_true',help='dynamic batch onnx for tensorrt and onnx-runtime')
-    parser.add_argument('--include', nargs='+', type=str,default='', help='export format')
-    parser.add_argument('--end2end', action='store_true',help='export end2end onnx (/end2end/EfficientNMS_TRT)')
-    parser.add_argument('--max-hw', type=int, default=None,help='None for tensorrt nms, int value for onnx-runtime nms')
-    parser.add_argument('--topk-all', type=int, default=100,help='topk objects for every images')
-    parser.add_argument('--iou-thres', '-iou', type=float,default=0.45, help='iou threshold for NMS')
-    parser.add_argument('--conf-thres', '-conf', type=float,default=0.25, help='conf threshold for NMS')
-    parser.add_argument('--onnx-opset', type=int, default=17,help='onnx opset version, 11 for DmlExecutionProvider')
-    parser.add_argument('--device', default='cpu',help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
-    parser.add_argument('--simplify', action='store_true',help='simplify onnx model')
-    parser.add_argument('--include-nms', action='store_true',help='registering EfficientNMS_TRT plugin to export TensorRT engine')
-    parser.add_argument('--fp16', action='store_true',help='CoreML FP16 half-precision export')
-    parser.add_argument('--int8', action='store_true',help='CoreML INT8 quantization')
+    parser.add_argument('--dynamic', action='store_true', help='dynamic ONNX axes')
+    parser.add_argument('--dynamic-batch', action='store_true', help='dynamic batch onnx for tensorrt and onnx-runtime')
+    parser.add_argument('--include', nargs='+', type=str, default='', help='export format')
+    parser.add_argument('--end2end', action='store_true', help='export end2end onnx (/end2end/EfficientNMS_TRT)')
+    parser.add_argument('--max-hw', type=int, default=None,
+                        help='None for tensorrt nms, int value for onnx-runtime nms')
+    parser.add_argument('--topk-all', type=int, default=100, help='topk objects for every images')
+    parser.add_argument('--iou-thres', '-iou', type=float, default=0.45, help='iou threshold for NMS')
+    parser.add_argument('--conf-thres', '-conf', type=float, default=0.25, help='conf threshold for NMS')
+    parser.add_argument('--onnx-opset', type=int, default=17, help='onnx opset version, 11 for DmlExecutionProvider')
+    parser.add_argument('--device', default='cpu', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
+    parser.add_argument('--simplify', action='store_true', help='simplify onnx model')
+    parser.add_argument('--include-nms', action='store_true',
+                        help='registering EfficientNMS_TRT plugin to export TensorRT engine')
+    parser.add_argument('--fp16', action='store_true', help='CoreML FP16 half-precision export')
+    parser.add_argument('--int8', action='store_true', help='CoreML INT8 quantization')
     parser.add_argument('--v', action='store_true', help='Verbose log')
-    parser.add_argument('--author', type=str,default='Nguyễn Văn Thạnh', help="author's name")
+    parser.add_argument('--author', type=str, default='Nguyễn Văn Thạnh', help="author's name")
+    parser.add_argument('--data', type=str, default='mydataset.yaml', help='data.yaml path')
     opt = parser.parse_args()
     opt.dynamic = opt.dynamic and not opt.end2end
     opt.dynamic = False if opt.dynamic_batch else opt.dynamic
     set_logging()
     logging.info(f'\n{opt}\n')
-    
+
     opt.include = [x.lower() for x in opt.include] if isinstance(
         opt.include, list) else [opt.include.lower()]
 
@@ -70,15 +73,16 @@ if __name__ == '__main__':
         ckpt = torch.load(weight, map_location=map_device)
 
         ckpt['best_fitness'] = ckpt['best_fitness'] if 'best_fitness' in ckpt else -1
-        ckpt['best_fitness'] = ckpt['best_fitness'].tolist()[0] if isinstance(ckpt['best_fitness'], np.ndarray) else ckpt['best_fitness']
+        ckpt['best_fitness'] = ckpt['best_fitness'].tolist()[0] if isinstance(ckpt['best_fitness'], np.ndarray) else \
+            ckpt['best_fitness']
         best_fitness = str(ckpt['best_fitness'])
-        
+
         labels = model.names
         model_ori = model
         model_Gflop = model.info()
-        gs = int(max(model.stride))  # grid size (max stride)
+        gs = int(max(model.stride.max(), 32))  # grid size (max stride)
 
-        input_shape = ckpt['input_shape'] if 'input_shape' in ckpt else [3,640,640]
+        input_shape = ckpt['input_shape'] if 'input_shape' in ckpt else [3, 640, 640]
         img = torch.zeros(opt.batch_size, *input_shape, device=map_device)
         model.eval()
         if device.type in ['cuda'] and opt.fp16:
@@ -98,7 +102,9 @@ if __name__ == '__main__':
                     m.act = Hardswish()
                 elif isinstance(m.act, nn.SiLU):
                     m.act = SiLU()
-                elif isinstance(m, (models.yolo.Detect, models.yolo.IDetect, models.yolo.IKeypoint, models.yolo.IAuxDetect, models.yolo.IBin)):
+                elif isinstance(m, (
+                        models.yolo.Detect, models.yolo.IDetect, models.yolo.IKeypoint, models.yolo.IAuxDetect,
+                        models.yolo.IBin)):
                     m.dynamic = opt.dynamic
 
         model.model[-1].export = False  # set Detect() layer grid export
@@ -128,6 +134,7 @@ if __name__ == '__main__':
             try:
                 prefix = colorstr('CoreML:')
                 import coremltools as ct
+
                 logging.info(
                     f'\n{prefix}Starting CoreML export with coremltools {ct.__version__}')
                 ct_model = ct.convert(ts, inputs=[ct.ImageType(
@@ -170,6 +177,7 @@ if __name__ == '__main__':
             prefix = colorstr('ONNX:')
             import onnx
             import onnxmltools
+
             logging.info(
                 f'\n{prefix} Starting ONNX export with onnx {onnx.__version__}')
             f = weight.replace('.pt', '.onnx')  # filename
@@ -234,6 +242,7 @@ if __name__ == '__main__':
             if opt.simplify:
                 try:
                     import onnxsim
+
                     logging.info(f'{prefix} Starting to simplify ONNX...')
                     onnx_model, check = onnxsim.simplify(onnx_model)
                     assert check, 'assert check failed'
@@ -248,14 +257,14 @@ if __name__ == '__main__':
             onnx_MetaData = {'export_gitstatus': gitstatus,
                              'stride': str(gs),
                              'nc': str(len(labels)),
-                             'names': str(labels), 
+                             'names': str(labels),
                              'export_date': datetime.datetime.now().isoformat('#'),
                              'exporting_opt': vars(opt),
                              }
-            key_ = colorstr('yellow','key:')
+            key_ = colorstr('yellow', 'key:')
             for index, key in enumerate(ckpt):
                 if key == 'model':
-                    continue                
+                    continue
                 metadata = onnx_model.metadata_props.add()
                 metadata.key = key
                 metadata.value = str(ckpt[key])
@@ -285,6 +294,7 @@ if __name__ == '__main__':
                 meta = {'stride': int(max(model_ori.stride)),
                         'names': model_ori.names}
                 from tools.auxexport import export_openvino
+
                 logging.info(f'{prefix} Starting export...')
                 outputpath, _ = export_openvino(
                     file_=weight, metadata=meta, half=True, prefix=prefix)
@@ -297,12 +307,13 @@ if __name__ == '__main__':
         if saved_Model:
             prefix = colorstr('TensorFlow SavedModel:')
             from tools.auxexport import export_saved_model
+
             outputpath, s_models = export_saved_model(ckpt,
                                                       img,
                                                       weight,
                                                       False,
-                                                      tf_nms=True,
-                                                      agnostic_nms=True,
+                                                      tf_nms=tensorFlowjs,
+                                                      agnostic_nms=tensorFlowjs,
                                                       topk_per_class=opt.topk_all,
                                                       topk_all=opt.topk_all,
                                                       iou_thres=opt.iou_thres,
@@ -314,6 +325,7 @@ if __name__ == '__main__':
             prefix = colorstr('TensorFlow GraphDef:')
             try:
                 from tools.auxexport import export_pb
+
                 outputpath = export_pb(s_models, weight, prefix=prefix)[0]
                 logging.info(
                     f'{prefix} export success✅, saved as {outputpath}')
@@ -326,6 +338,7 @@ if __name__ == '__main__':
             try:
                 check_requirements('tensorflowjs')
                 from tools.auxexport import export_tfjs
+
                 outputpath = export_tfjs(file_=weight,
                                          names=labels,
                                          prefix=prefix)[0]
@@ -338,9 +351,19 @@ if __name__ == '__main__':
         if tensorFlowLite:
             prefix = colorstr('Tensorflow lite:')
             try:
-                from tools.auxexport import export_tflite
-                outputpath = export_tflite(s_models, img, weight, False, prefix=prefix)[0]
+                from tools.auxexport import export_tflite, add_tflite_metadata
+
+                outputpath = export_tflite(s_models, img, weight,
+                                           int8=opt.int8,
+                                           data=opt.data, nms=True,
+                                           agnostic_nms=True,
+                                           stride=gs,
+                                           prefix=prefix)[0]
                 logging.info(f'{prefix} export success✅, saved as {outputpath}')
+                filenames.append(outputpath)
+                metadata = {'stride': int(max(model.stride)), 'names': model.names}  # model metadata
+                logging.info(f'{prefix} adding metadata...')
+                add_tflite_metadata(outputpath, metadata=metadata, num_outputs=len(s_models.outputs))
             except Exception as e:
                 logging.info(f'{prefix} export failure❌:\n{e}')
 

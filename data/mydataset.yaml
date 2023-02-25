@@ -1,5 +1,5 @@
-train: "TrainRes/train"
-val: "TrainRes/val"
+train: "TrainRes/train/images"
+val: "TrainRes/val/images"
 nc: 1
 names:
   [

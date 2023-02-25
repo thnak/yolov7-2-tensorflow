@@ -436,15 +436,15 @@ class TFDetect(keras.layers.Layer):
             x[i] = tf.reshape(x[i], [-1, ny * nx, self.na, self.no])
 
             if not self.training:  # inference
-                y = x[i]
+                y = tf.sigmoid(x[i])
                 grid = tf.transpose(self.grid[i], [0, 2, 1, 3]) - 0.5
                 anchor_grid = tf.transpose(self.anchor_grid[i], [0, 2, 1, 3]) * 4
-                xy = (tf.sigmoid(y[..., 0:2]) * 2. + grid) * self.stride[i]  # xy
-                wh = tf.sigmoid(y[..., 2:4]) ** 2 * anchor_grid  # wh
+                xy = (y[..., 0:2] * 2. + grid) * self.stride[i]  # xy
+                wh = y[..., 2:4] ** 2 * anchor_grid  # wh
                 # Normalize xywh to 0-1 to reduce calibration error
                 xy /= tf.constant([[self.imgsz[1], self.imgsz[0]]], dtype=tf.float32)
                 wh /= tf.constant([[self.imgsz[1], self.imgsz[0]]], dtype=tf.float32)
-                y = tf.concat([xy, wh, tf.sigmoid(y[..., 4:5 + self.nc]), y[..., 5 + self.nc:]], -1)
+                y = tf.concat([xy, wh, y[..., 4:5 + self.nc], y[..., 5 + self.nc:]], -1)
                 z.append(tf.reshape(y, [-1, self.na * nx * ny, self.no]))
         return tf.transpose(x, [0, 2, 1, 3]) if self.training else (tf.concat(z, 1), x)
 
@@ -452,25 +452,6 @@ class TFDetect(keras.layers.Layer):
     def _make_grid(nx=20, ny=20):
         xv, yv = tf.meshgrid(tf.range(nx), tf.range(ny), indexing='xy')
         return tf.cast(tf.reshape(tf.stack([xv, yv], 2), [1, 1, ny * nx, 2]), dtype=tf.float32)
-
-
-class TFSegment(TFDetect):
-    # YOLOv5 Segment head for segmentation models
-    def __init__(self, nc=80, anchors=(), nm=32, npr=256, ch=(), imgsz=(640, 640), w=None):
-        super().__init__(nc, anchors, ch, imgsz, w)
-        self.nm = nm  # number of masks
-        self.npr = npr  # number of protos
-        self.no = 5 + nc + self.nm  # number of outputs per anchor
-        self.m = [TFConv2d(x, self.no * self.na, 1, w=w.m[i]) for i, x in enumerate(ch)]  # output conv
-        self.proto = TFProto(ch[0], self.npr, self.nm, w=w.proto)  # protos
-        self.detect = TFDetect.call
-
-    def __call__(self, x):
-        p = self.proto(x[0])
-        # p = TFUpsample(None, scale_factor=4, mode='nearest')(self.proto(x[0]))  # (optional) full-size protos
-        p = tf.transpose(p, [0, 3, 1, 2])  # from shape(1,160,160,32) to shape(1,32,160,160)
-        x = self.detect(self, x)
-        return (x, p) if self.training else (x[0], p)
 
 
 class TFProto(keras.layers.Layer):
@@ -585,8 +566,7 @@ def parse_model(d, ch, model, imgsz):  # model_dict, input_channels(3)
 
 
 class TFModel:
-    # TF YOLOv5 model
-    def __init__(self, cfg='yolov5s.yaml', ch=3, nc=None, model=None, imgsz=(640, 640)):  # model, channels, classes
+    def __init__(self, cfg='cfg/yolov7.yaml', ch=3, nc=None, model=None, imgsz=(640, 640)):  # model, channels, classes
         super().__init__()
         if isinstance(cfg, dict):
             self.yaml = cfg  # model dict
@@ -729,7 +709,7 @@ def activations(act=nn.SiLU):
 
 def representative_dataset_gen(dataset, ncalib=100):
     """Representative dataset generator for use with converter.representative_dataset, returns a generator of np arrays"""
-    for n, (path, img, im0s, vid_cap, string) in enumerate(dataset):
+    for n, (path, img, im0s, vid_cap, string, x, y) in enumerate(dataset):
         im = np.transpose(img, [1, 2, 0])
         im = np.expand_dims(im, axis=0).astype(np.float32)
         im /= 255
