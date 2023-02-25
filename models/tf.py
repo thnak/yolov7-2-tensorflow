@@ -129,7 +129,7 @@ class TFReOrg(keras.layers.Layer):
         out = tf.concat([inputs[..., ::2, ::2],
                          inputs[..., 1::2, ::2],
                          inputs[..., ::2, 1::2],
-                         inputs[..., 1::2, 1::2]], 3)
+                         inputs[..., 1::2, 1::2]], 1)
         return out
 
 
@@ -203,9 +203,6 @@ class TFConv(keras.layers.Layer):
         self.act = activations(w.act) if act else tf.identity
 
     def __call__(self, inputs):
-        # out = self.conv(inputs)
-        # out = self.bn(out)
-        # out = self.act(out)
         return self.act(self.bn(self.conv(inputs)))
 
 
@@ -512,7 +509,7 @@ class TFConcat(keras.layers.Layer):
 
 
 def parse_model(d, ch, model, imgsz):  # model_dict, input_channels(3)
-    LOGGER.info('\n%3s%18s%3s%10s  %-40s%-30s' % ('', 'from', 'n', 'params', 'module', 'arguments'))
+    LOGGER.info(f"\n{'':>3}{'from':>18}{'n':>3}{'params':>10}  {'module':<40}{'arguments':<30}")
     anchors, nc, gd, gw = d['anchors'], d['nc'], d['depth_multiple'], d['width_multiple']
     na = (len(anchors[0]) // 2) if isinstance(anchors, list) else anchors  # number of anchors
     no = na * (nc + 5)  # number of outputs = anchors * (classes + 5)
@@ -579,7 +576,7 @@ def parse_model(d, ch, model, imgsz):  # model_dict, input_channels(3)
         torch_m = nn.Sequential(*[m(*args) for _ in range(n)]) if n > 1 else m(*args)  # module
         t = str(m)[8:-2].replace('__main__.', '')  # module type
         nparam = sum([x.numel() for x in torch_m.parameters()])  # number params
-        m_.i, m_.f, m_.type, m_.np = i, f, t, np  # attach index, 'from' index, type, number params
+        m_.i, m_.f, m_.type, m_.np = i, f, t, nparam  # attach index, 'from' index, type, number params
         LOGGER.info('%3s%18s%3s%10.0f  %-40s%-30s' % (i, f, n, nparam, t, args))  # print
         save.extend(x % i for x in ([f] if isinstance(f, int) else f) if x != -1)  # append to savelist
         layers.append(m_)
