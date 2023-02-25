@@ -6,7 +6,8 @@ dml:0 to set dml device (windows), cuda:0 to set cuda device, cache-images for f
 <h1>Export</h1>
     <p>python.exe export.py --weights "yolov7.pt" --include tfjs/onnx/saved_model/openvino/tflite</p>
 <h1>Usage</h1>
-    <p>tfjs model can be used with <a href="https://www.makesense.ai/">makesense.ai</a>, Run AI locally -> YOLOv5 object detection using rectangles -> and import all files from *_web_model folder</p>
+    <p>tfjs model can be used with <a href="https://www.makesense.ai/">makesense.ai</a></p>
+    <p>🔥Actions -> Run AI locally -> YOLOv5 object detection using rectangles -> and import all files from *_web_model folder</p>
     <img src='https://user-images.githubusercontent.com/117495750/221329302-c649af5c-f12d-41df-a23c-6dc998e3f90d.png'></img>
     </hr>
     <p>also you can follow <a href='https://github.com/Hyuto/yolov5-tfjs'>this step</a> to use (from https://github.com/Hyuto/yolov5-tfjs)</p>
