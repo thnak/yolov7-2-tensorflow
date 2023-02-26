@@ -36,7 +36,6 @@ IMG_FORMATS = ['bmp', 'jpg', 'jpeg', 'png', 'tif', 'tiff', 'dng', 'webp', 'mpo',
 VID_FORMATS = ['asf', 'mov', 'avi', 'mp4', 'mpg', 'mpeg', 'm4v', 'wmv', 'mkv', 'gif']  # acceptable video suffixes
 logger = logging.getLogger(__name__)
 RANK = int(os.getenv('RANK', -1))
-PIN_MEMORY = torch.cuda.is_available()
 # Get orientation exif tag
 for orientation in ExifTags.TAGS.keys():
     if ExifTags.TAGS[orientation] == 'Orientation':
@@ -70,7 +69,7 @@ def create_dataloader(path, imgsz, batch_size, stride, opt, hyp=None, augment=Fa
                       prefix='', shuffle=True, seed=0):
     # Make sure only the first process in DDP process the dataset first, and the following others can use the cache
     if rect and shuffle:
-        print('WARNING ⚠️ --rect is incompatible with DataLoader shuffle, setting shuffle=False')
+        print(f'{prefix}WARNING ⚠️ --rect is incompatible with DataLoader shuffle, setting shuffle=False')
         shuffle = False
     with torch_distributed_zero_first(rank):
         dataset = LoadImagesAndLabels(path, imgsz, batch_size,
@@ -99,18 +98,20 @@ def create_dataloader(path, imgsz, batch_size, stride, opt, hyp=None, augment=Fa
     loader = DataLoader if image_weights else InfiniteDataLoader
     generator = torch.Generator()
     generator.manual_seed(6148914691236517205 + seed + RANK)
+    if dataset.pin_memory:
+        print(f'{prefix} PyTorch {torch.__version__} with pin_memory is enable, it will use your RAM')
     dataloader = loader(dataset,
                         batch_size=batch_size,
                         num_workers=nw,
                         sampler=sampler,
-                        pin_memory=PIN_MEMORY,
+                        pin_memory=dataset.pin_memory,
                         shuffle=shuffle and sampler is None,
                         worker_init_fn=seed_worker,
                         collate_fn=LoadImagesAndLabels.collate_fn4 if quad else LoadImagesAndLabels.collate_fn,
                         generator=generator,
                         prefetch_factor=nw,
                         persistent_workers=True,
-                        pin_memory_device='cuda' if PIN_MEMORY else '')
+                        pin_memory_device='cuda' if dataset.pin_memory else '')
 
     return dataloader, dataset
 
@@ -440,6 +441,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         self.cache_images = cache_images
         self.albumentations = Albumentations(hyp, rect=rect) if augment else None
         self.single_channel = single_channel
+        self.pin_memory = False
         self.transforms = transforms.Compose(
             [transforms.ToTensor(), transforms.Grayscale(1)]) if single_channel else None
         try:
@@ -527,34 +529,43 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             self.batch_shapes = np.ceil(np.array(shapes) * img_size / stride + pad).astype(np.int32) * stride
         # Cache images into memory for faster training (WARNING: large datasets may exceed system RAM)
         if self.cache_images in ['ram', 'disk']:
-            if self.cache_images == 'ram' and not self.check_cache_ram(prefix=prefix):
-                self.cache_images = 'disk'
+            if self.cache_images == 'ram':
+                check_ram = self.check_cache_ram(prefix=prefix)
+                if not check_ram:
+                    self.cache_images = 'disk'
+                elif check_ram:
+                    if torch.cuda.is_available():
+                        self.pin_memory = True
+                        self.cache_images = ''
+                    else:
+                        self.cache_images = 'ram'
             if self.cache_images == 'disk':
                 self.im_cache_dir = Path(Path(self.img_files[0]).parent.as_posix() + '_npy')
                 self.img_npy = [self.im_cache_dir / Path(f).with_suffix('.npy').name for f in self.img_files]
                 self.im_cache_dir.mkdir(parents=True, exist_ok=True)
-            gb = 0  # Gigabytes of cached images
-            self.img_hw0, self.img_hw = [None] * n, [None] * n
-            results = ThreadPool().map(self.load_image, range(n))
-            pbar = tqdm(enumerate(results), total=n, mininterval=0.1, maxinterval=1, unit='image',
-                        bar_format=TQDM_BAR_FORMAT)
-            checkimgSizeStatus = False
-            for i, x in pbar:
-                if self.cache_images == 'disk':
-                    if not self.img_npy[i].exists():
-                        np.save(self.img_npy[i].as_posix(), x[0])
+            if self.cache_images:
+                gb = 0  # Gigabytes of cached images
+                self.img_hw0, self.img_hw = [None] * n, [None] * n
+                results = ThreadPool().map(self.load_image, range(n))
+                pbar = tqdm(enumerate(results), total=n, mininterval=0.1, maxinterval=1, unit='image',
+                            bar_format=TQDM_BAR_FORMAT)
+                checkimgSizeStatus = False
+                for i, x in pbar:
+                    if self.cache_images == 'disk':
+                        if not self.img_npy[i].exists():
+                            np.save(self.img_npy[i].as_posix(), x[0])
+                        else:
+                            if not checkimgSizeStatus:
+                                testSize = np.load(self.img_npy[i])
+                                assert self.img_size in testSize.shape[:2], colored(
+                                    f'You need to re-cache dataset by remove folder {self.im_cache_dir}', 'red')
+                                checkimgSizeStatus = True
+                        gb += os.path.getsize(self.img_npy[i])
                     else:
-                        if not checkimgSizeStatus:
-                            testSize = np.load(self.img_npy[i])
-                            assert self.img_size in testSize.shape[:2], colored(
-                                f'You need to re-cache dataset by remove folder {self.im_cache_dir}', 'red')
-                            checkimgSizeStatus = True
-                    gb += os.path.getsize(self.img_npy[i])
-                else:
-                    self.imgs[i], self.img_hw0[i], self.img_hw[i] = x
-                    gb += self.imgs[i].nbytes
-                pbar.desc = f'{prefix}Caching images {gb2mb(gb)} {self.cache_images.upper()}'
-            pbar.close()
+                        self.imgs[i], self.img_hw0[i], self.img_hw[i] = x
+                        gb += self.imgs[i].nbytes
+                    pbar.desc = f'{prefix}Caching images {gb2mb(gb)} {self.cache_images.upper()}'
+                pbar.close()
 
     def check_cache_ram(self, prefix='', safety_margin=1.5):
         tem = int(self.stride * ((self.img_size / self.stride) - 1))

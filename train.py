@@ -132,7 +132,8 @@ def train(hyp, opt, tb_writer=None,
             len(state_dict), len(model.state_dict()), weights, ckpt['best_fitness'],
             model_version if (model_version != 0 and not opt.resume) else 'Init new model'))  # report
         nodes = len(ckpt['model'].yaml['head']) + len(ckpt['model'].yaml['backbone']) - 1
-        nodes2 = model.num_nodes()
+        nodes = model.is_p5(nodes)
+        nodes2 = model.is_p5()
         assert nodes == nodes2, f'Please paste the same model cfg branch like P5vsP5 or P6vsP6'
     else:
         model = Model(opt.cfg,
@@ -400,12 +401,12 @@ def train(hyp, opt, tb_writer=None,
                 optimizer.zero_grad()
                 pred = model(imgs)  # forward
                 if 'loss_ota' not in hyp or hyp['loss_ota'] == 1:
-                    loss, loss_items = compute_loss_ota([pre.to(map_device) for pre in pred],
-                                                        targets.to(map_device),
-                                                        imgs.to(map_device))  # loss scaled by batch_size
+                    loss, loss_items = compute_loss_ota([pre.to(map_device, non_blocking=True) for pre in pred],
+                                                        targets.to(map_device, non_blocking=True),
+                                                        imgs.to(map_device, non_blocking=True))  # loss scaled by batch_size
                 else:
-                    loss, loss_items = compute_loss([pre.to(map_device) for pre in pred],
-                                                    targets.to(map_device))  # loss scaled by batch_size
+                    loss, loss_items = compute_loss([pre.to(map_device, non_blocking=True) for pre in pred],
+                                                    targets.to(map_device, non_blocking=True))  # loss scaled by batch_size
                 if rank != -1:
                     loss *= opt.world_size  # gradient averaged between devices in DDP mode
                 if opt.quad:

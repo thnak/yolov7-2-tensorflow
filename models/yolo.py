@@ -804,9 +804,11 @@ class Model(nn.Module):
     def info(self, verbose=False, img_size=640):  # print model information
         return model_info(self, verbose, img_size)
 
-    def is_p5(self):
-        nodes = len(self.yaml['backbone']) + len(self.yaml['head']) - 1
+    def is_p5(self, nodes=77):
+        if not nodes:
+            nodes = len(self.yaml['backbone']) + len(self.yaml['head']) - 1
         return nodes in [77, 105, 121]
+
 
     def num_nodes(self):
         return len(self.yaml['backbone']) + len(self.yaml['head']) - 1
