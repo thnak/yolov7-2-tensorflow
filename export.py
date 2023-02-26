@@ -36,6 +36,8 @@ if __name__ == '__main__':
     parser.add_argument('--simplify', action='store_true', help='simplify onnx model')
     parser.add_argument('--include-nms', action='store_true',
                         help='registering EfficientNMS_TRT plugin to export TensorRT engine')
+    parser.add_argument('--nms', action='store_true', help='TF: add NMS to model')
+    parser.add_argument('--agnostic-nms', action='store_true', help='TF: add agnostic NMS to model')
     parser.add_argument('--fp16', action='store_true', help='CoreML FP16 half-precision export')
     parser.add_argument('--int8', action='store_true', help='CoreML INT8 quantization')
     parser.add_argument('--v', action='store_true', help='Verbose log')
@@ -59,7 +61,7 @@ if __name__ == '__main__':
     coreML = any(x in ['coreml'] for x in opt.include)
     saved_Model = any(x in ['saved_model', 'tfjs', 'tflite']
                       for x in opt.include)
-    graphDef = any(x in ['saved_model', 'grapdef', 'tfjs', 'tflite']
+    graphDef = any(x in ['saved_model', 'grapdef', 'tfjs']
                    for x in opt.include)
 
     t = time.time()
@@ -312,8 +314,8 @@ if __name__ == '__main__':
                                                       img,
                                                       weight,
                                                       False,
-                                                      tf_nms=tensorFlowjs,
-                                                      agnostic_nms=tensorFlowjs,
+                                                      tf_nms=tensorFlowjs or opt.nms or opt.agnostic_nms,
+                                                      agnostic_nms=tensorFlowjs or opt.agnostic_nms,
                                                       topk_per_class=opt.topk_all,
                                                       topk_all=opt.topk_all,
                                                       iou_thres=opt.iou_thres,
@@ -325,7 +327,6 @@ if __name__ == '__main__':
             prefix = colorstr('TensorFlow GraphDef:')
             try:
                 from tools.auxexport import export_pb
-
                 outputpath = export_pb(s_models, weight, prefix=prefix)[0]
                 logging.info(
                     f'{prefix} export success✅, saved as {outputpath}')
@@ -355,8 +356,8 @@ if __name__ == '__main__':
 
                 outputpath = export_tflite(s_models, img, weight,
                                            int8=opt.int8,
-                                           data=opt.data, nms=True,
-                                           agnostic_nms=True,
+                                           data=opt.data, nms=opt.nms,
+                                           agnostic_nms=opt.agnostic_nms,
                                            stride=gs,
                                            prefix=prefix)[0]
                 logging.info(f'{prefix} export success✅, saved as {outputpath}')

@@ -19,6 +19,7 @@ import tensorflow as tf
 import torch
 import torch.nn as nn
 from tensorflow import keras
+from keras.layers import Layer
 import logging
 import inspect
 from typing import Optional
@@ -63,7 +64,7 @@ def print_args(args: Optional[dict] = None, show_file=True, show_func=False):
 LOGGER = logging.getLogger(__name__)
 
 
-class TFRepConv(keras.layers.Layer):
+class TFRepConv(Layer):
     # Represented convolution
     # https://arxiv.org/abs/2101.03697
 
@@ -87,7 +88,7 @@ class TFRepConv(keras.layers.Layer):
             self.rbr_1x1 = keras.Sequential([TFConv2d(c1, c2, 1, s, g=g, bias=False, w=w.rbr_1x1[0]),
                                              TFBN(w.rbr_1x1[1])])
 
-    def __call__(self, inputs):
+    def call(self, inputs):
         if hasattr(self, "rbr_reparam"):
             return self.act(self.rbr_reparam(inputs))
 
@@ -99,7 +100,7 @@ class TFRepConv(keras.layers.Layer):
         return self.act(self.rbr_dense(inputs) + self.rbr_1x1(inputs) + id_out)
 
 
-class TFSPPCSPC(keras.layers.Layer):
+class TFSPPCSPC(Layer):
     """CSP https://github.com/WongKinYiu/CrossStagePartialNetworks"""
 
     def __init__(self, c1, c2, n=1, shortcut=False, g=1, e=0.5, k=(5, 9, 13), w=None):
@@ -114,18 +115,18 @@ class TFSPPCSPC(keras.layers.Layer):
         self.cv6 = TFConv(c_, c_, 3, 1, w=w.cv6)
         self.cv7 = TFConv(2 * c_, c2, 1, 1, w=w.cv7)
 
-    def __call__(self, inputs):
+    def call(self, inputs):
         x1 = self.cv4(self.cv3(self.cv1(inputs)))
         y1 = self.cv6(self.cv5(tf.concat([x1] + [m(x1) for m in self.m], 3)))
         y2 = self.cv2(inputs)
         return self.cv7(tf.concat((y1, y2), 3))
 
 
-class TFReOrg(keras.layers.Layer):
+class TFReOrg(Layer):
     def __init__(self, w=None):
         super(TFReOrg, self).__init__()
 
-    def __call__(self, inputs):  # inputs(b,c,w,h) -> y(b,4c,w/2,h/2)
+    def call(self, inputs):  # inputs(b,c,w,h) -> y(b,4c,w/2,h/2)
         out = tf.concat([inputs[..., ::2, ::2],
                          inputs[..., 1::2, ::2],
                          inputs[..., ::2, 1::2],
@@ -133,7 +134,7 @@ class TFReOrg(keras.layers.Layer):
         return out
 
 
-class TFBN(keras.layers.Layer):
+class TFBN(Layer):
     # TensorFlow BatchNormalization wrapper
     def __init__(self, w=None):
         super().__init__()
@@ -144,29 +145,29 @@ class TFBN(keras.layers.Layer):
             moving_variance_initializer=keras.initializers.Constant(w.running_var.cpu().detach().numpy()),
             epsilon=w.eps)
 
-    def __call__(self, inputs):
+    def call(self, inputs):
         return self.bn(inputs)
 
 
-class TFMP(keras.layers.Layer):
+class TFMP(Layer):
     def __init__(self, k=2, w=None):
         super(TFMP, self).__init__()
         self.m = keras.layers.MaxPool2D(pool_size=k, strides=k, padding='valid')
 
-    def __call__(self, inputs):
+    def call(self, inputs):
         return self.m(inputs)
 
 
-class TFSP(keras.layers.Layer):
+class TFSP(Layer):
     def __init__(self, k=3, s=1, w=None):
         super(TFSP, self).__init__()
         self.m = keras.layers.MaxPool2D(pool_size=k, strides=s, padding='SAME')
 
-    def __call__(self, x):
+    def call(self, x):
         return self.m(x)
 
 
-class TFPad(keras.layers.Layer):
+class TFPad(Layer):
     # Pad inputs in spatial dimensions 1 and 2
     def __init__(self, pad):
         super().__init__()
@@ -175,11 +176,11 @@ class TFPad(keras.layers.Layer):
         else:  # tuple/list
             self.pad = tf.constant([[0, 0], [pad[0], pad[0]], [pad[1], pad[1]], [0, 0]])
 
-    def __call__(self, inputs):
+    def call(self, inputs):
         return tf.pad(inputs, self.pad, mode='constant', constant_values=0)
 
 
-class TFConv(keras.layers.Layer):
+class TFConv(Layer):
     # Standard convolution
     def __init__(self, c1, c2, k=1, s=1, p=None, g=1, act=True, w=None):
         # ch_in, ch_out, weights, kernel, stride, padding, groups
@@ -190,7 +191,6 @@ class TFConv(keras.layers.Layer):
             filters=c2,
             kernel_size=k,
             strides=s,
-            groups=g,
             padding='SAME' if s == 1 else 'VALID',
             use_bias=not hasattr(w, 'bn'),
             kernel_initializer=keras.initializers.Constant(
@@ -202,11 +202,11 @@ class TFConv(keras.layers.Layer):
         self.bn = TFBN(w.bn) if hasattr(w, 'bn') else tf.identity
         self.act = activations(w.act) if act else tf.identity
 
-    def __call__(self, inputs):
+    def call(self, inputs):
         return self.act(self.bn(self.conv(inputs)))
 
 
-class TFDownC(keras.layers.Layer):
+class TFDownC(Layer):
     """Spatial pyramid pooling layer used in YOLOv3-SPP"""
 
     def __init__(self, c1, c2, n=1, k=2, w=None):
@@ -222,7 +222,7 @@ class TFDownC(keras.layers.Layer):
         return tf.concat((self.cv2(self.cv1(x)), self.cv3(self.mp(x))), 3)
 
 
-class TFDWConv(keras.layers.Layer):
+class TFDWConv(Layer):
     """Depthwise convolution"""
 
     def __init__(self, c1, c2, k=1, s=1, p=None, act=True, w=None):
@@ -241,11 +241,11 @@ class TFDWConv(keras.layers.Layer):
         self.bn = TFBN(w.bn) if hasattr(w, 'bn') else tf.identity
         self.act = activations(w.act) if act else tf.identity
 
-    def __call__(self, inputs):
+    def call(self, inputs):
         return self.act(self.bn(self.conv(inputs)))
 
 
-class TFDWConvTranspose2d(keras.layers.Layer):
+class TFDWConvTranspose2d(Layer):
     # Depthwise ConvTranspose2d
     def __init__(self, c1, c2, k=1, s=1, p1=0, p2=0, w=None):
         # ch_in, ch_out, weights, kernel, stride, padding, groups
@@ -264,24 +264,24 @@ class TFDWConvTranspose2d(keras.layers.Layer):
                                          kernel_initializer=keras.initializers.Constant(weight[..., i:i + 1]),
                                          bias_initializer=keras.initializers.Constant(bias[i])) for i in range(c1)]
 
-    def __call__(self, inputs):
+    def call(self, inputs):
         return tf.concat([m(x) for m, x in zip(self.conv, tf.split(inputs, self.c1, 3))], 3)[:, 1:-1, 1:-1]
 
 
-class TFFocus(keras.layers.Layer):
+class TFFocus(Layer):
     # Focus wh information into c-space
     def __init__(self, c1, c2, k=1, s=1, p=None, g=1, act=True, w=None):
         # ch_in, ch_out, kernel, stride, padding, groups
         super().__init__()
         self.conv = TFConv(c1 * 4, c2, k, s, p, g, act, w.conv)
 
-    def __call__(self, inputs):  # x(b,w,h,c) -> y(b,w/2,h/2,4c)
+    def call(self, inputs):  # x(b,w,h,c) -> y(b,w/2,h/2,4c)
         # inputs = inputs / 255  # normalize 0-255 to 0-1
         inputs = [inputs[:, ::2, ::2, :], inputs[:, 1::2, ::2, :], inputs[:, ::2, 1::2, :], inputs[:, 1::2, 1::2, :]]
         return self.conv(tf.concat(inputs, 3))
 
 
-class TFBottleneck(keras.layers.Layer):
+class TFBottleneck(Layer):
     # Standard bottleneck
     def __init__(self, c1, c2, shortcut=True, g=1, e=0.5, w=None):  # ch_in, ch_out, shortcut, groups, expansion
         super().__init__()
@@ -290,11 +290,11 @@ class TFBottleneck(keras.layers.Layer):
         self.cv2 = TFConv(c_, c2, 3, 1, g=g, w=w.cv2)
         self.add = shortcut and c1 == c2
 
-    def __call__(self, inputs):
+    def call(self, inputs):
         return inputs + self.cv2(self.cv1(inputs)) if self.add else self.cv2(self.cv1(inputs))
 
 
-class TFCrossConv(keras.layers.Layer):
+class TFCrossConv(Layer):
     # Cross Convolution
     def __init__(self, c1, c2, k=3, s=1, g=1, e=1.0, shortcut=False, w=None):
         super().__init__()
@@ -303,31 +303,30 @@ class TFCrossConv(keras.layers.Layer):
         self.cv2 = TFConv(c_, c2, (k, 1), (s, 1), g=g, w=w.cv2)
         self.add = shortcut and c1 == c2
 
-    def __call__(self, inputs):
+    def call(self, inputs):
         return inputs + self.cv2(self.cv1(inputs)) if self.add else self.cv2(self.cv1(inputs))
 
 
-class TFConv2d(keras.layers.Layer):
+class TFConv2d(Layer):
     # Substitution for PyTorch nn.Conv2D
-    def __init__(self, c1, c2, k=1, s=1, p=None, g=1, bias=True, w=None):
+    def __init__(self, c1, c2, k=1, s=1, g=1, bias=True, w=None):
         super().__init__()
         assert g == 1, "TF v2.2 Conv2D does not support 'groups' argument"
         self.conv = keras.layers.Conv2D(filters=c2,
                                         kernel_size=k,
                                         strides=s,
-                                        groups=g,
-                                        padding='SAME' if s == 1 else 'VALID',
+                                        padding='VALID',
                                         use_bias=bias,
                                         kernel_initializer=keras.initializers.Constant(
                                             w.weight.permute(2, 3, 1, 0).detach().detach().cpu().numpy()),
                                         bias_initializer=keras.initializers.Constant(
                                             w.bias.detach().detach().cpu().numpy()) if bias else None)
 
-    def __call__(self, inputs):
+    def call(self, inputs):
         return self.conv(inputs)
 
 
-class TFBottleneckCSP(keras.layers.Layer):
+class TFBottleneckCSP(Layer):
     # CSP Bottleneck https://github.com/WongKinYiu/CrossStagePartialNetworks
     def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5, w=None):
         # ch_in, ch_out, number, shortcut, groups, expansion
@@ -341,13 +340,13 @@ class TFBottleneckCSP(keras.layers.Layer):
         self.act = activations(act=w.act) if hasattr(w, 'act') else tf.identity
         self.m = keras.Sequential([TFBottleneck(c_, c_, shortcut, g, e=1.0, w=w.m[j]) for j in range(n)])
 
-    def __call__(self, inputs):
+    def call(self, inputs):
         y1 = self.cv3(self.m(self.cv1(inputs)))
         y2 = self.cv2(inputs)
         return self.cv4(self.act(self.bn(tf.concat((y1, y2), axis=3))))
 
 
-class TFC3(keras.layers.Layer):
+class TFC3(Layer):
     # CSP Bottleneck with 3 convolutions
     def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5, w=None):
         # ch_in, ch_out, number, shortcut, groups, expansion
@@ -358,11 +357,11 @@ class TFC3(keras.layers.Layer):
         self.cv3 = TFConv(2 * c_, c2, 1, 1, w=w.cv3)
         self.m = keras.Sequential([TFBottleneck(c_, c_, shortcut, g, e=1.0, w=w.m[j]) for j in range(n)])
 
-    def __call__(self, inputs):
+    def call(self, inputs):
         return self.cv3(tf.concat((self.m(self.cv1(inputs)), self.cv2(inputs)), axis=3))
 
 
-class TFC3x(keras.layers.Layer):
+class TFC3x(Layer):
     # 3 module with cross-convolutions
     def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5, w=None):
         # ch_in, ch_out, number, shortcut, groups, expansion
@@ -374,11 +373,11 @@ class TFC3x(keras.layers.Layer):
         self.m = keras.Sequential([
             TFCrossConv(c_, c_, k=3, s=1, g=g, e=1.0, shortcut=shortcut, w=w.m[j]) for j in range(n)])
 
-    def __call__(self, inputs):
+    def call(self, inputs):
         return self.cv3(tf.concat((self.m(self.cv1(inputs)), self.cv2(inputs)), axis=3))
 
 
-class TFSPP(keras.layers.Layer):
+class TFSPP(Layer):
     # Spatial pyramid pooling layer used in YOLOv3-SPP
     def __init__(self, c1, c2, k=(5, 9, 13), w=None):
         super().__init__()
@@ -387,12 +386,12 @@ class TFSPP(keras.layers.Layer):
         self.cv2 = TFConv(c_ * (len(k) + 1), c2, 1, 1, w=w.cv2)
         self.m = [keras.layers.MaxPool2D(pool_size=x, strides=1, padding='SAME') for x in k]
 
-    def __call__(self, inputs):
+    def call(self, inputs):
         x = self.cv1(inputs)
         return self.cv2(tf.concat([x] + [m(x) for m in self.m], 3))
 
 
-class TFSPPF(keras.layers.Layer):
+class TFSPPF(Layer):
     # Spatial pyramid pooling-Fast layer
     def __init__(self, c1, c2, k=5, w=None):
         super().__init__()
@@ -401,14 +400,14 @@ class TFSPPF(keras.layers.Layer):
         self.cv2 = TFConv(c_ * 4, c2, 1, 1, w=w.cv2)
         self.m = keras.layers.MaxPool2D(pool_size=k, strides=1, padding='SAME')
 
-    def __call__(self, inputs):
+    def call(self, inputs):
         x = self.cv1(inputs)
         y1 = self.m(x)
         y2 = self.m(y1)
         return self.cv2(tf.concat([x, y1, y2, self.m(y2)], 3))
 
 
-class TFDetect(keras.layers.Layer):
+class TFDetect(Layer):
     def __init__(self, nc=80, anchors=(), ch=(), imgsz=(640, 640), w=None):  # detection layer
         super().__init__()
         self.stride = tf.convert_to_tensor(w.stride.detach().cpu().numpy(), dtype=tf.float32)
@@ -426,7 +425,7 @@ class TFDetect(keras.layers.Layer):
             ny, nx = self.imgsz[0] // self.stride[i], self.imgsz[1] // self.stride[i]
             self.grid[i] = self._make_grid(nx, ny)
 
-    def __call__(self, inputs):
+    def call(self, inputs):
         z = []  # inference output
         x = []
         for i in range(self.nl):
@@ -446,7 +445,7 @@ class TFDetect(keras.layers.Layer):
                 wh /= tf.constant([[self.imgsz[1], self.imgsz[0]]], dtype=tf.float32)
                 y = tf.concat([xy, wh, y[..., 4:5 + self.nc], y[..., 5 + self.nc:]], -1)
                 z.append(tf.reshape(y, [-1, self.na * nx * ny, self.no]))
-        return tf.transpose(x, [0, 2, 1, 3]) if self.training else (tf.concat(z, 1), x)
+        return tf.transpose(x, [0, 2, 1, 3]) if self.training else (tf.concat(z, 1), )
 
     @staticmethod
     def _make_grid(nx=20, ny=20):
@@ -454,7 +453,7 @@ class TFDetect(keras.layers.Layer):
         return tf.cast(tf.reshape(tf.stack([xv, yv], 2), [1, 1, ny * nx, 2]), dtype=tf.float32)
 
 
-class TFProto(keras.layers.Layer):
+class TFProto(Layer):
 
     def __init__(self, c1, c_=256, c2=32, w=None):
         super().__init__()
@@ -463,29 +462,29 @@ class TFProto(keras.layers.Layer):
         self.cv2 = TFConv(c_, c_, k=3, w=w.cv2)
         self.cv3 = TFConv(c_, c2, w=w.cv3)
 
-    def __call__(self, inputs):
+    def call(self, inputs):
         return self.cv3(self.cv2(self.upsample(self.cv1(inputs))))
 
 
-class TFUpsample(keras.layers.Layer):
+class TFUpsample(Layer):
     # TF version of torch.nn.Upsample()
     def __init__(self, size, scale_factor, mode, w=None):  # warning: all arguments needed including 'w'
         super().__init__()
         assert scale_factor % 2 == 0, "scale_factor must be multiple of 2"
         self.upsample = lambda x: tf.image.resize(x, (x.shape[1] * scale_factor, x.shape[2] * scale_factor), mode)
 
-    def __call__(self, inputs):
+    def call(self, inputs):
         return self.upsample(inputs)
 
 
-class TFConcat(keras.layers.Layer):
+class TFConcat(Layer):
     # TF version of torch.concat()
     def __init__(self, dimension=1, w=None):
         super().__init__()
         assert dimension == 1, "convert only NCHW to NHWC concat"
         self.d = 3
 
-    def __call__(self, inputs):
+    def call(self, inputs):
         return tf.concat(inputs, self.d)
 
 
@@ -630,11 +629,8 @@ class TFModel:
         return tf.concat([x - w / 2, y - h / 2, x + w / 2, y + h / 2], axis=-1)
 
 
-class AgnosticNMS(keras.layers.Layer):
+class AgnosticNMS(Layer):
     # TF Agnostic NMS
-    def __int__(self):
-        super().__int__()
-
     def call(self, inputs, topk_all, iou_thres, conf_thres):
         # wrap map_fn to avoid TypeSpec related error https://stackoverflow.com/a/65809989/3036450
         return tf.map_fn(lambda x: self._nms(x, topk_all, iou_thres, conf_thres),
@@ -674,7 +670,7 @@ class AgnosticNMS(keras.layers.Layer):
 def activations(act=nn.SiLU):
     """Returns TF activation from input PyTorch activation"""
     if isinstance(act, nn.LeakyReLU):
-        return lambda x: tf.keras.activations.relu(x, alpha=0.1)
+        return lambda x: keras.activations.relu(x, alpha=0.1)
     elif isinstance(act, (nn.Hardswish, Hardswish)):
         return lambda x: x * tf.nn.relu6(x + 3) * 0.166666667
     elif isinstance(act, nn.ReLU):
@@ -682,27 +678,27 @@ def activations(act=nn.SiLU):
     elif isinstance(act, nn.ReLU6):
         return lambda x: tf.nn.relu6(x)
     elif isinstance(act, (nn.SiLU, SiLU)):
-        return lambda x: tf.keras.activations.swish(x)
+        return lambda x: keras.activations.swish(x)
     elif isinstance(act, nn.Tanh):
-        return lambda x: tf.keras.activations.tanh(x)
+        return lambda x: keras.activations.tanh(x)
     elif isinstance(act, nn.Sigmoid):
-        return lambda x: tf.keras.activations.sigmoid(x)
+        return lambda x: keras.activations.sigmoid(x)
     elif isinstance(act, nn.ELU):
-        return lambda x: tf.keras.activations.elu(x)
+        return lambda x: keras.activations.elu(x)
     elif isinstance(act, nn.Hardsigmoid):
-        return lambda x: tf.keras.activations.hard_sigmoid(x)
+        return lambda x: keras.activations.hard_sigmoid(x)
     elif isinstance(act, nn.GELU):
-        return lambda x: tf.keras.activations.gelu(x)
+        return lambda x: keras.activations.gelu(x)
     elif isinstance(act, nn.PReLU):
-        return lambda x: tf.keras.activations.relu(x, alpha=0.25)
+        return lambda x: keras.activations.relu(x, alpha=0.25)
     elif isinstance(act, nn.Softmax):
-        return lambda x: tf.keras.activations.softmax(x)
+        return lambda x: keras.activations.softmax(x)
     elif isinstance(act, nn.Softsign):
-        return lambda x: tf.keras.activations.softsign(x)
+        return lambda x: keras.activations.softsign(x)
     elif isinstance(act, nn.Softplus):
-        return lambda x: tf.keras.activations.softplus(x)
+        return lambda x: keras.activations.softplus(x)
     elif isinstance(act, nn.Softsign):
-        return lambda x: tf.keras.activations.softsign(x)
+        return lambda x: keras.activations.softsign(x)
     else:
         raise Exception(f'no matching TensorFlow activation found for PyTorch activation {act}')
 
