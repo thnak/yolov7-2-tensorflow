@@ -360,11 +360,12 @@ def train(hyp, opt, tb_writer=None,
         pbar = enumerate(dataloader)
         logger.info(('\n' + '%11s' * 8) % tag_results)
         if rank in [-1, 0]:
-            pbar = tqdm(pbar, total=nb, mininterval=0.05, maxinterval=1, unit='batch',
+            pbar = tqdm(pbar, total=nb, mininterval=1, maxinterval=1, unit='batch',
                         bar_format=TQDM_BAR_FORMAT)  # progress bar
 
         # batch -------------------------------------------------------------
         for i, (imgs, targets, paths, _) in pbar:
+            del _
             # number integrated batches (since train start)
             ni = i + nb * epoch
             imgs = imgs.to(device, non_blocking=True).float() / 255.0  # uint8 to float32, 0-255 to 0.0-1.0
@@ -372,8 +373,8 @@ def train(hyp, opt, tb_writer=None,
             # Warmup
             if ni <= nw:
                 xi = [0, nw]  # x interp
-                accumulate = max(1, np.interp(
-                    ni, xi, [1, nbs / total_batch_size]).round())
+                accumulate = max(1,
+                                 np.interp(ni, xi, [1, nbs / total_batch_size]).round())
                 for j, x in enumerate(optimizer.param_groups):
                     # bias lr falls from 0.1 to lr0, all other lrs rise from 0.0 to lr0
                     x['lr'] = np.interp(
@@ -443,7 +444,8 @@ def train(hyp, opt, tb_writer=None,
                 elif plots and ni == 10 and wandb_logger.wandb:
                     wandb_logger.log({"Mosaics": [wandb_logger.wandb.Image(str(x), caption=x.name) for x in
                                                   save_dir.glob('train*.jpg') if x.exists()]})
-
+        input_shape = list(imgs.shape[1:]) if isinstance(imgs.shape[1:], torch.Size) else imgs.shape[1:]
+        del imgs, targets, paths
         # Scheduler
         lr = [x['lr'] for x in optimizer.param_groups]  # for tensorboard
         scheduler.step()
@@ -514,7 +516,7 @@ def train(hyp, opt, tb_writer=None,
                     'best_fitness': best_fitness,
                     'training_results': results_file.read_text(),
                     'model': deepcopy(model.module if is_parallel(model) else model).half(),
-                    'input_shape': list(imgs.shape[1:]) if isinstance(imgs.shape[1:], torch.Size) else imgs.shape[1:],
+                    'input_shape': input_shape,
                     # BCWH to CWH
                     'ema': deepcopy(ema.ema).half(),
                     'updates': ema.updates,
@@ -539,6 +541,7 @@ def train(hyp, opt, tb_writer=None,
                 del ckpt
                 if final_epoch:
                     saver.join()
+                del saver
         # end epoch ----------------------------------------------------------------------------------------------------
     # end training
     if rank in [-1, 0]:
@@ -611,14 +614,14 @@ def train(hyp, opt, tb_writer=None,
                     output_path = str(f)
                     output_path = output_path.replace('best.pt',
                                                       'deploy_best.pt')
-                    try:
-                        if opt.evolve <= 1:
-                            Re_parameterization(inputWeightPath=str(f),
+                    # try:
+                    #     if opt.evolve <= 1:
+                    Re_parameterization(inputWeightPath=str(f),
                                                 outputWeightPath=output_path,
                                                 device=map_device)
-                    except Exception as ex:
-                        prefix = colorstr('reparamater: ')
-                        logging.error(f'{prefix}{ex}')
+                    # except Exception as ex:
+                    #     prefix = colorstr('reparamater: ')
+                    #     logging.error(f'{prefix}{ex}')
         if opt.bucket:
             os.system(f'gsutil cp {final} gs://{opt.bucket}/weights')  # upload
         if wandb_logger.wandb and opt.evolve <= 1:  # Log the stripped model

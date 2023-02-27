@@ -34,7 +34,7 @@ from models.yolo import Detect, Segment, IDetect, RobustConv, RobustConv2, Ghost
     Res, ResCSPA, ResCSPB, ResCSPC, RepRes, RepResCSPA, RepResCSPB, RepResCSPC, ResX, ResXCSPA, ResXCSPB, ResXCSPC, \
     RepResX, RepResXCSPA, RepResXCSPB, RepResXCSPC, Ghost, GhostCSPA, GhostCSPB, GhostCSPC, SwinTransformerBlock, \
     STCSPA, STCSPB, STCSPC, \
-    SwinTransformer2Block, ST2CSPA, ST2CSPB, ST2CSPC, IAuxDetect, IBin, IKeypoint
+    SwinTransformer2Block, ST2CSPA, ST2CSPB, ST2CSPC, IAuxDetect
 from utils.activations import SiLU, Hardswish
 from utils.general import make_divisible, colorstr
 
@@ -64,6 +64,16 @@ def print_args(args: Optional[dict] = None, show_file=True, show_func=False):
 LOGGER = logging.getLogger(__name__)
 
 
+class TFShortcut(Layer):
+    def __init__(self, dimension=0, w=None):
+        super(TFShortcut, self).__init__()
+        self.d = dimension
+
+    def __call__(self, x):
+        return x[0] + x[1]
+# [80, [[19, 27, 44, 40, 38, 94], [96, 68, 86, 152, 180, 137], [140, 301, 303, 264, 238, 542], [436, 615, 739, 380, 925, 792]], [256, 512, 768, 1024, 320, 640, 960, 1280]]
+
+
 class TFRepConv(Layer):
     # Represented convolution
     # https://arxiv.org/abs/2101.03697
@@ -83,12 +93,13 @@ class TFRepConv(Layer):
         else:
             self.rbr_identity = (TFBN(w.rbr_indentity) if c2 == c1 and s == 1 else None)
             self.rbr_dense = keras.Sequential(
-                [TFConv2d(c1, c2, k, s, autopad(k, p), g=g, bias=False, w=w.rbr_dense[0]),
+                [TFConv2d(c1, c2, k, s, g=g, bias=False, w=w.rbr_dense[0]),
                  TFBN(w=w.rbr_dense[1])])
-            self.rbr_1x1 = keras.Sequential([TFConv2d(c1, c2, 1, s, g=g, bias=False, w=w.rbr_1x1[0]),
-                                             TFBN(w.rbr_1x1[1])])
+            self.rbr_1x1 = keras.Sequential(
+                [TFConv2d(c1, c2, 1, s, g=g, bias=False, w=w.rbr_1x1[0]),
+                 TFBN(w.rbr_1x1[1])])
 
-    def call(self, inputs):
+    def __call__(self, inputs):
         if hasattr(self, "rbr_reparam"):
             return self.act(self.rbr_reparam(inputs))
 
@@ -96,8 +107,11 @@ class TFRepConv(Layer):
             id_out = 0
         else:
             id_out = self.rbr_identity(inputs)
-
-        return self.act(self.rbr_dense(inputs) + self.rbr_1x1(inputs) + id_out)
+        a = self.rbr_dense(inputs)
+        b = self.rbr_1x1(inputs)
+        c = a + b + id_out
+        out = self.act(c)
+        return out
 
 
 class TFSPPCSPC(Layer):
@@ -115,7 +129,7 @@ class TFSPPCSPC(Layer):
         self.cv6 = TFConv(c_, c_, 3, 1, w=w.cv6)
         self.cv7 = TFConv(2 * c_, c2, 1, 1, w=w.cv7)
 
-    def call(self, inputs):
+    def __call__(self, inputs):
         x1 = self.cv4(self.cv3(self.cv1(inputs)))
         y1 = self.cv6(self.cv5(tf.concat([x1] + [m(x1) for m in self.m], 3)))
         y2 = self.cv2(inputs)
@@ -126,11 +140,11 @@ class TFReOrg(Layer):
     def __init__(self, w=None):
         super(TFReOrg, self).__init__()
 
-    def call(self, inputs):  # inputs(b,c,w,h) -> y(b,4c,w/2,h/2)
-        out = tf.concat([inputs[..., ::2, ::2],
-                         inputs[..., 1::2, ::2],
-                         inputs[..., ::2, 1::2],
-                         inputs[..., 1::2, 1::2]], 1)
+    def __call__(self, inputs):  # inputs(b,c,w,h) -> y(b,4c,w/2,h/2)
+        out = tf.concat([inputs[:, ::2, ::2, :],
+                         inputs[:, 1::2, ::2, :],
+                         inputs[:, ::2, 1::2, :],
+                         inputs[:, 1::2, 1::2, :]], 3)
         return out
 
 
@@ -145,7 +159,7 @@ class TFBN(Layer):
             moving_variance_initializer=keras.initializers.Constant(w.running_var.cpu().detach().numpy()),
             epsilon=w.eps)
 
-    def call(self, inputs):
+    def __call__(self, inputs):
         return self.bn(inputs)
 
 
@@ -154,7 +168,7 @@ class TFMP(Layer):
         super(TFMP, self).__init__()
         self.m = keras.layers.MaxPool2D(pool_size=k, strides=k, padding='valid')
 
-    def call(self, inputs):
+    def __call__(self, inputs):
         return self.m(inputs)
 
 
@@ -163,7 +177,7 @@ class TFSP(Layer):
         super(TFSP, self).__init__()
         self.m = keras.layers.MaxPool2D(pool_size=k, strides=s, padding='SAME')
 
-    def call(self, x):
+    def __call__(self, x):
         return self.m(x)
 
 
@@ -176,7 +190,7 @@ class TFPad(Layer):
         else:  # tuple/list
             self.pad = tf.constant([[0, 0], [pad[0], pad[0]], [pad[1], pad[1]], [0, 0]])
 
-    def call(self, inputs):
+    def __call__(self, inputs):
         return tf.pad(inputs, self.pad, mode='constant', constant_values=0)
 
 
@@ -202,8 +216,12 @@ class TFConv(Layer):
         self.bn = TFBN(w.bn) if hasattr(w, 'bn') else tf.identity
         self.act = activations(w.act) if act else tf.identity
 
-    def call(self, inputs):
-        return self.act(self.bn(self.conv(inputs)))
+    def __call__(self, inputs):
+        out = self.conv(inputs)
+        out = self.bn(out)
+        out = self.act(out)
+        # return self.act(self.bn(self.conv(inputs)))
+        return out
 
 
 class TFDownC(Layer):
@@ -241,7 +259,7 @@ class TFDWConv(Layer):
         self.bn = TFBN(w.bn) if hasattr(w, 'bn') else tf.identity
         self.act = activations(w.act) if act else tf.identity
 
-    def call(self, inputs):
+    def __call__(self, inputs):
         return self.act(self.bn(self.conv(inputs)))
 
 
@@ -264,7 +282,7 @@ class TFDWConvTranspose2d(Layer):
                                          kernel_initializer=keras.initializers.Constant(weight[..., i:i + 1]),
                                          bias_initializer=keras.initializers.Constant(bias[i])) for i in range(c1)]
 
-    def call(self, inputs):
+    def __call__(self, inputs):
         return tf.concat([m(x) for m, x in zip(self.conv, tf.split(inputs, self.c1, 3))], 3)[:, 1:-1, 1:-1]
 
 
@@ -275,7 +293,7 @@ class TFFocus(Layer):
         super().__init__()
         self.conv = TFConv(c1 * 4, c2, k, s, p, g, act, w.conv)
 
-    def call(self, inputs):  # x(b,w,h,c) -> y(b,w/2,h/2,4c)
+    def __call__(self, inputs):  # x(b,w,h,c) -> y(b,w/2,h/2,4c)
         # inputs = inputs / 255  # normalize 0-255 to 0-1
         inputs = [inputs[:, ::2, ::2, :], inputs[:, 1::2, ::2, :], inputs[:, ::2, 1::2, :], inputs[:, 1::2, 1::2, :]]
         return self.conv(tf.concat(inputs, 3))
@@ -290,7 +308,7 @@ class TFBottleneck(Layer):
         self.cv2 = TFConv(c_, c2, 3, 1, g=g, w=w.cv2)
         self.add = shortcut and c1 == c2
 
-    def call(self, inputs):
+    def __call__(self, inputs):
         return inputs + self.cv2(self.cv1(inputs)) if self.add else self.cv2(self.cv1(inputs))
 
 
@@ -303,7 +321,7 @@ class TFCrossConv(Layer):
         self.cv2 = TFConv(c_, c2, (k, 1), (s, 1), g=g, w=w.cv2)
         self.add = shortcut and c1 == c2
 
-    def call(self, inputs):
+    def __call__(self, inputs):
         return inputs + self.cv2(self.cv1(inputs)) if self.add else self.cv2(self.cv1(inputs))
 
 
@@ -315,14 +333,14 @@ class TFConv2d(Layer):
         self.conv = keras.layers.Conv2D(filters=c2,
                                         kernel_size=k,
                                         strides=s,
-                                        padding='VALID',
+                                        padding='SAME' if s == 1 else 'VALID',
                                         use_bias=bias,
                                         kernel_initializer=keras.initializers.Constant(
                                             w.weight.permute(2, 3, 1, 0).detach().detach().cpu().numpy()),
                                         bias_initializer=keras.initializers.Constant(
                                             w.bias.detach().detach().cpu().numpy()) if bias else None)
 
-    def call(self, inputs):
+    def __call__(self, inputs):
         return self.conv(inputs)
 
 
@@ -340,7 +358,7 @@ class TFBottleneckCSP(Layer):
         self.act = activations(act=w.act) if hasattr(w, 'act') else tf.identity
         self.m = keras.Sequential([TFBottleneck(c_, c_, shortcut, g, e=1.0, w=w.m[j]) for j in range(n)])
 
-    def call(self, inputs):
+    def __call__(self, inputs):
         y1 = self.cv3(self.m(self.cv1(inputs)))
         y2 = self.cv2(inputs)
         return self.cv4(self.act(self.bn(tf.concat((y1, y2), axis=3))))
@@ -357,7 +375,7 @@ class TFC3(Layer):
         self.cv3 = TFConv(2 * c_, c2, 1, 1, w=w.cv3)
         self.m = keras.Sequential([TFBottleneck(c_, c_, shortcut, g, e=1.0, w=w.m[j]) for j in range(n)])
 
-    def call(self, inputs):
+    def __call__(self, inputs):
         return self.cv3(tf.concat((self.m(self.cv1(inputs)), self.cv2(inputs)), axis=3))
 
 
@@ -373,7 +391,7 @@ class TFC3x(Layer):
         self.m = keras.Sequential([
             TFCrossConv(c_, c_, k=3, s=1, g=g, e=1.0, shortcut=shortcut, w=w.m[j]) for j in range(n)])
 
-    def call(self, inputs):
+    def __call__(self, inputs):
         return self.cv3(tf.concat((self.m(self.cv1(inputs)), self.cv2(inputs)), axis=3))
 
 
@@ -386,7 +404,7 @@ class TFSPP(Layer):
         self.cv2 = TFConv(c_ * (len(k) + 1), c2, 1, 1, w=w.cv2)
         self.m = [keras.layers.MaxPool2D(pool_size=x, strides=1, padding='SAME') for x in k]
 
-    def call(self, inputs):
+    def __call__(self, inputs):
         x = self.cv1(inputs)
         return self.cv2(tf.concat([x] + [m(x) for m in self.m], 3))
 
@@ -400,7 +418,7 @@ class TFSPPF(Layer):
         self.cv2 = TFConv(c_ * 4, c2, 1, 1, w=w.cv2)
         self.m = keras.layers.MaxPool2D(pool_size=k, strides=1, padding='SAME')
 
-    def call(self, inputs):
+    def __call__(self, inputs):
         x = self.cv1(inputs)
         y1 = self.m(x)
         y2 = self.m(y1)
@@ -425,7 +443,7 @@ class TFDetect(Layer):
             ny, nx = self.imgsz[0] // self.stride[i], self.imgsz[1] // self.stride[i]
             self.grid[i] = self._make_grid(nx, ny)
 
-    def call(self, inputs):
+    def __call__(self, inputs):
         z = []  # inference output
         x = []
         for i in range(self.nl):
@@ -445,7 +463,7 @@ class TFDetect(Layer):
                 wh /= tf.constant([[self.imgsz[1], self.imgsz[0]]], dtype=tf.float32)
                 y = tf.concat([xy, wh, y[..., 4:5 + self.nc], y[..., 5 + self.nc:]], -1)
                 z.append(tf.reshape(y, [-1, self.na * nx * ny, self.no]))
-        return tf.transpose(x, [0, 2, 1, 3]) if self.training else (tf.concat(z, 1), )
+        return tf.transpose(x, [0, 2, 1, 3]) if self.training else (tf.concat(z, 1),)
 
     @staticmethod
     def _make_grid(nx=20, ny=20):
@@ -462,7 +480,7 @@ class TFProto(Layer):
         self.cv2 = TFConv(c_, c_, k=3, w=w.cv2)
         self.cv3 = TFConv(c_, c2, w=w.cv3)
 
-    def call(self, inputs):
+    def __call__(self, inputs):
         return self.cv3(self.cv2(self.upsample(self.cv1(inputs))))
 
 
@@ -473,7 +491,7 @@ class TFUpsample(Layer):
         assert scale_factor % 2 == 0, "scale_factor must be multiple of 2"
         self.upsample = lambda x: tf.image.resize(x, (x.shape[1] * scale_factor, x.shape[2] * scale_factor), mode)
 
-    def call(self, inputs):
+    def __call__(self, inputs):
         return self.upsample(inputs)
 
 
@@ -484,7 +502,7 @@ class TFConcat(Layer):
         assert dimension == 1, "convert only NCHW to NHWC concat"
         self.d = 3
 
-    def call(self, inputs):
+    def __call__(self, inputs):
         return tf.concat(inputs, self.d)
 
 
@@ -543,7 +561,7 @@ def parse_model(d, ch, model, imgsz):  # model_dict, input_channels(3)
             c2 = ch[f] // 2
         elif m is ReOrg:
             c2 = ch[f] * 4
-        elif m in [Detect, IDetect, IAuxDetect, IBin, IKeypoint]:
+        elif m in [Detect, IDetect, IAuxDetect]:
             args.append([ch[x + 1] for x in f])
             if isinstance(args[1], int):  # number of anchors
                 args[1] = [list(range(args[1] * 2))] * len(f)
@@ -616,11 +634,6 @@ class TFModel:
                                                             clip_boxes=False)
             return (nms,)
         return x  # output [1,6300,85] = [xywh, conf, class0, class1, ...]
-        # x = x[0]  # [x(1,6300,85), ...] to x(6300,85)
-        # xywh = x[..., :4]  # x(6300,4) boxes
-        # conf = x[..., 4:5]  # x(6300,1) confidences
-        # cls = tf.reshape(tf.cast(tf.argmax(x[..., 5:], axis=1), tf.float32), (-1, 1))  # x(6300,1)  classes
-        # return tf.concat([conf, cls, xywh], 1)
 
     @staticmethod
     def _xywh2xyxy(xywh):

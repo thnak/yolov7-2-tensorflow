@@ -10,8 +10,10 @@ import platform
 MACOS = platform.system() == 'Darwin'  # macOS environment
 
 
-def yaml_save(file='data.yaml', data={}):
+def yaml_save(file='data.yaml', data=None):
     # Single-line safe yaml saving
+    if data is None:
+        data = {}
     with open(file, 'w') as f:
         yaml.safe_dump({k: str(v) if isinstance(v, Path) else v for k, v in data.items()}, f, sort_keys=False)
 
@@ -91,13 +93,9 @@ def export_saved_model(model,
                        keras=False,
                        prefix='TensorFlow SavedModel:'):
     file = Path(file)
-    try:
-        import tensorflow as tf
-    except Exception:
-        check_requirements(f"tensorflow")
-        import tensorflow as tf
+    check_requirements(f"tensorflow")
+    import tensorflow as tf
     from tensorflow.python.framework.convert_to_constants import convert_variables_to_constants_v2
-
     from models.tf import TFModel
 
     print(f'\n{prefix} starting export with tensorflow {tf.__version__}...')

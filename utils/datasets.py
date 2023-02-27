@@ -7,12 +7,12 @@ import random
 import shutil
 import time
 from itertools import repeat
-from multiprocessing.pool import ThreadPool
+from multiprocessing.pool import ThreadPool, Pool
 from pathlib import Path
 from threading import Thread
 from torch.utils.data import DataLoader, Dataset, dataloader, distributed
 from urllib.parse import urlparse
-
+from contextlib import closing
 import cv2
 import numpy as np
 import torch
@@ -21,6 +21,7 @@ import torch.nn.functional as F
 from PIL import Image, ExifTags
 from tqdm.auto import tqdm
 import psutil
+from copy import deepcopy
 # from pycocotools import mask as maskUtils
 # from torchvision.utils import save_image
 # from torchvision.ops import roi_pool, roi_align, ps_roi_pool, ps_roi_align
@@ -546,7 +547,8 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             if self.cache_images:
                 gb = 0  # Gigabytes of cached images
                 self.img_hw0, self.img_hw = [None] * n, [None] * n
-                results = ThreadPool().map(self.load_image, range(n))
+                with closing(Pool(maxtasksperchild=4)) as poolp:
+                    results = poolp.map(self.load_image, range(n), chunksize=int(n//os.cpu_count()))
                 pbar = tqdm(enumerate(results), total=n, mininterval=0.1, maxinterval=1, unit='image',
                             bar_format=TQDM_BAR_FORMAT)
                 checkimgSizeStatus = False
@@ -566,6 +568,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                         gb += self.imgs[i].nbytes
                     pbar.desc = f'{prefix}Caching images {gb2mb(gb)} {self.cache_images.upper()}'
                 pbar.close()
+                results.clear()
 
     def check_cache_ram(self, prefix='', safety_margin=1.5):
         tem = int(self.stride * ((self.img_size / self.stride) - 1))
@@ -739,7 +742,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         else:
             img = img.transpose(2, 0, 1)  # BGR to RGB, to 3x416x416
         img = np.ascontiguousarray(img)
-        return torch.from_numpy(img), labels_out, self.img_files[index], shapes
+        return deepcopy(torch.from_numpy(img)), deepcopy(labels_out), deepcopy(self.img_files[index]), deepcopy(shapes)
 
     @staticmethod
     def collate_fn(batch):
