@@ -29,7 +29,7 @@ seaborn==0.12.2
 # Export --------------------------------------
 
 coremltools==6.1  # CoreML export
-onnx==1.12.0  # ONNX export
+onnx==1.13.0  # ONNX export
 onnxsim==0.4.13
 onnxmltools==1.11.1
 onnx_tf==1.10.0
