@@ -63,9 +63,17 @@ def test(data,
         (save_dir / 'labels' if save_txt else save_dir).mkdir(parents=True, exist_ok=True)  # make dir
         # Load model
         map_device = 'cpu' if device.type == 'privateuseone' else device
+        ckpt = torch.load(weights, map_location=map_device)
+        input_shape = max(ckpt['input_shape']) if 'input_shape' in ckpt else imgsz
+        del ckpt
+        input_shape = input_shape if isinstance(input_shape, (list, tuple)) else [input_shape] * 3
+        single_channel = input_shape[0] == 1
+        input_shape = input_shape[1:]
         model = attempt_load(weights, map_location=map_device).to(device)  # load FP32 model
         gs = max(int(model.stride.max()), 32)  # grid size (max stride)
-        imgsz = check_img_size(imgsz, s=gs)  # check img_size
+        imgsz = [check_img_size(x, s=gs) for x in input_shape]  # HW
+        model.info(verbose=True, img_size=imgsz, single_channel=single_channel)
+        imgsz = max(imgsz)
         if trace:
             model = TracedModel(model, device, imgsz, saveTrace=False, single_channel=single_channel)
 

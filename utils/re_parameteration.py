@@ -23,11 +23,12 @@ def Re_parameterization(inputWeightPath='v7-tiny-training.pt',
             cfg['head'] = cfg['head_deploy']
             cfg.pop('head_deploy', None)
         model = Model(cfg, ch=3, nc=nc).to(device).float()
-
+        imgsz = ckpt['input_shape']
+        model.info(verbose=True, img_size=imgsz[1:], single_channel=imgsz[0] == 1)
         if not p5_model:
-            print(f'{prefix} P6 model: {model_named[nodes]}')
+            print(f'{prefix}P6 model: {model_named[nodes]}')
         else:
-            print(f'{prefix} P5 model: {model_named[nodes]}')
+            print(f'{prefix}P5 model: {model_named[nodes]}')
         anchors = len(ckpt['model'].model[-1].anchor_grid.squeeze()[0])
         # d6:: 166, e6:: 144, e6e:: 265, x:: 122
         state_dict = ckpt['model'].to(device).float().state_dict()

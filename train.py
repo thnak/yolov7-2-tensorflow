@@ -2,6 +2,7 @@ import argparse
 import logging
 import math
 import os
+import platform
 import random
 import csv
 import subprocess
@@ -141,6 +142,10 @@ def train(hyp, opt, tb_writer=None,
                       nc=nc,
                       anchors=hyp.get('anchors')).to(device)  # create
     p5_model = model.is_p5()
+    gs = max(int(model.stride.max()), 32)  # grid size (max stride)
+    imgsz, imgsz_test = [check_img_size(x, gs) for x in opt.img_size]
+    model.info(verbose=True, img_size=imgsz, rect=opt.rect, single_channel=opt.single_channel)
+    logger.info('')
     with torch_distributed_zero_first(rank):
         check_dataset(data_dict)  # check
     train_path = data_dict['train']
@@ -163,7 +168,6 @@ def train(hyp, opt, tb_writer=None,
     accumulate = max(round(nbs / total_batch_size), 1)
     hyp['weight_decay'] *= total_batch_size * \
                            accumulate / nbs  # scale weight_decay
-    logger.info(f"Scaled weight_decay = {hyp['weight_decay']}")
     optimizer = smart_optimizer(model, opt.optimizer,
                                 lr=hyp['lr0'],
                                 decay=hyp['weight_decay'],
@@ -204,12 +208,8 @@ def train(hyp, opt, tb_writer=None,
             epochs += ckpt['epoch']  # finetune additional epochs
         del ckpt, state_dict, nodes, freeze
 
-    # Image sizes
-    gs = max(int(model.stride.max()), 32)  # grid size (max stride)
     # number of detection layers (used for scaling hyp['obj'])
     nl = model.model[-1].nl
-    # verify imgsz are gs-multiples
-    imgsz, imgsz_test = [check_img_size(x, gs) for x in opt.img_size]
 
     # DP mode
     if cuda and rank == -1 and torch.cuda.device_count() > 1:
@@ -364,6 +364,7 @@ def train(hyp, opt, tb_writer=None,
                         bar_format=TQDM_BAR_FORMAT)  # progress bar
 
         # batch -------------------------------------------------------------
+        optimizer.zero_grad()
         for i, (imgs, targets, paths, _) in pbar:
             del _
             # number integrated batches (since train start)
@@ -399,7 +400,6 @@ def train(hyp, opt, tb_writer=None,
             # Forward
             with autocast(enabled=True if device.type in ['cpu', 'cuda'] else False,
                           device_type='cuda' if device.type == 'cuda' else 'cpu'):
-                optimizer.zero_grad()
                 pred = model(imgs)  # forward
                 if 'loss_ota' not in hyp or hyp['loss_ota'] == 1:
                     loss, loss_items = compute_loss_ota([pre.to(map_device, non_blocking=True) for pre in pred],
@@ -688,8 +688,7 @@ if __name__ == '__main__':
     set_logging(opt.global_rank)
     opt.epochs = 300 if opt.epochs < 1 else opt.epochs
     # if opt.global_rank in [-1, 0]:
-    #     check_git_status()
-    #     check_requirements()
+    #     check_requirements('torch-directml' if platform.system() == 'Windows' else 'torch')
 
     # Resume
     wandb_run = check_wandb_resume(opt)
@@ -738,8 +737,7 @@ if __name__ == '__main__':
                 assert opt.tensorboard, 'not using Tensorboard'
                 tb_writer = SummaryWriter(opt.save_dir)  # Tensorboard
                 tensorboard_lauch = threading.Thread(target=lambda: os.system(f'tensorboard --bind_all --logdir {opt.project}'), daemon=True).start()
-                logger.info(
-                    f"{prefix}Starting...")
+                logger.info(f"{prefix}Starting...")
             except Exception as ex:
                 tb_writer = None
                 logger.warning(f'{prefix}Init error, {ex}')
@@ -812,7 +810,7 @@ if __name__ == '__main__':
                     if k in meta:
                         try:
                             hyp[k] = float(x[i + 7] * v[i])  # mutate
-                        except:
+                        except Exception:
                             pass
             # Constrain to limits
             hyp_ = meta.copy()
