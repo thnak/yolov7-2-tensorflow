@@ -84,7 +84,7 @@ if __name__ == '__main__':
         model_Gflop = model.info()
         gs = int(max(model.stride.max(), 32))  # grid size (max stride)
 
-        input_shape = ckpt['input_shape'] if 'input_shape' in ckpt else [3, 640, 640]
+        input_shape = ckpt['input_shape'] if 'input_shape' in ckpt else ([3, 640, 640] if model.is_p5() else [3, 1280, 1280])
         img = torch.zeros(opt.batch_size, *input_shape, device=map_device)
         model.eval()
         if device.type in ['cuda'] and opt.fp16:
@@ -104,9 +104,7 @@ if __name__ == '__main__':
                     m.act = Hardswish()
                 elif isinstance(m.act, nn.SiLU):
                     m.act = SiLU()
-                elif isinstance(m, (
-                        models.yolo.Detect, models.yolo.IDetect, models.yolo.IKeypoint, models.yolo.IAuxDetect,
-                        models.yolo.IBin)):
+                elif isinstance(m, (models.yolo.Detect, models.yolo.IDetect, models.yolo.IAuxDetect)):
                     m.dynamic = opt.dynamic
 
         model.model[-1].export = False  # set Detect() layer grid export

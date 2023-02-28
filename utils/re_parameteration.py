@@ -16,10 +16,14 @@ def Re_parameterization(inputWeightPath='v7-tiny-training.pt',
     if os.path.exists(inputWeightPath):
         ckpt = torch.load(inputWeightPath, map_location=device)
         nc = ckpt['model'].nc
-        model_recfg = eval(str(ckpt['model'].yaml).replace('IDetect', 'Detect').replace('IAuxDetect', 'Detect'))
-        model = Model(model_recfg, ch=3, nc=nc).to(device).float()
-        p5_model = model.is_p5()
-        nodes = model.num_nodes()
+        p5_model = ckpt['model'].is_p5()
+        nodes = ckpt['model'].num_nodes()
+        cfg = eval(str(ckpt['model'].yaml).replace('IDetect', 'Detect'))
+        if 'head_deploy' in cfg:
+            cfg['head'] = cfg['head_deploy']
+            cfg.pop('head_deploy', None)
+        model = Model(cfg, ch=3, nc=nc).to(device).float()
+
         if not p5_model:
             print(f'{prefix} P6 model: {model_named[nodes]}')
         else:

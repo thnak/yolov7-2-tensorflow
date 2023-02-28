@@ -482,24 +482,6 @@ class Model(nn.Module):
             self.stride = m.stride
             self._initialize_aux_biases()  # only run once
             # print('Strides: %s' % m.stride.tolist())
-        if isinstance(m, IBin):
-            s = 256  # 2x min stride
-            m.stride = torch.tensor(
-                [s / x.shape[-2] for x in self.forward(torch.zeros(1, ch, s, s))])  # forward
-            check_anchor_order(m)
-            m.anchors /= m.stride.view(-1, 1, 1)
-            self.stride = m.stride
-            self._initialize_biases_bin()  # only run once
-            # print('Strides: %s' % m.stride.tolist())
-        if isinstance(m, IKeypoint):
-            s = 256  # 2x min stride
-            m.stride = torch.tensor(
-                [s / x.shape[-2] for x in self.forward(torch.zeros(1, ch, s, s))])  # forward
-            check_anchor_order(m)
-            m.anchors /= m.stride.view(-1, 1, 1)
-            self.stride = m.stride
-            self._initialize_biases_kpt()  # only run once
-            # print('Strides: %s' % m.stride.tolist())
 
         # Init weights, biases
         initialize_weights(self)
@@ -537,12 +519,11 @@ class Model(nn.Module):
                 self.traced = False
 
             if self.traced:
-                if isinstance(m, Detect) or isinstance(m, IDetect) or isinstance(m, IAuxDetect) or isinstance(m,
-                                                                                                              IKeypoint):
+                if isinstance(m, Detect) or isinstance(m, IDetect) or isinstance(m, IAuxDetect):
                     break
 
             if profile:
-                c = isinstance(m, (Detect, IDetect, IAuxDetect, IBin))
+                c = isinstance(m, (Detect, IDetect, IAuxDetect))
                 o = thop.profile(m, inputs=(x.copy() if c else x,), verbose=False)[
                         0] / 1E9 * 2 if thop else 0  # FLOPS
                 for _ in range(10):
@@ -1344,7 +1325,7 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
             c2 = ch[f[0]]
         elif m is Foldcut:
             c2 = ch[f] // 2
-        elif m in [Detect, IDetect, IAuxDetect, IBin, IKeypoint]:
+        elif m in [Detect, IDetect, IAuxDetect]:
             args.append([ch[x] for x in f])
             if isinstance(args[1], int):  # number of anchors
                 args[1] = [list(range(args[1] * 2))] * len(f)

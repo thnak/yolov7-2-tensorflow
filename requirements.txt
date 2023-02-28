@@ -35,8 +35,8 @@ onnxmltools==1.11.1
 onnx_tf==1.10.0
 onnx-simplifier==0.4.13 # ONNX simplifier
 scikit-learn<=1.1.2  # CoreML quantization
-tensorflow==2.11.0  # TFLite export
-tensorflowjs>=3.9.0  # TF.js export
+#tensorflow==2.11.0  # TFLite export
+#tensorflowjs>=3.9.0  # TF.js export
 openvino-dev==2022.3.0 # OpenVINO export
 
 # Extras --------------------------------------

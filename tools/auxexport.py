@@ -134,7 +134,7 @@ def export_tflite(keras_model, im, file, int8, data=None, nms=False, agnostic_nm
 
     print(f'\n{prefix} starting export with tensorflow {tf.__version__}...')
     batch_size, ch, *imgsz = list(im.shape)  # BCHW
-    f = str(file).replace('.pt', '-fp16.tflite')
+    f = str(file).replace('.pt', '-fp32 .tflite')
 
     converter = tf.lite.TFLiteConverter.from_keras_model(keras_model)
     converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS]
@@ -171,7 +171,7 @@ def add_tflite_metadata(file, metadata, num_outputs):
     # Add metadata to *.tflite models per https://www.tensorflow.org/lite/models/convert/metadata
     import contextlib
     with contextlib.suppress(ImportError):
-        check_requirements('tflite_support')
+        check_requirements('tflite-support')
         from tflite_support import flatbuffers
         from tflite_support import metadata as _metadata
         from tflite_support import metadata_schema_py_generated as _metadata_fb

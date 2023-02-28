@@ -236,7 +236,7 @@ class TFDownC(Layer):
         # self.mp = nn.MaxPool2d(kernel_size=k, stride=k)
         self.mp = keras.layers.MaxPool2D(k, k, padding='VALID')
 
-    def forward(self, x):
+    def __call__(self, x):
         return tf.concat((self.cv2(self.cv1(x)), self.cv3(self.mp(x))), 3)
 
 
