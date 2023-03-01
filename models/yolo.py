@@ -610,10 +610,10 @@ class Model(nn.Module):
             print(('%6g Conv2d.bias:' + '%10.3g' * 6) %
                   (mi.weight.shape[1], *b[:5].mean(1).tolist(), b[5:].mean()))
 
-    # def _print_weights(self):
-    #     for m in self.model.modules():
-    #         if type(m) is Bottleneck:
-    #             print('%10.3g' % (m.w.detach().sigmoid() * 2))  # shortcut weights
+    def _print_weights(self):
+        for m in self.model.modules():
+            if type(m) is Bottleneck:
+                print('%10.3g' % (m.w.detach().sigmoid() * 2))  # shortcut weights
 
     def fuse(self):  # fuse model Conv2d() + BatchNorm2d() layers
         print('Fusing layers... ')
@@ -1328,6 +1328,8 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
                 args[1] = [list(range(args[1] * 2))] * len(f)
         elif m is ReOrg:
             c2 = ch[f] * 4
+        elif m is ReOrg2:
+            c2 = ch[f] * 16
         elif m is Contract:
             c2 = ch[f] * args[0] ** 2
         elif m is Expand:

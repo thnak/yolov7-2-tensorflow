@@ -43,12 +43,27 @@ class SP(nn.Module):
         return self.m(x)
 
 
+def ReOrg_slice(out):
+    out = torch.cat([out[:, :, ::2, ::2], out[:, :, 1::2, ::2], out[:, :, ::2, 1::2], out[:, :, 1::2, 1::2]], 1)
+    return out
+
+
 class ReOrg(nn.Module):
     def __init__(self):
         super(ReOrg, self).__init__()
 
     def forward(self, x):  # x(b,c,w,h) -> y(b,4c,w/2,h/2)
-        out = torch.cat([x[:, :, ::2, ::2], x[:, :, 1::2, ::2], x[:, :, ::2, 1::2], x[:, :, 1::2, 1::2]], 1)
+        out = ReOrg_slice(x)
+        return out
+
+
+class ReOrg2(nn.Module):
+    def __init__(self):
+        super(ReOrg2, self).__init__()
+
+    def forward(self, x):  # x(b,c,w,h) -> y(b,4c,w/2,h/2)
+        out = ReOrg_slice(x)
+        out = ReOrg_slice(out)
         return out
 
 

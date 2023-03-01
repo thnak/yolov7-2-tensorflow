@@ -129,7 +129,7 @@ def train(hyp, opt, tb_writer=None,
         ckpt['best_fitness'] = ckpt['best_fitness'].tolist()[0] if isinstance(ckpt['best_fitness'], np.ndarray) else \
             ckpt['best_fitness']
         model_version = ckpt['model_version'] if 'model_version' in ckpt else 0
-        logger.info('Transferred %g/%g items from: %s, best fitness: %s, version: %s' % (
+        logger.info('Transferred %g/%g items from: %s, best fitness: %s, version: %s\n' % (
             len(state_dict), len(model.state_dict()), weights, ckpt['best_fitness'],
             model_version if (model_version != 0 and not opt.resume) else 'Init new model'))  # report
         nodes = len(ckpt['model'].yaml['head']) + len(ckpt['model'].yaml['backbone']) - 1
@@ -616,9 +616,10 @@ def train(hyp, opt, tb_writer=None,
                                                       'deploy_best.pt')
                     # try:
                     #     if opt.evolve <= 1:
-                    Re_parameterization(inputWeightPath=str(f),
-                                                outputWeightPath=output_path,
-                                                device=map_device)
+                    with torch.no_grad():
+                        Re_parameterization(inputWeightPath=str(f),
+                                            outputWeightPath=output_path,
+                                            device=map_device)
                     # except Exception as ex:
                     #     prefix = colorstr('reparamater: ')
                     #     logging.error(f'{prefix}{ex}')
