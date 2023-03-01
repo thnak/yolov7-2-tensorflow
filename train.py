@@ -614,15 +614,14 @@ def train(hyp, opt, tb_writer=None,
                     output_path = str(f)
                     output_path = output_path.replace('best.pt',
                                                       'deploy_best.pt')
-                    # try:
-                    #     if opt.evolve <= 1:
-                    with torch.no_grad():
-                        Re_parameterization(inputWeightPath=str(f),
-                                            outputWeightPath=output_path,
-                                            device=map_device)
-                    # except Exception as ex:
-                    #     prefix = colorstr('reparamater: ')
-                    #     logging.error(f'{prefix}{ex}')
+                    try:
+                        if opt.evolve <= 1:
+                            Re_parameterization(inputWeightPath=str(f),
+                                                outputWeightPath=output_path,
+                                                device=map_device)
+                    except Exception as ex:
+                        prefix = colorstr('reparamater: ')
+                        logging.error(f'{prefix}{ex}')
         if opt.bucket:
             os.system(f'gsutil cp {final} gs://{opt.bucket}/weights')  # upload
         if wandb_logger.wandb and opt.evolve <= 1:  # Log the stripped model

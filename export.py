@@ -76,6 +76,8 @@ if __name__ == '__main__':
             ckpt = torch.load(weight, map_location=map_device)
             ckpt.pop('model', None)
             model.eval()
+            for param in model.parameters():
+                param.grad = None
 
         ckpt['best_fitness'] = ckpt['best_fitness'] if 'best_fitness' in ckpt else -1
         ckpt['best_fitness'] = ckpt['best_fitness'].tolist()[0] if isinstance(ckpt['best_fitness'], np.ndarray) else \
@@ -90,8 +92,6 @@ if __name__ == '__main__':
 
         input_shape = ckpt['input_shape'] if 'input_shape' in ckpt else ([3, 640, 640] if model.is_p5() else [3, 1280, 1280])
         img = torch.zeros(opt.batch_size, *input_shape, device=map_device)
-        model_Gflop = model.info(verbose=False, img_size=input_shape[1:], single_channel=input_shape[0] == 1)
-        logging.info(model_Gflop)
 
         if device.type in ['cuda'] and opt.fp16:
             img, model = img.half(), model.half()
@@ -111,6 +111,9 @@ if __name__ == '__main__':
 
         model.model[-1].export = False  # set Detect() layer grid export
         y = model(img)  # dry run
+
+        model_Gflop = model.info(verbose=False, img_size=input_shape[1:], single_channel=input_shape[0] == 1)
+        logging.info(model_Gflop)
 
         # model output shape
         shape = tuple((y[0] if isinstance(y, tuple) else y).shape)

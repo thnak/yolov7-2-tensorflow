@@ -9,7 +9,7 @@ anchors:
   - [ 96,68,  86,152,  180,137 ]  # P4/16
   - [ 140,301,  303,264,  238,542 ]  # P5/32
   - [ 436,615,  739,380,  925,792 ]  # P6/64
-
+p5: False
 # yolov7 backbone
 backbone:
   # [from, number, module, args]

@@ -340,7 +340,7 @@ def model_info(model, verbose=False, img_size=640, verbose2=False, rect=False, s
     except Exception as ex:
         fs = '? GFLOPS'
         print(colored(f"{ex}", 'red'))
-    fs = f"{colorstr('Model Summary:')} {len(list(model.modules())):,} layers; {n_p:,} parameters; {n_g:,} gradients; {fs}"
+    fs = f"{colorstr('Model Summary:')} {'P5' if model.is_p5() else 'P6'} with {len(list(model.modules())):,} layers; {n_p:,} parameters; {n_g:,} gradients; {fs}"
     if verbose:
         logger.info(fs)
     return fs

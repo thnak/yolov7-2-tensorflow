@@ -660,7 +660,10 @@ class Model(nn.Module):
     def is_p5(self, nodes=None):
         if not nodes:
             nodes = len(self.yaml['backbone']) + len(self.yaml['head']) - 1
-        return nodes in [77, 105, 121]
+        if 'p5' in self.yaml:
+            return eval(self.yaml['p5']) if isinstance(self.yaml['p5'], str) else self.yaml['p5']
+        out = nodes in [77, 105, 121]
+        return out
 
     def num_nodes(self):
         return len(self.yaml['backbone']) + len(self.yaml['head']) - 1
@@ -1327,16 +1330,14 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
             if isinstance(args[1], int):  # number of anchors
                 args[1] = [list(range(args[1] * 2))] * len(f)
         elif m is ReOrg:
-            c2 = ch[f] * 4
-        elif m is ReOrg2:
-            c2 = ch[f] * 16
+            c2 = ch[f] * 4**args[0]
         elif m is Contract:
             c2 = ch[f] * args[0] ** 2
         elif m is Expand:
             c2 = ch[f] // args[0] ** 2
         else:
             c2 = ch[f]
-
+        # assert c2 < 1024, f'torch 1.13.1 max channel size is 1024, yours {torch.__version__}'
         m_ = nn.Sequential(*[m(*args) for _ in range(n)]) if n > 1 else m(*args)  # module
         t = str(m)[8:-2].replace('__main__.', '')  # module type
         nparam = sum([x.numel() for x in m_.parameters()])  # number params

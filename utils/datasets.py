@@ -591,7 +591,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                     total=len(self.img_files),
                     mininterval=0.05,
                     maxinterval=1,
-                    unit='image',
+                    unit='obj',
                     bar_format=TQDM_BAR_FORMAT)
         for i, (im_file, lb_file) in enumerate(pbar):
             try:
