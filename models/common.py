@@ -43,12 +43,22 @@ class SP(nn.Module):
         return self.m(x)
 
 
+def ReOrg_slice(out):
+    return torch.cat([out[:, :, ::2, ::2], out[:, :, 1::2, ::2], out[:, :, ::2, 1::2], out[:, :, 1::2, 1::2]], 1)
+
+
 class ReOrg(nn.Module):
+    """https://arxiv.org/pdf/2101.00745.pdf"""
     def __init__(self):
         super(ReOrg, self).__init__()
 
+<<<<<<< HEAD
+    def forward(self, out):  # x(b,c,w,h) -> y(b,4c,w/2,h/2)
+        out = ReOrg_slice(out)
+=======
     def forward(self, x):  # x(b,c,w,h) -> y(b,4c,w/2,h/2)
-        out = torch.cat([x[:, :, ::2, ::2], x[:, :, 1::2, ::2], x[:, :, ::2, 1::2], x[:, :, 1::2, 1::2]], 1)
+        out = torch.cat([x[..., ::2, ::2], x[..., 1::2, ::2], x[..., ::2, 1::2], x[..., 1::2, 1::2]], 1)
+>>>>>>> parent of b81891f (summary real compute model flops, update re-paramater.py, add tfjs for P6 model)
         return out
 
 
@@ -214,7 +224,7 @@ class SPP(nn.Module):
 class Bottleneck(nn.Module):
     # Standard bottleneck
     def __init__(self, c1, c2, shortcut=True, g=1, k=(3, 3), e=0.5):  # ch_in, ch_out, shortcut, groups, kernels, expand
-        super(Bottleneck, self).__init__()
+        super().__init__()
         c_ = int(c2 * e)  # hidden channels
         self.cv1 = Conv(c1, c_, k[0], 1)
         self.cv2 = Conv(c_, c2, k[1], 1, g=g)
@@ -994,7 +1004,7 @@ class BottleneckCSP(nn.Module):
     """CSP Bottleneck https://github.com/WongKinYiu/CrossStagePartialNetworks"""
 
     def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5):  # ch_in, ch_out, number, shortcut, groups, expansion
-        super(BottleneckCSP, self).__init__()
+        super().__init__()
         c_ = int(c2 * e)  # hidden channels
         self.cv1 = Conv(c1, c_, 1, 1)
         self.cv2 = nn.Conv2d(c1, c_, 1, 1, bias=False)
@@ -1019,7 +1029,7 @@ class Focus(nn.Module):
         # self.contract = Contract(gain=2)
 
     def forward(self, x):  # x(b,c,w,h) -> y(b,4c,w/2,h/2)
-        return self.conv(torch.cat([x[:, :, ::2, ::2], x[:, :, 1::2, ::2], x[:, :, ::2, 1::2], x[:, :, 1::2, 1::2]], 1))
+        return self.conv(torch.cat([x[..., ::2, ::2], x[..., 1::2, ::2], x[..., ::2, 1::2], x[..., 1::2, 1::2]], 1))
         # return self.conv(self.contract(x))
 
 

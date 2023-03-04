@@ -27,7 +27,7 @@ from copy import deepcopy
 # from torchvision.ops import roi_pool, roi_align, ps_roi_pool, ps_roi_align
 
 from utils.general import check_requirements, xyxy2xywh, xywh2xyxy, xywhn2xyxy, xyn2xy, segment2box, segments2boxes, \
-    resample_segments, clean_str, colorstr, TQDM_BAR_FORMAT
+    resample_segments, clean_str, colorstr, TQDM_BAR_FORMAT, gb2mb
 from utils.torch_utils import torch_distributed_zero_first
 from termcolor import colored
 
@@ -418,11 +418,6 @@ def img2label_paths(img_paths):
     return ['txt'.join(x.replace(sa, sb, 1).rsplit(x.split('.')[-1], 1)) for x in img_paths]
 
 
-def gb2mb(inp0):
-    value = round(inp0 / 1E9, 3)
-    return f'{value}GB' if value > 1 else f'{value * 1000}MB'
-
-
 class LoadImagesAndLabels(Dataset):  # for training/testing
     version = 0.1
     image_8bit = True
@@ -591,7 +586,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                     total=len(self.img_files),
                     mininterval=0.05,
                     maxinterval=1,
-                    unit='image',
+                    unit='obj',
                     bar_format=TQDM_BAR_FORMAT)
         for i, (im_file, lb_file) in enumerate(pbar):
             try:

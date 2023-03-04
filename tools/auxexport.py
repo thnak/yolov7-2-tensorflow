@@ -102,7 +102,7 @@ def export_saved_model(model,
     f = str(file).replace('.pt', '_saved_model')
     batch_size, ch, *imgsz = list(im.shape)  # BCHW
 
-    tf_model = TFModel(cfg=model.yaml, model=model.cpu(), nc=len(model.names), imgsz=imgsz)
+    tf_model = TFModel(cfg=model['model'].yaml, model=model['model'].cpu(), nc=len(model['model'].names), imgsz=imgsz)
     im = tf.zeros((batch_size, *imgsz, ch))  # BHWC order for TensorFlow
     _ = tf_model.predict(im, tf_nms, agnostic_nms, topk_per_class, topk_all, iou_thres, conf_thres)
     inputs = tf.keras.Input(shape=(*imgsz, ch), batch_size=None if dynamic else batch_size)
@@ -134,7 +134,7 @@ def export_tflite(keras_model, im, file, int8, data=None, nms=False, agnostic_nm
 
     print(f'\n{prefix} starting export with tensorflow {tf.__version__}...')
     batch_size, ch, *imgsz = list(im.shape)  # BCHW
-    f = str(file).replace('.pt', '-fp32 .tflite')
+    f = str(file).replace('.pt', '-fp32.tflite')
 
     converter = tf.lite.TFLiteConverter.from_keras_model(keras_model)
     converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS]

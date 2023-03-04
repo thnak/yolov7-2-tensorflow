@@ -71,7 +71,6 @@ class TFShortcut(Layer):
 
     def __call__(self, x):
         return x[0] + x[1]
-# [80, [[19, 27, 44, 40, 38, 94], [96, 68, 86, 152, 180, 137], [140, 301, 303, 264, 238, 542], [436, 615, 739, 380, 925, 792]], [256, 512, 768, 1024, 320, 640, 960, 1280]]
 
 
 class TFRepConv(Layer):
@@ -136,22 +135,25 @@ class TFSPPCSPC(Layer):
         return self.cv7(tf.concat((y1, y2), 3))
 
 
+def ReOrg_slice(inputs):
+    return tf.concat([inputs[:, ::2, ::2, :],
+                         inputs[:, 1::2, ::2, :],
+                         inputs[:, ::2, 1::2, :],
+                         inputs[:, 1::2, 1::2, :]], 3)
+
 class TFReOrg(Layer):
     def __init__(self, w=None):
         super(TFReOrg, self).__init__()
 
-    def __call__(self, inputs):  # inputs(b,c,w,h) -> y(b,4c,w/2,h/2)
-        out = tf.concat([inputs[:, ::2, ::2, :],
-                         inputs[:, 1::2, ::2, :],
-                         inputs[:, ::2, 1::2, :],
-                         inputs[:, 1::2, 1::2, :]], 3)
+    def __call__(self, out):  # inputs(b,c,w,h) -> y(b,4c,w/2,h/2)
+        out = ReOrg_slice(out)
         return out
 
 
 class TFBN(Layer):
     # TensorFlow BatchNormalization wrapper
     def __init__(self, w=None):
-        super(TFBN, self).__init__()
+        super().__init__()
         self.bn = keras.layers.BatchNormalization(
             beta_initializer=keras.initializers.Constant(w.bias.cpu().detach().numpy()),
             gamma_initializer=keras.initializers.Constant(w.weight.cpu().detach().numpy()),
@@ -184,7 +186,7 @@ class TFSP(Layer):
 class TFPad(Layer):
     # Pad inputs in spatial dimensions 1 and 2
     def __init__(self, pad):
-        super(TFPad, self).__init__()
+        super().__init__()
         if isinstance(pad, int):
             self.pad = tf.constant([[0, 0], [pad, pad], [pad, pad], [0, 0]])
         else:  # tuple/list
@@ -198,7 +200,7 @@ class TFConv(Layer):
     # Standard convolution
     def __init__(self, c1, c2, k=1, s=1, p=None, g=1, act=True, w=None):
         # ch_in, ch_out, weights, kernel, stride, padding, groups
-        super(TFConv, self).__init__()
+        super().__init__()
         # TensorFlow convolution padding is inconsistent with PyTorch (e.g. k=3 s=2 'SAME' padding)
         # see https://stackoverflow.com/questions/52975843/comparing-conv2d-with-padding-between-tensorflow-and-pytorch
         conv = keras.layers.Conv2D(
@@ -245,7 +247,7 @@ class TFDWConv(Layer):
 
     def __init__(self, c1, c2, k=1, s=1, p=None, act=True, w=None):
         # ch_in, ch_out, weights, kernel, stride, padding, groups
-        super(TFDWConv, self).__init__()
+        super().__init__()
         assert c2 % c1 == 0, f'TFDWConv() output={c2} must be a multiple of input={c1} channels'
         conv = keras.layers.DepthwiseConv2D(
             kernel_size=k,
@@ -267,7 +269,7 @@ class TFDWConvTranspose2d(Layer):
     # Depthwise ConvTranspose2d
     def __init__(self, c1, c2, k=1, s=1, p1=0, p2=0, w=None):
         # ch_in, ch_out, weights, kernel, stride, padding, groups
-        super(TFDWConvTranspose2d, self).__init__()
+        super().__init__()
         assert c1 == c2, f'TFDWConv() output={c2} must be equal to input={c1} channels'
         assert k == 4 and p1 == 1, 'TFDWConv() only valid for k=4 and p1=1'
         weight, bias = w.weight.permute(2, 3, 1, 0).detach().numpy(), w.bias.detach().numpy()
@@ -290,7 +292,7 @@ class TFFocus(Layer):
     # Focus wh information into c-space
     def __init__(self, c1, c2, k=1, s=1, p=None, g=1, act=True, w=None):
         # ch_in, ch_out, kernel, stride, padding, groups
-        super(TFFocus, self).__init__()
+        super().__init__()
         self.conv = TFConv(c1 * 4, c2, k, s, p, g, act, w.conv)
 
     def __call__(self, inputs):  # x(b,w,h,c) -> y(b,w/2,h/2,4c)
@@ -302,7 +304,7 @@ class TFFocus(Layer):
 class TFBottleneck(Layer):
     # Standard bottleneck
     def __init__(self, c1, c2, shortcut=True, g=1, e=0.5, w=None):  # ch_in, ch_out, shortcut, groups, expansion
-        super(TFBottleneck, self).__init__()
+        super().__init__()
         c_ = int(c2 * e)  # hidden channels
         self.cv1 = TFConv(c1, c_, 1, 1, w=w.cv1)
         self.cv2 = TFConv(c_, c2, 3, 1, g=g, w=w.cv2)
@@ -315,7 +317,7 @@ class TFBottleneck(Layer):
 class TFCrossConv(Layer):
     # Cross Convolution
     def __init__(self, c1, c2, k=3, s=1, g=1, e=1.0, shortcut=False, w=None):
-        super(TFCrossConv, self).__init__()
+        super().__init__()
         c_ = int(c2 * e)  # hidden channels
         self.cv1 = TFConv(c1, c_, (1, k), (1, s), w=w.cv1)
         self.cv2 = TFConv(c_, c2, (k, 1), (s, 1), g=g, w=w.cv2)
@@ -328,7 +330,7 @@ class TFCrossConv(Layer):
 class TFConv2d(Layer):
     # Substitution for PyTorch nn.Conv2D
     def __init__(self, c1, c2, k=1, s=1, g=1, bias=True, w=None):
-        super(TFConv2d, self).__init__()
+        super().__init__()
         assert g == 1, "TF v2.2 Conv2D does not support 'groups' argument"
         self.conv = keras.layers.Conv2D(filters=c2,
                                         kernel_size=k,
@@ -348,7 +350,7 @@ class TFBottleneckCSP(Layer):
     # CSP Bottleneck https://github.com/WongKinYiu/CrossStagePartialNetworks
     def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5, w=None):
         # ch_in, ch_out, number, shortcut, groups, expansion
-        super(TFBottleneckCSP, self).__init__()
+        super().__init__()
         c_ = int(c2 * e)  # hidden channels
         self.cv1 = TFConv(c1, c_, 1, 1, w=w.cv1)
         self.cv2 = TFConv2d(c1, c_, 1, 1, bias=False, w=w.cv2)
@@ -368,7 +370,7 @@ class TFC3(Layer):
     # CSP Bottleneck with 3 convolutions
     def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5, w=None):
         # ch_in, ch_out, number, shortcut, groups, expansion
-        super(TFC3, self).__init__()
+        super().__init__()
         c_ = int(c2 * e)  # hidden channels
         self.cv1 = TFConv(c1, c_, 1, 1, w=w.cv1)
         self.cv2 = TFConv(c1, c_, 1, 1, w=w.cv2)
@@ -383,7 +385,7 @@ class TFC3x(Layer):
     # 3 module with cross-convolutions
     def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5, w=None):
         # ch_in, ch_out, number, shortcut, groups, expansion
-        super(TFC3x, self).__init__()
+        super().__init__()
         c_ = int(c2 * e)  # hidden channels
         self.cv1 = TFConv(c1, c_, 1, 1, w=w.cv1)
         self.cv2 = TFConv(c1, c_, 1, 1, w=w.cv2)
@@ -398,7 +400,7 @@ class TFC3x(Layer):
 class TFSPP(Layer):
     # Spatial pyramid pooling layer used in YOLOv3-SPP
     def __init__(self, c1, c2, k=(5, 9, 13), w=None):
-        super(TFSPP, self).__init__()
+        super().__init__()
         c_ = c1 // 2  # hidden channels
         self.cv1 = TFConv(c1, c_, 1, 1, w=w.cv1)
         self.cv2 = TFConv(c_ * (len(k) + 1), c2, 1, 1, w=w.cv2)
@@ -412,7 +414,7 @@ class TFSPP(Layer):
 class TFSPPF(Layer):
     # Spatial pyramid pooling-Fast layer
     def __init__(self, c1, c2, k=5, w=None):
-        super(TFSPPF, self).__init__()
+        super().__init__()
         c_ = c1 // 2  # hidden channels
         self.cv1 = TFConv(c1, c_, 1, 1, w=w.cv1)
         self.cv2 = TFConv(c_ * 4, c2, 1, 1, w=w.cv2)
@@ -427,7 +429,7 @@ class TFSPPF(Layer):
 
 class TFDetect(Layer):
     def __init__(self, nc=80, anchors=(), ch=(), imgsz=(640, 640), w=None):  # detection layer
-        super(TFDetect, self).__init__()
+        super().__init__()
         self.stride = tf.convert_to_tensor(w.stride.detach().cpu().numpy(), dtype=tf.float32)
         self.nc = nc  # number of classes
         self.no = nc + 5  # number of outputs per anchor
@@ -459,8 +461,8 @@ class TFDetect(Layer):
                 xy = (y[..., 0:2] * 2. + grid) * self.stride[i]  # xy
                 wh = y[..., 2:4] ** 2 * anchor_grid  # wh
                 # Normalize xywh to 0-1 to reduce calibration error
-                xy /= tf.constant([*self.imgsz], dtype=tf.float32)
-                wh /= tf.constant([*self.imgsz], dtype=tf.float32)
+                xy /= tf.constant([[self.imgsz[1], self.imgsz[0]]], dtype=tf.float32)
+                wh /= tf.constant([[self.imgsz[1], self.imgsz[0]]], dtype=tf.float32)
                 y = tf.concat([xy, wh, y[..., 4:5 + self.nc], y[..., 5 + self.nc:]], -1)
                 z.append(tf.reshape(y, [-1, self.na * nx * ny, self.no]))
         return tf.transpose(x, [0, 2, 1, 3]) if self.training else (tf.concat(z, 1),)
@@ -474,7 +476,7 @@ class TFDetect(Layer):
 class TFProto(Layer):
 
     def __init__(self, c1, c_=256, c2=32, w=None):
-        super(TFProto, self).__init__()
+        super().__init__()
         self.cv1 = TFConv(c1, c_, k=3, w=w.cv1)
         self.upsample = TFUpsample(None, scale_factor=2, mode='nearest')
         self.cv2 = TFConv(c_, c_, k=3, w=w.cv2)
@@ -487,7 +489,7 @@ class TFProto(Layer):
 class TFUpsample(Layer):
     # TF version of torch.nn.Upsample()
     def __init__(self, size, scale_factor, mode, w=None):  # warning: all arguments needed including 'w'
-        super(TFUpsample, self).__init__()
+        super().__init__()
         assert scale_factor % 2 == 0, "scale_factor must be multiple of 2"
         self.upsample = lambda x: tf.image.resize(x, (x.shape[1] * scale_factor, x.shape[2] * scale_factor), mode)
 
@@ -498,7 +500,7 @@ class TFUpsample(Layer):
 class TFConcat(Layer):
     # TF version of torch.concat()
     def __init__(self, dimension=1, w=None):
-        super(TFConcat, self).__init__()
+        super().__init__()
         assert dimension == 1, "convert only NCHW to NHWC concat"
         self.d = 3
 

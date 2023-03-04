@@ -485,6 +485,8 @@ class Model(nn.Module):
 
         # Init weights, biases
         initialize_weights(self)
+        self.info()
+        logger.info('')
 
     def forward(self, x, augment=False, profile=False):
         if augment:
@@ -610,10 +612,10 @@ class Model(nn.Module):
             print(('%6g Conv2d.bias:' + '%10.3g' * 6) %
                   (mi.weight.shape[1], *b[:5].mean(1).tolist(), b[5:].mean()))
 
-    # def _print_weights(self):
-    #     for m in self.model.modules():
-    #         if type(m) is Bottleneck:
-    #             print('%10.3g' % (m.w.detach().sigmoid() * 2))  # shortcut weights
+    def _print_weights(self):
+        for m in self.model.modules():
+            if type(m) is Bottleneck:
+                print('%10.3g' % (m.w.detach().sigmoid() * 2))  # shortcut weights
 
     def fuse(self):  # fuse model Conv2d() + BatchNorm2d() layers
         print('Fusing layers... ')
@@ -631,6 +633,7 @@ class Model(nn.Module):
             elif isinstance(m, (IDetect, IAuxDetect)):
                 m.fuse()
                 m.forward = m.fuseforward
+        self.info()
         return self
 
     def nms(self, mode=True):  # add or remove NMS module
@@ -654,13 +657,16 @@ class Model(nn.Module):
                                     'stride'), exclude=())  # copy attributes
         return m
 
-    def info(self, verbose=False, img_size=640, rect=False, single_channel=False):  # print model information
-        return model_info(self, verbose, img_size, rect=rect, single_channel=single_channel)
+    def info(self, verbose=False, img_size=640):  # print model information
+        return model_info(self, verbose, img_size)
 
     def is_p5(self, nodes=None):
         if not nodes:
             nodes = len(self.yaml['backbone']) + len(self.yaml['head']) - 1
-        return nodes in [77, 105, 121]
+        if 'p5' in self.yaml:
+            return eval(self.yaml['p5']) if isinstance(self.yaml['p5'], str) else self.yaml['p5']
+        out = nodes in [77, 105, 121]
+        return out
 
     def num_nodes(self):
         return len(self.yaml['backbone']) + len(self.yaml['head']) - 1
@@ -1334,7 +1340,7 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
             c2 = ch[f] // args[0] ** 2
         else:
             c2 = ch[f]
-
+        # assert c2 < 1024, f'torch 1.13.1 max channel size is 1024, yours {torch.__version__}'
         m_ = nn.Sequential(*[m(*args) for _ in range(n)]) if n > 1 else m(*args)  # module
         t = str(m)[8:-2].replace('__main__.', '')  # module type
         nparam = sum([x.numel() for x in m_.parameters()])  # number params

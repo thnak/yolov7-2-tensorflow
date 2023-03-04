@@ -314,14 +314,11 @@ def fuse_conv_and_bn(conv, bn):
     return fusedconv
 
 
-def model_info(model, verbose=False, img_size=640, verbose2=False, rect=False, single_channel=False):
+def model_info(model, verbose=False, img_size=640):
     """Model information. img_size may be int or list, i.e. img_size=640 or img_size=[640, 320]"""
     n_p = sum(x.numel() for x in model.parameters())  # number parameters
     n_g = sum(x.numel() for x in model.parameters() if x.requires_grad)  # number gradients
-    for m in model.modules():
-        if isinstance(m, nn.Upsample):
-            m.recompute_scale_factor = None
-    if verbose2:
+    if verbose:
         print('%5s %40s %9s %12s %20s %10s %10s' % ('layer', 'name', 'gradient', 'parameters', 'shape', 'mu', 'sigma'))
         for i, (name, p) in enumerate(model.named_parameters()):
             name = name.replace('module_list.', '')
@@ -329,20 +326,24 @@ def model_info(model, verbose=False, img_size=640, verbose2=False, rect=False, s
                   (i, name, p.requires_grad, p.numel(), list(p.shape), p.mean(), p.std()))
 
     try:  # FLOPS
-        check_requirements('thop')
         from thop import profile
-        img_size = img_size if isinstance(img_size, list) else [img_size, img_size]  # expand if int/float
-        img = torch.zeros((1, 1 if single_channel else 3, *img_size), device=next(model.parameters()).device)
+        stride = max(int(model.stride.max()), 32) if hasattr(model, 'stride') else 32
+        img = torch.zeros((1, model.yaml.get('ch', 3), stride, stride), device=next(model.parameters()).device)  # input
         flops = profile(deepcopy(model), inputs=(img,), verbose=False)[0] / 1E9 * 2  # stride GFLOPS
-        flops = round(flops, 3)
-        fs = f'{flops:,} GFLOPS {"(--rect is using, you will see the final Flops when the training finish)" if rect else ""} with input shape {list(img.shape)}'  # 640x640 GFLOPS
+        img_size = img_size if isinstance(img_size, list) else [img_size, img_size]  # expand if int/float
+        fs = '%.3f GFLOPS' % (flops * img_size[0] / stride * img_size[1] / stride)  # 640x640 GFLOPS
 
     except Exception as ex:
         fs = '? GFLOPS'
         print(colored(f"{ex}", 'red'))
-    fs = f"{colorstr('Model Summary:')} {len(list(model.modules())):,} layers; {n_p:,} parameters; {n_g:,} gradients; {fs}"
+<<<<<<< HEAD
+    fs = f"{colorstr('Model Summary:')} {'P5' if model.is_p5() else 'P6'} with {len(list(model.modules())):,} layers; {n_p:,} parameters; {n_g:,} gradients; {fs}"
     if verbose:
         logger.info(fs)
+=======
+    fs = f"Model Summary: {len(list(model.modules()))} layers, {n_p} parameters, {n_g} gradients, {fs}"
+    logger.info(fs)
+>>>>>>> parent of b81891f (summary real compute model flops, update re-paramater.py, add tfjs for P6 model)
     return fs
 
 
@@ -533,7 +534,7 @@ class TracedModel(nn.Module):
         traced_script_module = torch.jit.trace(self.model, rand_example, strict=False)
         if saveTrace:
             traced_script_module.save("traced_model.pt")
-            print("traced_script_module saved! ")
+        print("traced_script_module saved! ")
         self.model = traced_script_module
         self.model.to(device)
         self.detect_layer.to(device)
