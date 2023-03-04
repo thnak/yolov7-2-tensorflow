@@ -71,7 +71,6 @@ class TFShortcut(Layer):
 
     def __call__(self, x):
         return x[0] + x[1]
-# [80, [[19, 27, 44, 40, 38, 94], [96, 68, 86, 152, 180, 137], [140, 301, 303, 264, 238, 542], [436, 615, 739, 380, 925, 792]], [256, 512, 768, 1024, 320, 640, 960, 1280]]
 
 
 class TFRepConv(Layer):
@@ -135,19 +134,19 @@ class TFSPPCSPC(Layer):
         y2 = self.cv2(inputs)
         return self.cv7(tf.concat((y1, y2), 3))
 
-def ReOrg_slice(out):
+
+def ReOrg_slice(inputs):
     return tf.concat([inputs[:, ::2, ::2, :],
                          inputs[:, 1::2, ::2, :],
                          inputs[:, ::2, 1::2, :],
                          inputs[:, 1::2, 1::2, :]], 3)
+
 class TFReOrg(Layer):
-    def __init__(self,n=1, w=None):
+    def __init__(self, w=None):
         super(TFReOrg, self).__init__()
-        self.n = max(n, 1)
 
     def __call__(self, out):  # inputs(b,c,w,h) -> y(b,4c,w/2,h/2)
-        for i in range(self.n):
-            out = ReOrg_slice(out)
+        out = ReOrg_slice(out)
         return out
 
 
@@ -563,7 +562,7 @@ def parse_model(d, ch, model, imgsz):  # model_dict, input_channels(3)
         elif m is Foldcut:
             c2 = ch[f] // 2
         elif m is ReOrg:
-            c2 = ch[f] * 4**args[0]
+            c2 = ch[f] * 4
         elif m in [Detect, IDetect, IAuxDetect]:
             args.append([ch[x + 1] for x in f])
             if isinstance(args[1], int):  # number of anchors

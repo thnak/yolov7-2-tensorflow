@@ -49,13 +49,11 @@ def ReOrg_slice(out):
 
 class ReOrg(nn.Module):
     """https://arxiv.org/pdf/2101.00745.pdf"""
-    def __init__(self, n=1):
+    def __init__(self):
         super(ReOrg, self).__init__()
-        self.n = max(n, 1)
 
     def forward(self, out):  # x(b,c,w,h) -> y(b,4c,w/2,h/2)
-        for i in range(self.n):
-            out = ReOrg_slice(out)
+        out = ReOrg_slice(out)
         return out
 
 
