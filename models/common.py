@@ -52,13 +52,10 @@ class ReOrg(nn.Module):
     def __init__(self):
         super(ReOrg, self).__init__()
 
-<<<<<<< HEAD
     def forward(self, out):  # x(b,c,w,h) -> y(b,4c,w/2,h/2)
         out = ReOrg_slice(out)
-=======
     def forward(self, x):  # x(b,c,w,h) -> y(b,4c,w/2,h/2)
         out = torch.cat([x[..., ::2, ::2], x[..., 1::2, ::2], x[..., ::2, 1::2], x[..., 1::2, 1::2]], 1)
->>>>>>> parent of b81891f (summary real compute model flops, update re-paramater.py, add tfjs for P6 model)
         return out
 
 

@@ -336,14 +336,11 @@ def model_info(model, verbose=False, img_size=640):
     except Exception as ex:
         fs = '? GFLOPS'
         print(colored(f"{ex}", 'red'))
-<<<<<<< HEAD
     fs = f"{colorstr('Model Summary:')} {'P5' if model.is_p5() else 'P6'} with {len(list(model.modules())):,} layers; {n_p:,} parameters; {n_g:,} gradients; {fs}"
     if verbose:
         logger.info(fs)
-=======
     fs = f"Model Summary: {len(list(model.modules()))} layers, {n_p} parameters, {n_g} gradients, {fs}"
     logger.info(fs)
->>>>>>> parent of b81891f (summary real compute model flops, update re-paramater.py, add tfjs for P6 model)
     return fs
 
 

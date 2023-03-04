@@ -1,11 +1,8 @@
 import datetime
 from utils.add_nms import RegisterNMS
 from utils.torch_utils import select_device
-<<<<<<< HEAD
 from utils.general import set_logging, check_img_size, check_requirements, colorstr, ONNX_OPSET, ONNX_OPSET_TARGET, gb2mb
-=======
 from utils.general import set_logging, check_img_size, check_requirements, colorstr
->>>>>>> parent of b81891f (summary real compute model flops, update re-paramater.py, add tfjs for P6 model)
 from utils.activations import Hardswish, SiLU
 from models.experimental import attempt_load, End2End
 import models
@@ -75,7 +72,6 @@ if __name__ == '__main__':
         logging.info(f'# Load PyTorch model')
         device, gitstatus = select_device(opt.device)
         map_device = 'cpu' if device.type == 'privateuseone' else device
-<<<<<<< HEAD
         with torch.no_grad():
             model = attempt_load(weight, map_location=map_device).to(map_device)  # load FP32 model
             ckpt = torch.load(weight, map_location=map_device)
@@ -83,10 +79,8 @@ if __name__ == '__main__':
             model.eval()
             for param in model.parameters():
                 param.grad = None
-=======
         model = attempt_load(weight, map_location=map_device).to(map_device)  # load FP32 model
         ckpt = torch.load(weight, map_location=map_device)
->>>>>>> parent of b81891f (summary real compute model flops, update re-paramater.py, add tfjs for P6 model)
 
         ckpt['best_fitness'] = ckpt['best_fitness'] if 'best_fitness' in ckpt else -1
         ckpt['best_fitness'] = ckpt['best_fitness'].tolist()[0] if isinstance(ckpt['best_fitness'], np.ndarray) else \
@@ -100,11 +94,7 @@ if __name__ == '__main__':
 
         input_shape = ckpt['input_shape'] if 'input_shape' in ckpt else ([3, 640, 640] if model.is_p5() else [3, 1280, 1280])
         img = torch.zeros(opt.batch_size, *input_shape, device=map_device)
-<<<<<<< HEAD
-
-=======
         model.eval()
->>>>>>> parent of b81891f (summary real compute model flops, update re-paramater.py, add tfjs for P6 model)
         if device.type in ['cuda'] and opt.fp16:
             img, model = img.half(), model.half()
             logging.info(
@@ -127,7 +117,6 @@ if __name__ == '__main__':
 
         model.model[-1].export = False  # set Detect() layer grid export
         y = model(img)  # dry run
-<<<<<<< HEAD
         mem_params = sum([param.nelement() * param.element_size() for param in model.parameters()])
         mem_bufs = sum([buf.nelement() * buf.element_size() for buf in model.buffers()])
         mem = mem_params + mem_bufs  # in bytes
@@ -135,8 +124,6 @@ if __name__ == '__main__':
         model_Gflop = model.info(verbose=False, img_size=input_shape[1:], single_channel=input_shape[0] == 1)
         logging.info(model_Gflop)
         logging.info(f'model size: {gb2mb(mem)}')
-=======
->>>>>>> parent of b81891f (summary real compute model flops, update re-paramater.py, add tfjs for P6 model)
         # model output shape
         shape = tuple((y[0] if isinstance(y, tuple) else y).shape)
 
