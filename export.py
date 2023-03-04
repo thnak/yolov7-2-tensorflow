@@ -1,7 +1,11 @@
 import datetime
 from utils.add_nms import RegisterNMS
 from utils.torch_utils import select_device
+<<<<<<< HEAD
 from utils.general import set_logging, check_img_size, check_requirements, colorstr, ONNX_OPSET, ONNX_OPSET_TARGET, gb2mb
+=======
+from utils.general import set_logging, check_img_size, check_requirements, colorstr
+>>>>>>> parent of b81891f (summary real compute model flops, update re-paramater.py, add tfjs for P6 model)
 from utils.activations import Hardswish, SiLU
 from models.experimental import attempt_load, End2End
 import models
@@ -15,7 +19,7 @@ import warnings
 import logging
 import os
 import numpy as np
-from copy import deepcopy
+
 sys.path.append('./')  # to run '$ python *.py' files in subdirectories
 
 if __name__ == '__main__':
@@ -52,7 +56,7 @@ if __name__ == '__main__':
     opt.include = [x.lower() for x in opt.include] if isinstance(
         opt.include, list) else [opt.include.lower()]
 
-    torchScript = any(x in ['torchscript', 'coreml'] for x in opt.include)
+    torchScript = any(x in ['torchscript'] for x in opt.include)
     torchScriptLite = any(x in ['torchscriptlite'] for x in opt.include)
     ONNX = any(x in ['onnx', 'open', 'openvino'] for x in opt.include)
     openVINO = any(x in ['openvino', 'open'] for x in opt.include)
@@ -67,10 +71,11 @@ if __name__ == '__main__':
     t = time.time()
     opt.weights = [os.path.realpath(x) for x in opt.weights] if isinstance(
         opt.weights, (tuple, list)) else [os.path.realpath(opt.weights)]
-    filenames = []
     for weight in opt.weights:
+        logging.info(f'# Load PyTorch model')
         device, gitstatus = select_device(opt.device)
         map_device = 'cpu' if device.type == 'privateuseone' else device
+<<<<<<< HEAD
         with torch.no_grad():
             model = attempt_load(weight, map_location=map_device).to(map_device)  # load FP32 model
             ckpt = torch.load(weight, map_location=map_device)
@@ -78,26 +83,37 @@ if __name__ == '__main__':
             model.eval()
             for param in model.parameters():
                 param.grad = None
+=======
+        model = attempt_load(weight, map_location=map_device).to(map_device)  # load FP32 model
+        ckpt = torch.load(weight, map_location=map_device)
+>>>>>>> parent of b81891f (summary real compute model flops, update re-paramater.py, add tfjs for P6 model)
 
         ckpt['best_fitness'] = ckpt['best_fitness'] if 'best_fitness' in ckpt else -1
         ckpt['best_fitness'] = ckpt['best_fitness'].tolist()[0] if isinstance(ckpt['best_fitness'], np.ndarray) else \
             ckpt['best_fitness']
-
         best_fitness = str(ckpt['best_fitness'])
-        prefix = colorstr('Export: ')
-        labels = model.names
-        model_ori = deepcopy(model)
 
+        labels = model.names
+        model_ori = model
+        model_Gflop = model.info()
         gs = int(max(model.stride.max(), 32))  # grid size (max stride)
 
         input_shape = ckpt['input_shape'] if 'input_shape' in ckpt else ([3, 640, 640] if model.is_p5() else [3, 1280, 1280])
         img = torch.zeros(opt.batch_size, *input_shape, device=map_device)
+<<<<<<< HEAD
 
+=======
+        model.eval()
+>>>>>>> parent of b81891f (summary real compute model flops, update re-paramater.py, add tfjs for P6 model)
         if device.type in ['cuda'] and opt.fp16:
             img, model = img.half(), model.half()
+            logging.info(
+                f'Export with shape {input_shape}, FP16, best fitness: {best_fitness}')
         else:
             if opt.fp16:
                 logging.warning(f'Export with fp16 only support for CUDA device, yours {device.type}')
+            logging.info(
+                f'Export with shape {input_shape}, FP32, best fitness: {best_fitness}')
         # Update model
         for k, m in model.named_modules():
             m._non_persistent_buffers_set = set()  # pytorch 1.6.0 compatibility
@@ -111,6 +127,7 @@ if __name__ == '__main__':
 
         model.model[-1].export = False  # set Detect() layer grid export
         y = model(img)  # dry run
+<<<<<<< HEAD
         mem_params = sum([param.nelement() * param.element_size() for param in model.parameters()])
         mem_bufs = sum([buf.nelement() * buf.element_size() for buf in model.buffers()])
         mem = mem_params + mem_bufs  # in bytes
@@ -118,20 +135,19 @@ if __name__ == '__main__':
         model_Gflop = model.info(verbose=False, img_size=input_shape[1:], single_channel=input_shape[0] == 1)
         logging.info(model_Gflop)
         logging.info(f'model size: {gb2mb(mem)}')
+=======
+>>>>>>> parent of b81891f (summary real compute model flops, update re-paramater.py, add tfjs for P6 model)
         # model output shape
         shape = tuple((y[0] if isinstance(y, tuple) else y).shape)
-        logging.info(f'{prefix}starting from {weight} wiht output shape {shape}, dtype: {img.dtype}, best fitness: {round(eval(best_fitness),3)}')
 
         if opt.include_nms:
             model.model[-1].include_nms = True
-            del y
-        warnings.filterwarnings('ignore', category=torch.jit.TracerWarning)
-
+            y = None
+        filenames = []
         # TorchScript export
         if torchScript:
             try:
                 prefix = colorstr('TorchScript:')
-
                 logging.info(
                     f'\n{prefix} Starting TorchScript export with torch %s...{torch.__version__}')
                 f = weight.replace('.pt', '.torchscript.pt')  # filename
@@ -141,7 +157,7 @@ if __name__ == '__main__':
                 filenames.append(f)
             except Exception as e:
                 logging.info(f'{prefix} export failure❌:\n{e}')
-        # CoreML export
+            # CoreML export
         if coreML:
             try:
                 prefix = colorstr('CoreML:')
@@ -171,11 +187,11 @@ if __name__ == '__main__':
                 filenames.append(f)
             except Exception as e:
                 logging.info(f'{prefix} CoreML export failure❌: {e}')
-
         if torchScriptLite:
             prefix = colorstr('TorchScript-Lite:')
             try:
-                logging.info(f'\n{prefix} Starting TorchScript-Lite export with torch {torch.__version__}')
+                logging.info(
+                    f'\n{prefix} Starting TorchScript-Lite export with torch {torch.__version__}')
                 f = weight.replace('.pt', '.torchscript.ptl')  # filename
                 tsl = torch.jit.trace(model, img, strict=False)
                 tsl = optimize_for_mobile(tsl)
@@ -189,7 +205,9 @@ if __name__ == '__main__':
             prefix = colorstr('ONNX:')
             import onnx
             import onnxmltools
-            logging.info(f'\n{prefix} Starting ONNX export with onnx {onnx.__version__}')
+
+            logging.info(
+                f'\n{prefix} Starting ONNX export with onnx {onnx.__version__}')
             f = weight.replace('.pt', '.onnx')  # filename
             model.eval()
             output_names = ['classes',
@@ -200,7 +218,10 @@ if __name__ == '__main__':
                                 'output': {0: 'batch', 2: 'y', 3: 'x'}}
             if opt.dynamic_batch:
                 opt.batch_size = 'batch'
-                dynamic_axes = {'images': {0: 'batch', }, }
+                dynamic_axes = {
+                    'images': {
+                        0: 'batch',
+                    }, }
                 if opt.end2end and opt.max_hw is None:
                     output_axes = {
                         'num_dets': {0: 'batch'},
@@ -225,15 +246,12 @@ if __name__ == '__main__':
                     output_names = ['output']
             else:
                 model.model[-1].concat = True
-            if opt.onnx_opset not in ([x for x in range(20)][ONNX_OPSET[0]:ONNX_OPSET[1]]):
-                logging.warning(f'{prefix} onnx opset must be {ONNX_OPSET[0]} - {ONNX_OPSET[1]}')
-                opt.onnx_opset = ONNX_OPSET[0]
-            if opt.onnx_opset > ONNX_OPSET_TARGET:
+            if opt.onnx_opset < 11 and opt.onnx_opset > 17:
+                opt.onnx_opset = 11
+            if opt.onnx_opset > 11:
                 logging.info(
-                    f'{prefix} onnx opset tested for version {ONNX_OPSET_TARGET} (yours {opt.onnx_opset}), '
-                    f'newer version may have poor performance for ONNXRUNTIME in DmlExecutionProvider')
+                    f'{prefix} onnx opset tested for version 11, newer version may have poor performance for ONNXRUNTIME in DmlExecutionProvider')
             torch.onnx.disable_log()
-            warnings.filterwarnings('ignore', category=UserWarning)
             torch.onnx.export(model, img, f, verbose=opt.v,
                               opset_version=opt.onnx_opset,
                               input_names=['images'],
@@ -313,12 +331,12 @@ if __name__ == '__main__':
                 filenames.append(outputpath)
             except Exception as e:
                 logging.info(f'{prefix} export failure❌:\n{e}')
-        del ckpt
+
         if saved_Model:
             prefix = colorstr('TensorFlow SavedModel:')
             from tools.auxexport import export_saved_model
 
-            outputpath, s_models = export_saved_model(model_ori,
+            outputpath, s_models = export_saved_model(ckpt,
                                                       img,
                                                       weight,
                                                       False,

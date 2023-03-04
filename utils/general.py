@@ -28,8 +28,6 @@ pd.options.display.max_columns = 10
 # os.environ['NUMEXPR_MAX_THREADS'] = str(os.cpu_count())  # NumExpr max threads
 FILE = Path(__file__).resolve()
 ROOT = FILE.parents[1]  # YOLOv5 root directory
-ONNX_OPSET = [11, 17]
-ONNX_OPSET_TARGET = 12
 TQDM_BAR_FORMAT = '{l_bar}{bar:10}{r_bar}'  # tqdm bar format
 
 

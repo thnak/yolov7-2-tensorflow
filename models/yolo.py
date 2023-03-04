@@ -485,6 +485,8 @@ class Model(nn.Module):
 
         # Init weights, biases
         initialize_weights(self)
+        self.info()
+        logger.info('')
 
     def forward(self, x, augment=False, profile=False):
         if augment:
@@ -631,6 +633,7 @@ class Model(nn.Module):
             elif isinstance(m, (IDetect, IAuxDetect)):
                 m.fuse()
                 m.forward = m.fuseforward
+        self.info()
         return self
 
     def nms(self, mode=True):  # add or remove NMS module
@@ -654,8 +657,8 @@ class Model(nn.Module):
                                     'stride'), exclude=())  # copy attributes
         return m
 
-    def info(self, verbose=False, img_size=640, rect=False, single_channel=False):  # print model information
-        return model_info(self, verbose, img_size, rect=rect, single_channel=single_channel)
+    def info(self, verbose=False, img_size=640):  # print model information
+        return model_info(self, verbose, img_size)
 
     def is_p5(self, nodes=None):
         if not nodes:
