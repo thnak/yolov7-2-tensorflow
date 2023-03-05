@@ -27,7 +27,7 @@ from copy import deepcopy
 # from torchvision.ops import roi_pool, roi_align, ps_roi_pool, ps_roi_align
 
 from utils.general import check_requirements, xyxy2xywh, xywh2xyxy, xywhn2xyxy, xyn2xy, segment2box, segments2boxes, \
-    resample_segments, clean_str, colorstr, TQDM_BAR_FORMAT
+    resample_segments, clean_str, colorstr, TQDM_BAR_FORMAT, gb2mb
 from utils.torch_utils import torch_distributed_zero_first
 from termcolor import colored
 
@@ -418,10 +418,6 @@ def img2label_paths(img_paths):
     return ['txt'.join(x.replace(sa, sb, 1).rsplit(x.split('.')[-1], 1)) for x in img_paths]
 
 
-def gb2mb(inp0):
-    value = round(inp0 / 1E9, 3)
-    return f'{value}GB' if value > 1 else f'{value * 1000}MB'
-
 
 class LoadImagesAndLabels(Dataset):  # for training/testing
     version = 0.1
@@ -441,10 +437,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         self.path = path
         self.cache_images = cache_images
         self.albumentations = Albumentations(hyp, rect=rect) if augment else None
-        self.single_channel = single_channel
         self.pin_memory = False
-        self.transforms = transforms.Compose(
-            [transforms.ToTensor(), transforms.Grayscale(1)]) if single_channel else None
         try:
             f = []  # image files
             for p in path if isinstance(path, list) else [path]:
@@ -735,12 +728,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             labels_out[:, 1:] = torch.from_numpy(labels)
 
         # Convert
-        img = img[:, :, ::-1]
-        if self.transforms:
-            img_tensor = self.transforms(np.ascontiguousarray(img).copy())
-            return img_tensor, labels_out, self.img_files[index], shapes
-        else:
-            img = img.transpose(2, 0, 1)  # BGR to RGB, to 3x416x416
+        img = img[:, :, ::-1].transpose(2, 0, 1)  # BGR to RGB, to 3x416x416
         img = np.ascontiguousarray(img)
         return deepcopy(torch.from_numpy(img)), deepcopy(labels_out), deepcopy(self.img_files[index]), deepcopy(shapes)
 

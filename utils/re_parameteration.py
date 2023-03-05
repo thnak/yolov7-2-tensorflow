@@ -5,12 +5,12 @@ from utils.torch_utils import is_parallel
 import os
 from utils.general import colorstr
 
-
+@torch.no_grad()
 def Re_parameterization(inputWeightPath='v7-tiny-training.pt',
                         outputWeightPath = 'cfg/deploy/yolov7.pt',
                         device = None):
     prefix = colorstr('Re-parameteration: ')
-    model_named = {77: 'YOLOv7-tiny', 105: 'YOLOv7', 121: 'YOLOv7-w6', 122: 'YOLOv7x', 144: 'YOLOv7-e6',
+    model_named = {-1: 'unnamed', 77: 'YOLOv7-tiny', 105: 'YOLOv7', 121: 'YOLOv7-w6', 122: 'YOLOv7x', 144: 'YOLOv7-e6',
                    166: 'YOLOv7-d6', 265: 'YOLOv7-e6e'}
     idx = {166: [162, 166], 144: [140, 144], 265: [261, 265], 122: [118, 122]}
     if os.path.exists(inputWeightPath):
@@ -22,12 +22,10 @@ def Re_parameterization(inputWeightPath='v7-tiny-training.pt',
         if 'head_deploy' in cfg:
             cfg['head'] = cfg['head_deploy']
             cfg.pop('head_deploy', None)
-        model = Model(cfg, ch=3, nc=nc).to(device).float()
-
-        if not p5_model:
-            print(f'{prefix} P6 model: {model_named[nodes]}')
-        else:
-            print(f'{prefix} P5 model: {model_named[nodes]}')
+        model = Model(cfg, ch=3, nc=nc).to(device=device, dtype=torch.float32)
+        imgsz = ckpt['input_shape']
+        model.info(verbose=True, img_size=imgsz[1:])
+        print(f'{prefix}{"P5" if p5_model else "P6"} branch; named model: {model_named[nodes] if nodes in model_named else model_named[-1]}')
         anchors = len(ckpt['model'].model[-1].anchor_grid.squeeze()[0])
         # d6:: 166, e6:: 144, e6e:: 265, x:: 122
         state_dict = ckpt['model'].to(device).float().state_dict()

@@ -10,13 +10,13 @@ from copy import deepcopy
 from pathlib import Path
 from termcolor import colored
 import torch
-
+import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision
 from torch.optim import Optimizer
 
-from utils.general import check_requirements, colorstr
+from utils.general import check_requirements, colorstr, gb2mb
 
 try:
     import thop  # for FLOPS computation
@@ -318,30 +318,42 @@ def model_info(model, verbose=False, img_size=640):
     """Model information. img_size may be int or list, i.e. img_size=640 or img_size=[640, 320]"""
     n_p = sum(x.numel() for x in model.parameters())  # number parameters
     n_g = sum(x.numel() for x in model.parameters() if x.requires_grad)  # number gradients
-    if verbose:
+    for m in model.modules():
+        if isinstance(m, nn.Upsample):
+            m.recompute_scale_factor = None
+    xxx = False
+    if xxx:
         print('%5s %40s %9s %12s %20s %10s %10s' % ('layer', 'name', 'gradient', 'parameters', 'shape', 'mu', 'sigma'))
         for i, (name, p) in enumerate(model.named_parameters()):
             name = name.replace('module_list.', '')
             print('%5g %40s %9s %12g %20s %10.3g %10.3g' %
                   (i, name, p.requires_grad, p.numel(), list(p.shape), p.mean(), p.std()))
-
+    header = '====================================================SUMMARY====================================================\n'
+    footer = '\n====================================================+++++++====================================================\n'
     try:  # FLOPS
+        check_requirements('thop')
         from thop import profile
-        stride = max(int(model.stride.max()), 32) if hasattr(model, 'stride') else 32
-        img = torch.zeros((1, model.yaml.get('ch', 3), stride, stride), device=next(model.parameters()).device)  # input
-        flops = profile(deepcopy(model), inputs=(img,), verbose=False)[0] / 1E9 * 2  # stride GFLOPS
         img_size = img_size if isinstance(img_size, list) else [img_size, img_size]  # expand if int/float
-        fs = '%.3f GFLOPS' % (flops * img_size[0] / stride * img_size[1] / stride)  # 640x640 GFLOPS
+        img = torch.zeros((1, 3, *img_size), device=next(model.parameters()).device)
+        flops = profile(deepcopy(model), inputs=(img,), verbose=False)[0] / 1E9 * 2  # stride GFLOPS
+        flops = round(flops, 3)
+        rect = img_size[0] != img_size[1]
+        param_size = sum([param.nelement() * param.element_size() for param in model.parameters()])
+        buffer_size = sum([buffer.nelement() * buffer.element_size() for buffer in model.buffers()])
+        size_in_mem = gb2mb(param_size + buffer_size)
+        numpy_img = np.zeros((*img_size, 3), dtype=np.uint8)
+        size_in_mem2 = gb2mb(numpy_img.nbytes)
+        fs = f'{flops} Gflops{" (--rect is using, you will see the final Flops when the training finish)" if rect else ""}\n'  # 640x640 GFLOPS
+        fs += f'               Model size: {size_in_mem}\n'
+        fs += f'               Input shape: {list(img.shape)[1:]}'
 
     except Exception as ex:
-        fs = '? GFLOPS'
+        fs = '? Gflops'
         print(colored(f"{ex}", 'red'))
-    fs = f"{colorstr('Model Summary:')} {'P5' if model.is_p5() else 'P6'} with {len(list(model.modules())):,} layers; {n_p:,} parameters; {n_g:,} gradients; {fs}"
+    output = f"{header}{colorstr('Model Summary:')} {'P5' if model.is_p5() else 'P6'} branch with {len(list(model.modules())):,} layers; {n_p:,} parameters; {n_g:,} gradients; {fs}{footer}"
     if verbose:
-        logger.info(fs)
-    fs = f"Model Summary: {len(list(model.modules()))} layers, {n_p} parameters, {n_g} gradients, {fs}"
-    logger.info(fs)
-    return fs
+        logger.info(output)
+    return output
 
 
 def load_classifier(name='resnet101', n=2):
@@ -511,7 +523,7 @@ def revert_sync_batchnorm(module):
 class TracedModel(nn.Module):
     """Traced for faster inference"""
 
-    def __init__(self, model=None, device=None, img_size=(640, 640), single_channel=False, saveTrace=False):
+    def __init__(self, model=None, device=None, img_size=(640, 640), saveTrace=False):
         super(TracedModel, self).__init__()
 
         print("Convert model to Traced-model... ")
@@ -526,12 +538,12 @@ class TracedModel(nn.Module):
         self.detect_layer = self.model.model[-1]
         self.model.traced = True
 
-        rand_example = torch.rand(1, 1 if single_channel else 3, img_size, img_size)
+        rand_example = torch.rand(1, 3, img_size, img_size)
 
         traced_script_module = torch.jit.trace(self.model, rand_example, strict=False)
         if saveTrace:
             traced_script_module.save("traced_model.pt")
-        print("traced_script_module saved! ")
+            print("traced_script_module saved! ")
         self.model = traced_script_module
         self.model.to(device)
         self.detect_layer.to(device)

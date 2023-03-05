@@ -115,7 +115,7 @@ def train(hyp, opt, tb_writer=None,
             attempt_download(weights)  # download if not found locally
         ckpt = torch.load(weights, map_location=map_device)  # load checkpoint
         model = Model(opt.cfg or ckpt['model'].yaml,
-                      ch=1 if opt.single_channel else 3,
+                      ch=3,
                       nc=nc,
                       anchors=hyp.get('anchors')).to(device)  # create
         exclude = ['anchor'] if (opt.cfg or hyp.get('anchors')) and not opt.resume else []  # exclude keys
@@ -137,7 +137,7 @@ def train(hyp, opt, tb_writer=None,
         assert nodes == nodes2, f'Please paste the same model cfg branch like P5vsP5 or P6vsP6'
     else:
         model = Model(opt.cfg,
-                      ch=1 if opt.single_channel else 3,
+                      ch=3,
                       nc=nc,
                       anchors=hyp.get('anchors')).to(device)  # create
     p5_model = model.is_p5()
@@ -163,7 +163,6 @@ def train(hyp, opt, tb_writer=None,
     accumulate = max(round(nbs / total_batch_size), 1)
     hyp['weight_decay'] *= total_batch_size * \
                            accumulate / nbs  # scale weight_decay
-    logger.info(f"Scaled weight_decay = {hyp['weight_decay']}")
     optimizer = smart_optimizer(model, opt.optimizer,
                                 lr=hyp['lr0'],
                                 decay=hyp['weight_decay'],
@@ -206,10 +205,13 @@ def train(hyp, opt, tb_writer=None,
 
     # Image sizes
     gs = max(int(model.stride.max()), 32)  # grid size (max stride)
-    # number of detection layers (used for scaling hyp['obj'])
-    nl = model.model[-1].nl
     # verify imgsz are gs-multiples
     imgsz, imgsz_test = [check_img_size(x, gs) for x in opt.img_size]
+    model.info(verbose=True, img_size=imgsz)
+    logger.info('')
+    # number of detection layers (used for scaling hyp['obj'])
+    nl = model.model[-1].nl
+
 
     # DP mode
     if cuda and rank == -1 and torch.cuda.device_count() > 1:
@@ -232,7 +234,6 @@ def train(hyp, opt, tb_writer=None,
                                                 seed=opt.seed,
                                                 image_weights=opt.image_weights,
                                                 quad=opt.quad,
-                                                single_channel=opt.single_channel,
                                                 prefix=colorstr('train: '))
 
         data_loader['dataloader'], data_loader['dataset'] = dataloader, dataset
@@ -258,7 +259,6 @@ def train(hyp, opt, tb_writer=None,
                                                rank=-1,
                                                world_size=opt.world_size,
                                                workers=opt.workers,
-                                               single_channel=opt.single_channel,
                                                pad=0.5, prefix=colorstr('val: '))[0]
             data_loader['val_dataloader'] = val_dataloader
         else:
@@ -276,7 +276,6 @@ def train(hyp, opt, tb_writer=None,
                                                     rank=-1,
                                                     world_size=opt.world_size,
                                                     workers=opt.workers,
-                                                    single_channel=opt.single_channel,
                                                     pad=0.5, prefix=colorstr('test: '))[0]
                 data_loader['test_dataloader'] = test_dataloader
             else:
@@ -364,6 +363,7 @@ def train(hyp, opt, tb_writer=None,
                         bar_format=TQDM_BAR_FORMAT)  # progress bar
 
         # batch -------------------------------------------------------------
+        optimizer.zero_grad()
         for i, (imgs, targets, paths, _) in pbar:
             del _
             # number integrated batches (since train start)
@@ -399,7 +399,7 @@ def train(hyp, opt, tb_writer=None,
             # Forward
             with autocast(enabled=True if device.type in ['cpu', 'cuda'] else False,
                           device_type='cuda' if device.type == 'cuda' else 'cpu'):
-                optimizer.zero_grad()
+
                 pred = model(imgs)  # forward
                 if 'loss_ota' not in hyp or hyp['loss_ota'] == 1:
                     loss, loss_items = compute_loss_ota([pre.to(map_device, non_blocking=True) for pre in pred],
@@ -470,7 +470,6 @@ def train(hyp, opt, tb_writer=None,
                                        wandb_logger=wandb_logger,
                                        compute_loss=compute_loss if device.type != 'privateuseone' else None,
                                        is_coco=is_coco,
-                                       single_channel=opt.single_channel,
                                        v5_metric=opt.v5_metric)[:2]
 
                 # Write
@@ -566,7 +565,6 @@ def train(hyp, opt, tb_writer=None,
                                  iou_thres=0.7,
                                  weights=best,
                                  single_cls=opt.single_cls,
-                                 single_channel=opt.single_channel,
                                  dataloader=val_dataloader,
                                  save_dir=save_dir,
                                  save_json=is_coco,
@@ -592,7 +590,6 @@ def train(hyp, opt, tb_writer=None,
                                       weights=best,
                                       single_cls=opt.single_cls,
                                       dataloader=test_dataloader,
-                                      single_channel=opt.single_channel,
                                       save_dir=save_dir,
                                       save_json=is_coco,
                                       verbose=True,
@@ -647,7 +644,6 @@ if __name__ == '__main__':
     parser.add_argument('--augment', action='store_true', help='using augment for training')
     parser.add_argument('--batch-size', type=int, default=16, help='total batch size for all GPUs')
     parser.add_argument('--img-size', nargs='+', type=int, default=[640, 640], help='[train, test] image sizes')
-    parser.add_argument('--single-channel', action='store_true', help='single channel image training')
     parser.add_argument('--rect', action='store_true', help='rectangular training')
     parser.add_argument('--resume', nargs='?', const=True, default=False, help='resume most recent training')
     parser.add_argument('--nosave', action='store_true', help='only save final checkpoint')

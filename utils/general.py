@@ -39,6 +39,11 @@ def set_logging(rank=-1, filename=None, filemode=None):
         level=logging.INFO if rank in [-1, 0] else logging.WARN)
 
 
+def gb2mb(inp0):
+    value = round(inp0 / 1E9, 3)
+    return f'{value}GB' if value > 1 else f'{value * 1000}MB'
+
+
 def init_torch_seeds(seed=0):
     # Speed-reproducibility tradeoff https://pytorch.org/docs/stable/notes/randomness.html
     torch.manual_seed(seed)

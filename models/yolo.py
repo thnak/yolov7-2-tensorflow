@@ -485,8 +485,8 @@ class Model(nn.Module):
 
         # Init weights, biases
         initialize_weights(self)
-        self.info()
-        logger.info('')
+        # self.info()
+        # logger.info('')
 
     def forward(self, x, augment=False, profile=False):
         if augment:
@@ -633,7 +633,7 @@ class Model(nn.Module):
             elif isinstance(m, (IDetect, IAuxDetect)):
                 m.fuse()
                 m.forward = m.fuseforward
-        self.info()
+        # self.info()
         return self
 
     def nms(self, mode=True):  # add or remove NMS module
@@ -1333,7 +1333,7 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
             if isinstance(args[1], int):  # number of anchors
                 args[1] = [list(range(args[1] * 2))] * len(f)
         elif m is ReOrg:
-            c2 = ch[f] * 4**args[0]
+            c2 = ch[f] * 4
         elif m is Contract:
             c2 = ch[f] * args[0] ** 2
         elif m is Expand:

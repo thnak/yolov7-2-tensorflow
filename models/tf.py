@@ -42,7 +42,7 @@ FILE = Path(__file__).resolve()
 ROOT = FILE.parents[1]  # YOLOv5 root directory
 if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))  # add ROOT to PATH
-
+LOGGER = logging.getLogger(__name__)
 
 # ROOT = ROOT.relative_to(Path.cwd())  # relative
 
@@ -59,9 +59,6 @@ def print_args(args: Optional[dict] = None, show_file=True, show_func=False):
         file = Path(file).stem
     s = (f'{file}: ' if show_file else '') + (f'{func}: ' if show_func else '')
     LOGGER.info(colorstr(s) + ', '.join(f'{k}={v}' for k, v in args.items()))
-
-
-LOGGER = logging.getLogger(__name__)
 
 
 class TFShortcut(Layer):
@@ -89,7 +86,7 @@ class TFRepConv(Layer):
         assert autopad(k, p) == 1
         self.act = activations(w.act) if act else tf.identity
         if deploy:
-            self.rbr_reparam = TFConv2d(c1, c2, k, s, autopad(k, p), w.rbr_reparam)
+            self.rbr_reparam = TFConv2d(c1, c2, k, s, autopad(k, p), bias=True, w=w.rbr_reparam)
         else:
             self.rbr_identity = (TFBN(w.rbr_indentity) if c2 == c1 and s == 1 else None)
             self.rbr_dense = keras.Sequential(
@@ -135,26 +132,24 @@ class TFSPPCSPC(Layer):
         y2 = self.cv2(inputs)
         return self.cv7(tf.concat((y1, y2), 3))
 
-def ReOrg_slice(out):
+def ReOrg_slice(inputs):
     return tf.concat([inputs[:, ::2, ::2, :],
                          inputs[:, 1::2, ::2, :],
                          inputs[:, ::2, 1::2, :],
                          inputs[:, 1::2, 1::2, :]], 3)
 class TFReOrg(Layer):
-    def __init__(self,n=1, w=None):
+    def __init__(self, w=None):
         super(TFReOrg, self).__init__()
-        self.n = max(n, 1)
 
     def __call__(self, out):  # inputs(b,c,w,h) -> y(b,4c,w/2,h/2)
-        for i in range(self.n):
-            out = ReOrg_slice(out)
+        out = ReOrg_slice(out)
         return out
 
 
 class TFBN(Layer):
     # TensorFlow BatchNormalization wrapper
     def __init__(self, w=None):
-        super().__init__()
+        super(TFBN, self).__init__()
         self.bn = keras.layers.BatchNormalization(
             beta_initializer=keras.initializers.Constant(w.bias.cpu().detach().numpy()),
             gamma_initializer=keras.initializers.Constant(w.weight.cpu().detach().numpy()),
@@ -201,7 +196,7 @@ class TFConv(Layer):
     # Standard convolution
     def __init__(self, c1, c2, k=1, s=1, p=None, g=1, act=True, w=None):
         # ch_in, ch_out, weights, kernel, stride, padding, groups
-        super().__init__()
+        super(TFConv, self).__init__()
         # TensorFlow convolution padding is inconsistent with PyTorch (e.g. k=3 s=2 'SAME' padding)
         # see https://stackoverflow.com/questions/52975843/comparing-conv2d-with-padding-between-tensorflow-and-pytorch
         conv = keras.layers.Conv2D(
@@ -248,7 +243,7 @@ class TFDWConv(Layer):
 
     def __init__(self, c1, c2, k=1, s=1, p=None, act=True, w=None):
         # ch_in, ch_out, weights, kernel, stride, padding, groups
-        super().__init__()
+        super(TFDWConv, self).__init__()
         assert c2 % c1 == 0, f'TFDWConv() output={c2} must be a multiple of input={c1} channels'
         conv = keras.layers.DepthwiseConv2D(
             kernel_size=k,
@@ -293,7 +288,7 @@ class TFFocus(Layer):
     # Focus wh information into c-space
     def __init__(self, c1, c2, k=1, s=1, p=None, g=1, act=True, w=None):
         # ch_in, ch_out, kernel, stride, padding, groups
-        super().__init__()
+        super(TFFocus, self).__init__()
         self.conv = TFConv(c1 * 4, c2, k, s, p, g, act, w.conv)
 
     def __call__(self, inputs):  # x(b,w,h,c) -> y(b,w/2,h/2,4c)
@@ -305,7 +300,7 @@ class TFFocus(Layer):
 class TFBottleneck(Layer):
     # Standard bottleneck
     def __init__(self, c1, c2, shortcut=True, g=1, e=0.5, w=None):  # ch_in, ch_out, shortcut, groups, expansion
-        super().__init__()
+        super(TFBottleneck, self).__init__()
         c_ = int(c2 * e)  # hidden channels
         self.cv1 = TFConv(c1, c_, 1, 1, w=w.cv1)
         self.cv2 = TFConv(c_, c2, 3, 1, g=g, w=w.cv2)
@@ -318,7 +313,7 @@ class TFBottleneck(Layer):
 class TFCrossConv(Layer):
     # Cross Convolution
     def __init__(self, c1, c2, k=3, s=1, g=1, e=1.0, shortcut=False, w=None):
-        super().__init__()
+        super(TFCrossConv, self).__init__()
         c_ = int(c2 * e)  # hidden channels
         self.cv1 = TFConv(c1, c_, (1, k), (1, s), w=w.cv1)
         self.cv2 = TFConv(c_, c2, (k, 1), (s, 1), g=g, w=w.cv2)
@@ -331,7 +326,7 @@ class TFCrossConv(Layer):
 class TFConv2d(Layer):
     # Substitution for PyTorch nn.Conv2D
     def __init__(self, c1, c2, k=1, s=1, g=1, bias=True, w=None):
-        super().__init__()
+        super(TFConv2d, self).__init__()
         assert g == 1, "TF v2.2 Conv2D does not support 'groups' argument"
         self.conv = keras.layers.Conv2D(filters=c2,
                                         kernel_size=k,
@@ -351,7 +346,7 @@ class TFBottleneckCSP(Layer):
     # CSP Bottleneck https://github.com/WongKinYiu/CrossStagePartialNetworks
     def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5, w=None):
         # ch_in, ch_out, number, shortcut, groups, expansion
-        super().__init__()
+        super(TFBottleneckCSP, self).__init__()
         c_ = int(c2 * e)  # hidden channels
         self.cv1 = TFConv(c1, c_, 1, 1, w=w.cv1)
         self.cv2 = TFConv2d(c1, c_, 1, 1, bias=False, w=w.cv2)
@@ -401,7 +396,7 @@ class TFC3x(Layer):
 class TFSPP(Layer):
     # Spatial pyramid pooling layer used in YOLOv3-SPP
     def __init__(self, c1, c2, k=(5, 9, 13), w=None):
-        super().__init__()
+        super(TFSPP, self).__init__()
         c_ = c1 // 2  # hidden channels
         self.cv1 = TFConv(c1, c_, 1, 1, w=w.cv1)
         self.cv2 = TFConv(c_ * (len(k) + 1), c2, 1, 1, w=w.cv2)
@@ -563,7 +558,7 @@ def parse_model(d, ch, model, imgsz):  # model_dict, input_channels(3)
         elif m is Foldcut:
             c2 = ch[f] // 2
         elif m is ReOrg:
-            c2 = ch[f] * 4**args[0]
+            c2 = ch[f] * 4
         elif m in [Detect, IDetect, IAuxDetect]:
             args.append([ch[x + 1] for x in f])
             if isinstance(args[1], int):  # number of anchors

@@ -1,16 +1,10 @@
 import datetime
 from utils.add_nms import RegisterNMS
 from utils.torch_utils import select_device
-<<<<<<< HEAD
-<<<<<<< HEAD
 from utils.general import set_logging, check_img_size, check_requirements, colorstr, ONNX_OPSET, ONNX_OPSET_TARGET, gb2mb
 from utils.general import set_logging, check_img_size, check_requirements, colorstr
-=======
 from utils.general import set_logging, check_img_size, check_requirements, colorstr, ONNX_OPSET, ONNX_OPSET_TARGET
->>>>>>> parent of 6646baf (error with yolov7.pt tflite)
-=======
 from utils.general import set_logging, check_img_size, check_requirements, colorstr, ONNX_OPSET, ONNX_OPSET_TARGET
->>>>>>> parent of 6646baf (error with yolov7.pt tflite)
 from utils.activations import Hardswish, SiLU
 from models.experimental import attempt_load, End2End
 import models
@@ -24,7 +18,7 @@ import warnings
 import logging
 import os
 import numpy as np
-
+from copy import deepcopy
 sys.path.append('./')  # to run '$ python *.py' files in subdirectories
 
 if __name__ == '__main__':
@@ -76,6 +70,7 @@ if __name__ == '__main__':
     t = time.time()
     opt.weights = [os.path.realpath(x) for x in opt.weights] if isinstance(
         opt.weights, (tuple, list)) else [os.path.realpath(opt.weights)]
+    warnings.filterwarnings('ignore', category=torch.jit.TracerWarning)
     for weight in opt.weights:
         logging.info(f'# Load PyTorch model')
         device, gitstatus = select_device(opt.device)
@@ -83,12 +78,11 @@ if __name__ == '__main__':
         with torch.no_grad():
             model = attempt_load(weight, map_location=map_device).to(map_device)  # load FP32 model
             ckpt = torch.load(weight, map_location=map_device)
+            model_ori = deepcopy(ckpt['model'])
             ckpt.pop('model', None)
             model.eval()
-            for param in model.parameters():
-                param.grad = None
-        model = attempt_load(weight, map_location=map_device).to(map_device)  # load FP32 model
-        ckpt = torch.load(weight, map_location=map_device)
+            model_ori.eval()
+
 
         ckpt['best_fitness'] = ckpt['best_fitness'] if 'best_fitness' in ckpt else -1
         ckpt['best_fitness'] = ckpt['best_fitness'].tolist()[0] if isinstance(ckpt['best_fitness'], np.ndarray) else \
@@ -96,22 +90,15 @@ if __name__ == '__main__':
         best_fitness = str(ckpt['best_fitness'])
 
         labels = model.names
-        model_ori = model
-        model_Gflop = model.info()
         gs = int(max(model.stride.max(), 32))  # grid size (max stride)
 
         input_shape = ckpt['input_shape'] if 'input_shape' in ckpt else ([3, 640, 640] if model.is_p5() else [3, 1280, 1280])
         img = torch.zeros(opt.batch_size, *input_shape, device=map_device)
-        model.eval()
         if device.type in ['cuda'] and opt.fp16:
             img, model = img.half(), model.half()
-            logging.info(
-                f'Export with shape {input_shape}, FP16, best fitness: {best_fitness}')
         else:
             if opt.fp16:
                 logging.warning(f'Export with fp16 only support for CUDA device, yours {device.type}')
-            logging.info(
-                f'Export with shape {input_shape}, FP32, best fitness: {best_fitness}')
         # Update model
         for k, m in model.named_modules():
             m._non_persistent_buffers_set = set()  # pytorch 1.6.0 compatibility
@@ -123,11 +110,12 @@ if __name__ == '__main__':
                 elif isinstance(m, (models.yolo.Detect, models.yolo.IDetect, models.yolo.IAuxDetect)):
                     m.dynamic = opt.dynamic
 
-        model.model[-1].export = False  # set Detect() layer grid export
-        y = model(img)  # dry run
-
-        model_Gflop = model.info(verbose=False, img_size=input_shape[1:], single_channel=input_shape[0] == 1)
+        model_Gflop = model.info(verbose=False, img_size=input_shape[1:])
         logging.info(model_Gflop)
+        model_Gflop = 0
+        model.model[-1].export = False  # set Detect() layer grid export
+
+        y = model(img)  # dry run
 
         # model output shape
         shape = tuple((y[0] if isinstance(y, tuple) else y).shape)
@@ -165,8 +153,7 @@ if __name__ == '__main__':
                     if sys.platform.lower() == 'darwin':  # quantization only supported on macOS
                         with warnings.catch_warnings():
                             # suppress numpy==1.20 float warning
-                            warnings.filterwarnings(
-                                "ignore", category=DeprecationWarning)
+                            warnings.filterwarnings("ignore", category=DeprecationWarning)
                             ct_model = ct.models.neural_network.quantization_utils.quantize_weights(
                                 ct_model, bits, mode)
                     else:
@@ -238,11 +225,20 @@ if __name__ == '__main__':
                     output_names = ['output']
             else:
                 model.model[-1].concat = True
-            if opt.onnx_opset < 11 and opt.onnx_opset > 17:
-                opt.onnx_opset = 11
-            if opt.onnx_opset > 11:
+            if opt.onnx_opset not in ONNX_OPSET:
+                logging.info(f'{prefix} onnx opset must be in {ONNX_OPSET}, switching to 12')
+                opt.onnx_opset = 12
+            dml = False
+            try:
+                import torch_directml
+                dml = True
+            except ImportError:
+                pass
+            except Exception:
+                pass
+            if opt.onnx_opset != ONNX_OPSET_TARGET and dml:
                 logging.info(
-                    f'{prefix} onnx opset tested for version 11, newer version may have poor performance for ONNXRUNTIME in DmlExecutionProvider')
+                    f'{prefix} onnx opset tested for version {ONNX_OPSET_TARGET}, newer version may have poor performance for ONNXRUNTIME in DmlExecutionProvider')
             torch.onnx.disable_log()
             torch.onnx.export(model, img, f, verbose=opt.v,
                               opset_version=opt.onnx_opset,
@@ -328,7 +324,7 @@ if __name__ == '__main__':
             prefix = colorstr('TensorFlow SavedModel:')
             from tools.auxexport import export_saved_model
 
-            outputpath, s_models = export_saved_model(ckpt,
+            outputpath, s_models = export_saved_model(model_ori,
                                                       img,
                                                       weight,
                                                       False,
