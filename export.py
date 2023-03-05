@@ -2,8 +2,12 @@ import datetime
 from utils.add_nms import RegisterNMS
 from utils.torch_utils import select_device
 <<<<<<< HEAD
+<<<<<<< HEAD
 from utils.general import set_logging, check_img_size, check_requirements, colorstr, ONNX_OPSET, ONNX_OPSET_TARGET, gb2mb
 from utils.general import set_logging, check_img_size, check_requirements, colorstr
+=======
+from utils.general import set_logging, check_img_size, check_requirements, colorstr, ONNX_OPSET, ONNX_OPSET_TARGET
+>>>>>>> parent of 6646baf (error with yolov7.pt tflite)
 =======
 from utils.general import set_logging, check_img_size, check_requirements, colorstr, ONNX_OPSET, ONNX_OPSET_TARGET
 >>>>>>> parent of 6646baf (error with yolov7.pt tflite)
