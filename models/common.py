@@ -49,13 +49,19 @@ def ReOrg_slice(out):
 
 class ReOrg(nn.Module):
     """https://arxiv.org/pdf/2101.00745.pdf"""
-    def __init__(self):
+    def __init__(self, n=1):
         super(ReOrg, self).__init__()
+        self.n = max(n, 1)
 
     def forward(self, out):  # x(b,c,w,h) -> y(b,4c,w/2,h/2)
+<<<<<<< HEAD
         out = ReOrg_slice(out)
     def forward(self, x):  # x(b,c,w,h) -> y(b,4c,w/2,h/2)
         out = torch.cat([x[..., ::2, ::2], x[..., 1::2, ::2], x[..., ::2, 1::2], x[..., 1::2, 1::2]], 1)
+=======
+        for i in range(self.n):
+            out = ReOrg_slice(out)
+>>>>>>> parent of 6646baf (error with yolov7.pt tflite)
         return out
 
 

@@ -1,8 +1,12 @@
 import datetime
 from utils.add_nms import RegisterNMS
 from utils.torch_utils import select_device
+<<<<<<< HEAD
 from utils.general import set_logging, check_img_size, check_requirements, colorstr, ONNX_OPSET, ONNX_OPSET_TARGET, gb2mb
 from utils.general import set_logging, check_img_size, check_requirements, colorstr
+=======
+from utils.general import set_logging, check_img_size, check_requirements, colorstr, ONNX_OPSET, ONNX_OPSET_TARGET
+>>>>>>> parent of 6646baf (error with yolov7.pt tflite)
 from utils.activations import Hardswish, SiLU
 from models.experimental import attempt_load, End2End
 import models
@@ -117,13 +121,10 @@ if __name__ == '__main__':
 
         model.model[-1].export = False  # set Detect() layer grid export
         y = model(img)  # dry run
-        mem_params = sum([param.nelement() * param.element_size() for param in model.parameters()])
-        mem_bufs = sum([buf.nelement() * buf.element_size() for buf in model.buffers()])
-        mem = mem_params + mem_bufs  # in bytes
 
         model_Gflop = model.info(verbose=False, img_size=input_shape[1:], single_channel=input_shape[0] == 1)
         logging.info(model_Gflop)
-        logging.info(f'model size: {gb2mb(mem)}')
+
         # model output shape
         shape = tuple((y[0] if isinstance(y, tuple) else y).shape)
 

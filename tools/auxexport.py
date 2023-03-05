@@ -134,7 +134,7 @@ def export_tflite(keras_model, im, file, int8, data=None, nms=False, agnostic_nm
 
     print(f'\n{prefix} starting export with tensorflow {tf.__version__}...')
     batch_size, ch, *imgsz = list(im.shape)  # BCHW
-    f = str(file).replace('.pt', '-fp32.tflite')
+    f = str(file).replace('.pt', '-fp32 .tflite')
 
     converter = tf.lite.TFLiteConverter.from_keras_model(keras_model)
     converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS]

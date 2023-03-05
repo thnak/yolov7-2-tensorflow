@@ -1,6 +1,6 @@
-train: "D:/Users/Downloads/openlogo/autosplit_train.txt"
-val: "D:/Users/Downloads/openlogo/autosplit_val.txt"
-test: "D:/Users/Downloads/openlogo/autosplit_test.txt"
+train: "D:/Users/Downloads/openlogo"
+val: "D:/Users/Downloads/openlogo"
+test: "D:/Users/Downloads/openlogo"
 nc: 335
 names:
   ['guinness', 'dhl', 'stellaartois', 'fosters', 'becks', 'nvidia', 'shell', 'corona', 'ford', 'google', 'aldi', 'pepsi', 'apple', 'fedex', 'starbucks', 'singha', 'heineken', 'carlsberg', 'paulaner', 'fe
