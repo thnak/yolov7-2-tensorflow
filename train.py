@@ -35,7 +35,7 @@ from utils.google_utils import attempt_download
 from utils.loss import ComputeLoss, ComputeLossOTA, ComputeLossAuxOTA
 from utils.plots import plot_images, plot_results, plot_evolution
 from utils.torch_utils import ModelEMA, select_device, intersect_dicts, torch_distributed_zero_first, is_parallel, \
-    time_synchronized, smart_optimizer, save_model
+    time_synchronized, smart_optimizer, save_model, prune
 from utils.wandb_logging.wandb_utils import WandbLogger, check_wandb_resume
 # from utils.autobatch import check_train_batch_size
 from utils.re_parameteration import Re_parameterization

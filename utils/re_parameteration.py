@@ -15,6 +15,7 @@ def Re_parameterization(inputWeightPath='v7-tiny-training.pt',
     idx = {166: [162, 166], 144: [140, 144], 265: [261, 265], 122: [118, 122]}
     if os.path.exists(inputWeightPath):
         ckpt = torch.load(inputWeightPath, map_location=device)
+        ckpt['model'].eval()
         nc = ckpt['model'].nc
         p5_model = ckpt['model'].is_p5()
         nodes = ckpt['model'].num_nodes()
@@ -22,7 +23,7 @@ def Re_parameterization(inputWeightPath='v7-tiny-training.pt',
         if 'head_deploy' in cfg:
             cfg['head'] = cfg['head_deploy']
             cfg.pop('head_deploy', None)
-        model = Model(cfg, ch=3, nc=nc).to(device=device, dtype=torch.float32)
+        model = Model(cfg, ch=3, nc=nc).to(device=device, dtype=torch.float32).eval()
         imgsz = ckpt['input_shape']
         model.info(verbose=True, img_size=imgsz[1:])
         print(f'{prefix}{"P5" if p5_model else "P6"} branch; named model: {model_named[nodes] if nodes in model_named else model_named[-1]}')
@@ -82,6 +83,7 @@ def Re_parameterization(inputWeightPath='v7-tiny-training.pt',
             model.state_dict()[f'model.{idx[nodes][0]}.m.3.bias'].data *= state_dict[f'model.{idx[nodes][1]}.im.3.implicit'].data.squeeze()
 
         ckpt['model'] = deepcopy(model.module if is_parallel(model) else model)
+        ckpt['model'].half()
         ckpt['epoch'] = -1
         torch.save(ckpt, outputWeightPath)
         print(f'{prefix}saved model at: {outputWeightPath}')

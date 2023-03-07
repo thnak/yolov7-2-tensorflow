@@ -1,6 +1,6 @@
 import datetime
 from utils.add_nms import RegisterNMS
-from utils.torch_utils import select_device
+from utils.torch_utils import select_device, prune
 from utils.general import set_logging, check_img_size, check_requirements, colorstr, ONNX_OPSET, ONNX_OPSET_TARGET, gb2mb
 from utils.general import set_logging, check_img_size, check_requirements, colorstr
 from utils.general import set_logging, check_img_size, check_requirements, colorstr, ONNX_OPSET, ONNX_OPSET_TARGET
@@ -71,6 +71,9 @@ if __name__ == '__main__':
     opt.weights = [os.path.realpath(x) for x in opt.weights] if isinstance(
         opt.weights, (tuple, list)) else [os.path.realpath(opt.weights)]
     warnings.filterwarnings('ignore', category=torch.jit.TracerWarning)
+    s = 'WARNING: The shape inference of prim::Constant type is missing, so it may result in wrong shape ' \
+        'inference for the exported graph. Please consider adding it in symbolic function.'
+    warnings.filterwarnings(action='ignore', message=s)
     for weight in opt.weights:
         logging.info(f'# Load PyTorch model')
         device, gitstatus = select_device(opt.device)
@@ -80,9 +83,9 @@ if __name__ == '__main__':
             ckpt = torch.load(weight, map_location=map_device)
             model_ori = deepcopy(ckpt['model'])
             ckpt.pop('model', None)
+            # prune(model)
             model.eval()
             model_ori.eval()
-
 
         ckpt['best_fitness'] = ckpt['best_fitness'] if 'best_fitness' in ckpt else -1
         ckpt['best_fitness'] = ckpt['best_fitness'].tolist()[0] if isinstance(ckpt['best_fitness'], np.ndarray) else \
@@ -245,7 +248,8 @@ if __name__ == '__main__':
                               input_names=['images'],
                               output_names=output_names,
                               training=torch.onnx.TrainingMode.EVAL,
-                              dynamic_axes=dynamic_axes)
+                              dynamic_axes=dynamic_axes,
+                              keep_initializers_as_inputs=True)
             # Checks
             onnx_model = onnx.load(f)  # load onnx model
             onnx.checker.check_model(onnx_model)  # check onnx model
