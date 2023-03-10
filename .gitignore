@@ -18,6 +18,7 @@ models/best_saved_model/
 *.xml
 *.txt
 *.pt
+*.pth
 *.onnx
 *.tflite
 TrainRes/train

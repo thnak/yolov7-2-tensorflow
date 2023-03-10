@@ -33,6 +33,13 @@ class MP(nn.Module):
     def forward(self, x):
         return self.m(x)
 
+class AP(nn.Module):
+    def __init__(self, k=2):
+        super(AP, self).__init__()
+        self.m = nn.AvgPool2d(kernel_size=k, stride=k)
+
+    def forward(self, x):
+        return self.m(x)
 
 class SP(nn.Module):
     def __init__(self, k=3, s=1):

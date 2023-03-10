@@ -6,6 +6,7 @@ from utils.torch_utils import time_synchronized, fuse_conv_and_bn, model_info, s
     select_device, copy_attr
 from utils.general import make_divisible, check_file, set_logging, colorstr, xywh2xyxy, box_iou
 from utils.autoanchor import check_anchor_order
+from utils.activations import *
 from models.experimental import *
 from models.common import *
 import torchvision
@@ -146,6 +147,7 @@ class IDetect(nn.Module):
                     self.grid[i] = self._make_grid(nx, ny).to(x[i].device)
 
                 y = x[i].sigmoid()
+                y[..., 0:2] = (y[..., 0:2] * 2. - 0.5 + self.grid[i]) * self.stride[i]  # xy
                 y[..., 0:2] = (y[..., 0:2] * 2. - 0.5 + self.grid[i]) * self.stride[i]  # xy
                 y[..., 2:4] = (y[..., 2:4] * 2) ** 2 * self.anchor_grid[i]  # wh
                 z.append(y.view(bs, self.na * nx * ny, self.no))
@@ -1196,17 +1198,18 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
     no = na * (nc + 5)  # number of outputs = anchors * (classes + 5)
 
     layers, save, c2 = [], [], ch[-1]  # layers, savelist, ch out
-    single_ch = c2 == 1
-    if single_ch:
-        gw *= 3
+
     # from, number, module, args
     for i, (f, n, m, args) in enumerate(d['backbone'] + d['head']):
         m = eval(m) if isinstance(m, str) else m  # eval strings
         for j, a in enumerate(args):
             try:
                 args[j] = eval(a) if isinstance(a, str) else a  # eval strings
-            except NameError:
-                pass
+            except NameError as nameerr:
+                logger.error(f'{nameerr} --> switching to SiLu()')
+                args[j] = SiLU()
+            except Exception as ex:
+                logger.error(f'ex: {ex}')
 
         n = max(round(n * gd), 1) if n > 1 else n  # depth gain
         if m in [nn.Conv2d, Conv, RobustConv, RobustConv2, DWConv, GhostConv, RepConv, RepConv_OREPA, DownC,
@@ -1220,7 +1223,7 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
                  Ghost, GhostCSPA, GhostCSPB, GhostCSPC,
                  SwinTransformerBlock, STCSPA, STCSPB, STCSPC,
                  SwinTransformer2Block, ST2CSPA, ST2CSPB, ST2CSPC, C3, C2f]:
-            c1, c2 = ch[f], args[0] / 3 if single_ch else args[0]
+            c1, c2 = ch[f], args[0]
             if c2 != no:  # if not output
                 c2 = make_divisible(c2 * gw, 8)
 

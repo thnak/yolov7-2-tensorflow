@@ -12,6 +12,36 @@ class SiLU(nn.Module):  # export-friendly version of nn.SiLU()
         return x * torch.sigmoid(x)
 
 
+class SL_ReLu(nn.Module):
+    """https://www.mdpi.com/2076-3417/10/5/1897"""
+
+    def __init__(self, k=10, a=0.1):
+        super(SL_ReLu, self).__init__()
+        self.num_parameters = 1
+        assert k > 5, f'the argument must be larger than 5'
+        self.k = k
+        self.a = a
+
+    def forward(self, x):
+        for a in x:
+            for b in a:
+                for c in b:
+                    for d in c:
+                        if d <= 0:
+                            d = d / (1 + torch.abs(d))
+                        elif self.k >= x > 0:
+                            d = max(0, d)
+                        else:
+                            d = torch.log(self.a * d + 1) + torch.abs(torch.log(self.a * self.k + 1) - self.k)
+        return x
+        # if x <= 0:
+        #     return x/(1 + torch.abs(x))
+        # elif self.k >= x > 0:
+        #     return max(0, x)
+        # else:
+        #     return torch.log(self.a * x + 1) + torch.abs(torch.log(self.a * self.k + 1) - self.k)
+
+
 class Hardswish(nn.Module):  # export-friendly version of nn.Hardswish()
     @staticmethod
     def forward(x):
@@ -71,6 +101,7 @@ class FReLU(nn.Module):
     def forward(self, x):
         return torch.max(x, self.bn(self.conv(x)))
 
+
 # Copied from YoLov5 repo
 class AconC(nn.Module):
     r""" ACON activation (activate or not)
@@ -113,19 +144,21 @@ class MetaAconC(nn.Module):
         dpx = (self.p1 - self.p2) * x
         return dpx * torch.sigmoid(beta * dpx) + self.p2 * x
 
+
 # Advanced activation function
 
 class Mish_PLUS(nn.Module):
     # https://www.scirp.org/journal/paperinformation.aspx?paperid=114024
     def forward(x):
-        M = x*F.softplus(x).tanh()
-        return x*torch.tanh(M)
-    
+        M = x * F.softplus(x).tanh()
+        return x * torch.tanh(M)
+
+
 class Sigmoid_Tanh(nn.Module):
     # https://www.scirp.org/journal/paperinformation.aspx?paperid=114024
     def __init__(self):
         super().__init__()
-        self.s = nn.Sigmoid()
-        self.t = nn.Tanh()
-    def forward(self,x):
-        return self.s(x) * self.t(x)
+
+    @staticmethod
+    def forward(x):
+        return torch.sigmoid(x) * torch.tanh(x)
