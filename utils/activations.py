@@ -15,31 +15,24 @@ class SiLU(nn.Module):  # export-friendly version of nn.SiLU()
 class SL_ReLu(nn.Module):
     """https://www.mdpi.com/2076-3417/10/5/1897"""
 
-    def __init__(self, k=10, a=0.1):
+    def __init__(self, k=9, a=0.1):
         super(SL_ReLu, self).__init__()
         self.num_parameters = 1
         assert k > 5, f'the argument must be larger than 5'
         self.k = k
         self.a = a
+        self.dummy_param = nn.Parameter(torch.empty(0))
 
     def forward(self, x):
-        for a in x:
-            for b in a:
-                for c in b:
-                    for d in c:
-                        if d <= 0:
-                            d = d / (1 + torch.abs(d))
-                        elif self.k >= x > 0:
-                            d = max(0, d)
-                        else:
-                            d = torch.log(self.a * d + 1) + torch.abs(torch.log(self.a * self.k + 1) - self.k)
-        return x
-        # if x <= 0:
-        #     return x/(1 + torch.abs(x))
-        # elif self.k >= x > 0:
-        #     return max(0, x)
-        # else:
-        #     return torch.log(self.a * x + 1) + torch.abs(torch.log(self.a * self.k + 1) - self.k)
+        device = self.dummy_param.device
+        c = x / (1 + torch.abs(x))
+        zero_ = torch.zeros_like(x, device=device)
+        x = torch.maximum(x, zero_)
+        k = torch.full(x.shape, self.k, device=device)
+        cs = torch.log(self.a * x + 1) + torch.abs(torch.log(self.a * k + 1) - k)
+        r = torch.minimum(torch.maximum(zero_, x), cs)
+        out = r + c
+        return out
 
 
 class Hardswish(nn.Module):  # export-friendly version of nn.Hardswish()

@@ -543,6 +543,8 @@ def train(hyp, opt, tb_writer=None,
                 del saver
         # end epoch ----------------------------------------------------------------------------------------------------
     # end training
+    prefix = colorstr('best fitness: ')
+    logger.info(f'{prefix}{best_fitness}')
     if rank in [-1, 0]:
         # Plots
         if plots:

@@ -24,6 +24,8 @@ try:
 except ImportError:
     thop = None
 
+UPSAMPLEMODE = ['nearest', 'linear', 'bilinear', 'bicubic']
+
 
 class Detect(nn.Module):
     stride = None  # strides computed during build
@@ -147,7 +149,6 @@ class IDetect(nn.Module):
                     self.grid[i] = self._make_grid(nx, ny).to(x[i].device)
 
                 y = x[i].sigmoid()
-                y[..., 0:2] = (y[..., 0:2] * 2. - 0.5 + self.grid[i]) * self.stride[i]  # xy
                 y[..., 0:2] = (y[..., 0:2] * 2. - 0.5 + self.grid[i]) * self.stride[i]  # xy
                 y[..., 2:4] = (y[..., 2:4] * 2) ** 2 * self.anchor_grid[i]  # wh
                 z.append(y.view(bs, self.na * nx * ny, self.no))
@@ -405,7 +406,7 @@ class Model(nn.Module):
         # Init weights, biases
         initialize_weights(self)
         # self.info()
-        # logger.info('')
+        # logger.info('inited')
 
     def forward(self, x, augment=False, profile=False):
         if augment:
@@ -1204,10 +1205,7 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
         m = eval(m) if isinstance(m, str) else m  # eval strings
         for j, a in enumerate(args):
             try:
-                args[j] = eval(a) if isinstance(a, str) else a  # eval strings
-            except NameError as nameerr:
-                logger.error(f'{nameerr} --> switching to SiLu()')
-                args[j] = SiLU()
+                args[j] = a if a in UPSAMPLEMODE else eval(a) if isinstance(a, str) else a
             except Exception as ex:
                 logger.error(f'ex: {ex}')
 
