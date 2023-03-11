@@ -81,11 +81,12 @@ if __name__ == '__main__':
         with torch.no_grad():
             model = attempt_load(weight, map_location=map_device).to(map_device)  # load FP32 model
             ckpt = torch.load(weight, map_location=map_device)
-            model_ori = deepcopy(ckpt['model'])
             ckpt.pop('model', None)
             # prune(model)
+            model.zero_grad(set_to_none=True)
             model.eval()
-            model_ori.eval()
+            model_ori = deepcopy(model)
+
 
         ckpt['best_fitness'] = ckpt['best_fitness'] if 'best_fitness' in ckpt else -1
         ckpt['best_fitness'] = ckpt['best_fitness'].tolist()[0] if isinstance(ckpt['best_fitness'], np.ndarray) else \

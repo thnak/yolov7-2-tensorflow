@@ -363,7 +363,7 @@ def train(hyp, opt, tb_writer=None,
                         bar_format=TQDM_BAR_FORMAT)  # progress bar
 
         # batch -------------------------------------------------------------
-        optimizer.zero_grad()
+        optimizer.zero_grad(set_to_none=True)
         for i, (imgs, targets, paths, _) in pbar:
             del _
             # number integrated batches (since train start)
@@ -420,7 +420,7 @@ def train(hyp, opt, tb_writer=None,
             if ni % accumulate == 0:
                 scaler.step(optimizer)  # optimizer.step
                 scaler.update()
-                optimizer.zero_grad()
+                optimizer.zero_grad(set_to_none=True)
                 if ema:
                     ema.update(model)
 

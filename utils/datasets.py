@@ -37,6 +37,7 @@ IMG_FORMATS = ['bmp', 'jpg', 'jpeg', 'png', 'tif', 'tiff', 'dng', 'webp', 'mpo',
 VID_FORMATS = ['asf', 'mov', 'avi', 'mp4', 'mpg', 'mpeg', 'm4v', 'wmv', 'mkv', 'gif']  # acceptable video suffixes
 logger = logging.getLogger(__name__)
 RANK = int(os.getenv('RANK', -1))
+TORCH_PIN_MEMORY = False
 # Get orientation exif tag
 for orientation in ExifTags.TAGS.keys():
     if ExifTags.TAGS[orientation] == 'Orientation':
@@ -529,8 +530,8 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                     self.cache_images = 'disk'
                 elif check_ram:
                     if torch.cuda.is_available():
-                        self.pin_memory = True
-                        self.cache_images = ''
+                        self.pin_memory = TORCH_PIN_MEMORY
+                        self.cache_images = '' if TORCH_PIN_MEMORY else 'ram'
                     else:
                         self.cache_images = 'ram'
             if self.cache_images == 'disk':
@@ -541,7 +542,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                 gb = 0  # Gigabytes of cached images
                 self.img_hw0, self.img_hw = [None] * n, [None] * n
                 with closing(Pool(maxtasksperchild=4)) as poolp:
-                    results = poolp.map(self.load_image, range(n), chunksize=int(n//os.cpu_count()))
+                    results = poolp.map(self.load_image, range(n), chunksize=n//os.cpu_count())
                 pbar = tqdm(enumerate(results), total=n, mininterval=0.1, maxinterval=1, unit='image',
                             bar_format=TQDM_BAR_FORMAT)
                 checkimgSizeStatus = False
