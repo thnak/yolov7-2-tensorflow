@@ -1,50 +1,47 @@
 # Usage: pip install -r requirements.txt
 
 # Base ----------------------------------------
-matplotlib==3.6.2
-numpy==1.23.4
-opencv-python==4.7.0.68
-Pillow==9.4.0
-PyYAML==6.0
-requests==2.28.0
-scipy==1.10.0
-torch==1.13.1
-mss==7.0.1
+matplotlib>=3.6.2
+numpy>=1.23.4
+opencv-python>=4.7.0.68
+Pillow>=9.4.0
+PyYAML>=6.0
+requests>=2.28.0
+scipy>=1.10.0
+torch>=1.13.1
+mss>=7.0.1
 # torch-directml
-tqdm==4.64.0
-protobuf<4.21.3
-pycuda==2022.2.2
-nvidia-pyindex==1.0.9
+tqdm
+protobuf
+#pycuda==2022.2.2
+#nvidia-pyindex==1.0.9
 # nvidia-tensorrt==8.4.3.1
-pafy==0.5.5
-youtube_dl==2021.12.17
+#pafy==0.5.5
+#youtube_dl==2021.12.17
 # Logging -------------------------------------
-tensorboard==2.11.0
+tensorboard>=2.11.0
 # wandb
 termcolor
 # Plotting ------------------------------------
-pandas==1.3.5
-seaborn==0.12.2
+pandas>=1.3.5
+seaborn>=0.12.2
 
 # Export --------------------------------------
 
-coremltools==6.1  # CoreML export
-onnx==1.13.0  # ONNX export
-onnxsim==0.4.13
-onnxmltools==1.11.1
-onnx_tf==1.10.0
-onnx-simplifier==0.4.13 # ONNX simplifier
-scikit-learn<=1.1.2  # CoreML quantization
+#coremltools>=6.1  # CoreML export
+#onnx>=1.13.0  # ONNX export
+#onnxsim>=0.4.13
+#onnxmltools>=1.11.1
+#onnx_tf>=1.10.0
+#scikit-learn<=1.1.2  # CoreML quantization
 #tensorflow==2.11.0  # TFLite export
 #tensorflowjs>=3.9.0  # TF.js export
-openvino-dev==2022.3.0 # OpenVINO export
+#openvino-dev==2022.3.0 # OpenVINO export
 
 # Extras --------------------------------------
-pyadl==0.1
-ipython==8.10.0  # interactive notebook
-psutil==5.9.4  # system utilization
-thop==0.1.1.post2209072238
-albumentations==1.3.0
+pyadl
+ipython # interactive notebook
+psutil  # system utilization
 # onnx-graphsurgeon==0.3.25
 # pycocotools>=2.0  # COCO mAP
 # roboflow

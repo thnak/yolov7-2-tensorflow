@@ -76,16 +76,16 @@ if __name__ == '__main__':
     warnings.filterwarnings(action='ignore', category=UserWarning)
     warnings.filterwarnings(action='ignore', category=FutureWarning)
     for weight in opt.weights:
-        logging.info(f'# Load PyTorch model')
+        prefix = colorstr('Export:')
+        logging.info(f'{prefix} Load PyTorch model')
         device, gitstatus = select_device(opt.device)
         map_device = 'cpu' if device.type == 'privateuseone' else device
         with torch.no_grad():
-            model = attempt_load(weight, map_location=map_device).to(map_device)  # load FP32 model
+            model = attempt_load(weight, map_location=map_device).to(map_device).eval()  # load FP32 model
             ckpt = torch.load(weight, map_location=map_device)
             ckpt.pop('model', None)
             # prune(model)
             model.zero_grad(set_to_none=True)
-            model.eval()
             model_ori = deepcopy(model)
 
         ckpt['best_fitness'] = ckpt['best_fitness'] if 'best_fitness' in ckpt else -1
@@ -112,17 +112,17 @@ if __name__ == '__main__':
 
         model_Gflop = model.info(verbose=False, img_size=input_shape[1:])
         logging.info(model_Gflop)
-        model_Gflop = 0
-        model.model[-1].export = False  # set Detect() layer grid export
+        model.model[-1].export = coreML  # set Detect() layer grid export, for coreml export set to True
 
         y = model(img)  # dry run
 
         # model output shape
-        shape = tuple((y[0] if isinstance(y, tuple) else y).shape)
+        shape = tuple((y[0] if isinstance(y, (tuple, list)) else y).shape)
+        logging.info(f'{prefix} model output shape {shape}')
 
         if opt.include_nms:
             model.model[-1].include_nms = True
-            y = None
+            del y
         filenames = []
         # TorchScript export
         if torchScript:
@@ -141,6 +141,7 @@ if __name__ == '__main__':
         if coreML:
             try:
                 prefix = colorstr('CoreML:')
+                check_requirements('coremltools')
                 import coremltools as ct
 
                 logging.info(
@@ -182,6 +183,7 @@ if __name__ == '__main__':
                 logging.info(f'{prefix} export failure❌:\n{e}')
         if ONNX:
             prefix = colorstr('ONNX:')
+            check_requirements(('onnx', 'onnxmltools'))
             import onnx
             import onnxmltools
 

@@ -16,11 +16,13 @@ models/best_saved_model/
 *.jpg
 *.npy
 *.xml
-*.txt
+*.mlmodel
 *.pt
 *.pth
 *.onnx
 *.tflite
+*.mp3
+*.mp4
 TrainRes/train
 TrainRes/val
 tre.py

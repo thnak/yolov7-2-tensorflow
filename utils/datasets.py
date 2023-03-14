@@ -38,6 +38,7 @@ VID_FORMATS = ['asf', 'mov', 'avi', 'mp4', 'mpg', 'mpeg', 'm4v', 'wmv', 'mkv', '
 logger = logging.getLogger(__name__)
 RANK = int(os.getenv('RANK', -1))
 TORCH_PIN_MEMORY = False
+YOUTUBE = ('www.youtube.com', 'youtube.com', 'youtu.be', 'https://youtu.be')
 # Get orientation exif tag
 for orientation in ExifTags.TAGS.keys():
     if ExifTags.TAGS[orientation] == 'Orientation':
@@ -208,6 +209,8 @@ class LoadImages:
         self.scaleFill = scaleFill
         self.scaleUp = scaleUp
         self.vid_stride = vid_stride  # video frame-rate stride
+        self.fps = None
+
         if any(videos):
             self._new_video(videos[0])  # new video
         else:
@@ -300,14 +303,15 @@ class LoadStreams:
         self.c_frame = [0] * n
         self.sources = [clean_str(x) for x in sources]  # clean source names for later
         for i, s in enumerate(sources):
-            print(f'{i + 1}/{n}: {s}... init ', end='')
+            print(f'{i + 1}/{n}: {s}... init ')
             url = eval(s) if s.isnumeric() else s
-            if urlparse(s).hostname in (
-                    'www.youtube.com', 'youtube.com', 'youtu.be', 'https://youtu.be'):  # if source is YouTube video
-                check_requirements(('pafy==0.5.5', 'youtube_dl==2021.12.17'))
+            if urlparse(s).hostname in YOUTUBE:  # if source is YouTube video
+                check_requirements(('pafy', 'youtube_dl'))
                 import pafy
                 url = pafy.new(url).getbest(preftype="mp4").url
-            cap = cv2.VideoCapture(url)
+            if 'rtsp://' in s:
+                os.environ['OPENCV_FFMPEG_CAPTURE_OPTIONS'] = 'rtsp_transport;udp'
+            cap = cv2.VideoCapture(url, cv2.CAP_ANY)
             assert cap.isOpened(), f'Failed to open {s}'
             w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
@@ -1259,6 +1263,7 @@ class Albumentations:
     """Data augmentation with Albumentations library"""
 
     def __init__(self, hyp=None, rect=True):
+        check_requirements('albumentations')
         import albumentations as A
         self.transform = A.Compose([
             A.CLAHE(p=hyp['CLAHE'],

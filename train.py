@@ -386,8 +386,7 @@ def train(hyp, opt, tb_writer=None,
 
             # Multi-scale
             if opt.multi_scale:
-                sz = random.randrange(
-                    imgsz * 0.5, imgsz * 1.5 + gs) // gs * gs  # size
+                sz = random.randrange(int(imgsz * 0.5), int(imgsz * 1.5) + gs) // gs * gs  # size
                 sf = sz / max(imgs.shape[2:])  # scale factor
                 if sf != 1:
                     # new shape (stretched to gs-multiple)

@@ -352,7 +352,8 @@ def inferWithDynamicBatch(enginePath,opt, save=''):
             img, bbox = model.end2end(Data_vis[8], Data_vis[2], Data_vis[6], Data_vis[5], Data_vis[7], BFC,Data_vis[4][0]['c_frame'][0] / Data_vis[4][0]['frames'][0])
             if demensions is None and not opt.nosave:
                 demensions = Data_vis[2][0].shape[:2]
-                ffmpeg = FFMPEG_recorder(f'{save_dir}/detect.mp4', videoDimensions= (demensions[1], demensions[0]), fps= dataset.fps)
+                if dataset.fps != None:
+                    ffmpeg = FFMPEG_recorder(f'{save_dir}/detect.mp4', videoDimensions=(demensions[1], demensions[0]), fps=dataset.fps)
             if opt.view_img > -1:
                 for index, (im) in enumerate(img):
                     cv2.namedWindow(f'{Data_vis[0][index]}', cv2.WINDOW_NORMAL)
@@ -373,8 +374,7 @@ def inferWithDynamicBatch(enginePath,opt, save=''):
                 for i in range(len(Data_vis)):
                     Data_vis[i] = None
         print(f'end: Thread-3 {seen}')
-        
-    
+
     thread1 = threading.Thread(target= Thread1, name='Thread-1')
     thread2 = threading.Thread(target= Thread2, name='Thread-2')
     thread3 = threading.Thread(target= Thread3, name='Thread-3')
