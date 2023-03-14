@@ -557,6 +557,7 @@ class TracedModel(nn.Module):
 
 def save_model(ckpt=None, last=None, best=None, best_fitness=None, fi=None, epoch=0, epochs=0, wdir=None, wandb_logger=None, opt=None):
     if ckpt is not None:
+        ckpt['model'] = deepcopy(ckpt['model']).to('cpu')
         torch.save(ckpt, last)
         if best_fitness == fi:
             torch.save(ckpt, best)

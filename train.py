@@ -159,6 +159,12 @@ def train(hyp, opt, tb_writer=None,
 
     # Optimizer
     nbs = 64  # nominal batch size
+    # Image sizes
+    gs = max(int(model.stride.max()), 32)  # grid size (max stride)
+    # verify imgsz are gs-multiples
+    imgsz, imgsz_test = [check_img_size(x, gs) for x in opt.img_size]
+    model.info(verbose=True, img_size=imgsz)
+    logger.info('')
     # accumulate loss before optimizing
     accumulate = max(round(nbs / total_batch_size), 1)
     hyp['weight_decay'] *= total_batch_size * \
@@ -203,12 +209,7 @@ def train(hyp, opt, tb_writer=None,
             epochs += ckpt['epoch']  # finetune additional epochs
         del ckpt, state_dict, nodes, freeze
 
-    # Image sizes
-    gs = max(int(model.stride.max()), 32)  # grid size (max stride)
-    # verify imgsz are gs-multiples
-    imgsz, imgsz_test = [check_img_size(x, gs) for x in opt.img_size]
-    model.info(verbose=True, img_size=imgsz)
-    logger.info('')
+
     # number of detection layers (used for scaling hyp['obj'])
     nl = model.model[-1].nl
 

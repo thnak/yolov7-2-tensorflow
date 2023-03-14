@@ -199,3 +199,5 @@ def add_tflite_metadata(file, metadata, num_outputs):
         populator.load_associated_files([str(tmp_file)])
         populator.populate()
         tmp_file.unlink()
+
+

@@ -30,7 +30,7 @@ FILE = Path(__file__).resolve()
 ROOT = FILE.parents[1]  # YOLOv5 root directory
 TQDM_BAR_FORMAT = '{l_bar}{bar:10}{r_bar}'  # tqdm bar format
 ONNX_OPSET = [11, 12, 13, 14, 15, 16, 17]
-ONNX_OPSET_TARGET = 12
+ONNX_OPSET_TARGET = ONNX_OPSET
 
 def set_logging(rank=-1, filename=None, filemode=None):
     logging.basicConfig(

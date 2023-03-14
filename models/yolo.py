@@ -71,7 +71,7 @@ class Detect(nn.Module):
                     xy, wh, conf = y.split((2, 2, self.nc + 1), 4)
                     # new xy
                     xy = xy * (2. * self.stride[i]) + (self.stride[i] * (self.grid[i] - 0.5))
-                    wh = wh ** 2 * (4 * self.anchor_grid[i].data)  # new wh
+                    wh = wh ** 2 * (4 * self.anchor_grid[i].detach())  # new wh
                     y = torch.cat((xy, wh, conf), 4)
                 z.append(y.view(bs, self.na * nx * ny, self.no))
 
@@ -180,7 +180,7 @@ class IDetect(nn.Module):
                     # new xy
                     xy = xy * (2. * self.stride[i]) + \
                          (self.stride[i] * (self.grid[i] - 0.5))
-                    wh = wh ** 2 * (4 * self.anchor_grid[i].data)  # new wh
+                    wh = wh ** 2 * (4 * self.anchor_grid[i].detach())  # new wh
                     y = torch.cat((xy, wh, conf), 4)
                 z.append(y.view(bs, self.na * nx * ny, self.no))
 
@@ -278,7 +278,7 @@ class IAuxDetect(nn.Module):
                 else:
                     xy, wh, conf = y.split((2, 2, self.nc + 1), 4)  # y.tensor_split((2, 4, 5), 4)  # torch 1.8.0
                     xy = xy * (2. * self.stride[i]) + (self.stride[i] * (self.grid[i] - 0.5))  # new xy
-                    wh = wh ** 2 * (4 * self.anchor_grid[i].data)  # new wh
+                    wh = wh ** 2 * (4 * self.anchor_grid[i].detach())  # new wh
                     y = torch.cat((xy, wh, conf), 4)
                 z.append(y.view(bs, self.na * nx * ny, self.no))
 
@@ -303,7 +303,7 @@ class IAuxDetect(nn.Module):
                     y[..., 2:4] = (y[..., 2:4] * 2) ** 2 * self.anchor_grid[i]  # wh
                 else:
                     xy = (y[..., 0:2] * 2. - 0.5 + self.grid[i]) * self.stride[i]  # xy
-                    wh = (y[..., 2:4] * 2) ** 2 * self.anchor_grid[i].data  # wh
+                    wh = (y[..., 2:4] * 2) ** 2 * self.anchor_grid[i].detach()  # wh
                     y = torch.cat((xy, wh, y[..., 4:]), -1)
                 z.append(y.view(bs, self.na * nx * ny, self.no))
 
@@ -468,10 +468,10 @@ class Model(nn.Module):
         # cf = torch.bincount(torch.tensor(np.concatenate(dataset.labels, 0)[:, 0]).long(), minlength=nc) + 1.
         m = self.model[-1]  # Detect() module
         for mi, s in zip(m.m, m.stride):  # from
-            b = mi.bias.view(m.na, -1)  # conv.bias(255) to (3,85)
+            b = mi.bias.view(m.na, -1).detach()  # conv.bias(255) to (3,85)
             # obj (8 objects per 640 image)
-            b.data[:, 4] += math.log(8 / (640 / s) ** 2)
-            b.data[:, 5:] += math.log(0.6 / (m.nc - 0.99)
+            b[:, 4] += math.log(8 / (640 / s) ** 2)
+            b[:, 5:] += math.log(0.6 / (m.nc - 0.99)
                                       ) if cf is None else torch.log(cf / cf.sum())  # cls
             mi.bias = torch.nn.Parameter(b.view(-1), requires_grad=True)
 
@@ -481,16 +481,16 @@ class Model(nn.Module):
         # cf = torch.bincount(torch.tensor(np.concatenate(dataset.labels, 0)[:, 0]).long(), minlength=nc) + 1.
         m = self.model[-1]  # Detect() module
         for mi, mi2, s in zip(m.m, m.m2, m.stride):  # from
-            b = mi.bias.view(m.na, -1)  # conv.bias(255) to (3,85)
+            b = mi.bias.view(m.na, -1).detach()  # conv.bias(255) to (3,85)
             # obj (8 objects per 640 image)
-            b.data[:, 4] += math.log(8 / (640 / s) ** 2)
-            b.data[:, 5:] += math.log(0.6 / (m.nc - 0.99)
+            b[:, 4] += math.log(8 / (640 / s) ** 2)
+            b[:, 5:] += math.log(0.6 / (m.nc - 0.99)
                                       ) if cf is None else torch.log(cf / cf.sum())  # cls
             mi.bias = torch.nn.Parameter(b.view(-1), requires_grad=True)
-            b2 = mi2.bias.view(m.na, -1)  # conv.bias(255) to (3,85)
+            b2 = mi2.bias.view(m.na, -1).detach()  # conv.bias(255) to (3,85)
             # obj (8 objects per 640 image)
-            b2.data[:, 4] += math.log(8 / (640 / s) ** 2)
-            b2.data[:, 5:] += math.log(0.6 / (m.nc - 0.99)
+            b2[:, 4] += math.log(8 / (640 / s) ** 2)
+            b2[:, 5:] += math.log(0.6 / (m.nc - 0.99)
                                        ) if cf is None else torch.log(cf / cf.sum())  # cls
             mi2.bias = torch.nn.Parameter(b2.view(-1), requires_grad=True)
 
@@ -501,15 +501,15 @@ class Model(nn.Module):
         m = self.model[-1]  # Bin() module
         bc = m.bin_count
         for mi, s in zip(m.m, m.stride):  # from
-            b = mi.bias.view(m.na, -1)  # conv.bias(255) to (3,85)
-            old = b[:, (0, 1, 2, bc + 3)].data
+            b = mi.bias.view(m.na, -1).detach()  # conv.bias(255) to (3,85)
+            old = b[:, (0, 1, 2, bc + 3)].detach()
             obj_idx = 2 * bc + 4
-            b[:, :obj_idx].data += math.log(0.6 / (bc + 1 - 0.99))
+            b[:, :obj_idx] += math.log(0.6 / (bc + 1 - 0.99))
             # obj (8 objects per 640 image)
-            b[:, obj_idx].data += math.log(8 / (640 / s) ** 2)
-            b[:, (obj_idx + 1):].data += math.log(0.6 / (m.nc - 0.99)
+            b[:, obj_idx] += math.log(8 / (640 / s) ** 2)
+            b[:, (obj_idx + 1):] += math.log(0.6 / (m.nc - 0.99)
                                                   ) if cf is None else torch.log(cf / cf.sum())  # cls
-            b[:, (0, 1, 2, bc + 3)].data = old
+            b[:, (0, 1, 2, bc + 3)] = old
             mi.bias = torch.nn.Parameter(b.view(-1), requires_grad=True)
 
     # initialize biases into Detect(), cf is class frequency
@@ -518,10 +518,10 @@ class Model(nn.Module):
         # cf = torch.bincount(torch.tensor(np.concatenate(dataset.labels, 0)[:, 0]).long(), minlength=nc) + 1.
         m = self.model[-1]  # Detect() module
         for mi, s in zip(m.m, m.stride):  # from
-            b = mi.bias.view(m.na, -1)  # conv.bias(255) to (3,85)
+            b = mi.bias.view(m.na, -1).detach()  # conv.bias(255) to (3,85)
             # obj (8 objects per 640 image)
-            b.data[:, 4] += math.log(8 / (640 / s) ** 2)
-            b.data[:, 5:] += math.log(0.6 / (m.nc - 0.99)
+            b[:, 4] += math.log(8 / (640 / s) ** 2)
+            b[:, 5:] += math.log(0.6 / (m.nc - 0.99)
                                       ) if cf is None else torch.log(cf / cf.sum())  # cls
             mi.bias = torch.nn.Parameter(b.view(-1), requires_grad=True)
 
@@ -621,15 +621,15 @@ class ONNX_Engine(object):
         intel_Devicess = True if 'Intel' in platform.machine() else False
         cpu_device = False
         if operating_system in ['Windows']:
-            check_requirements(['onnxruntime-directml==1.13.1'])
+            check_requirements(['onnxruntime-directml'])
         elif operating_system == 'Linux':
             if is_x64 and nvidia_GPUDevices:
-                check_requirements(['onnxruntime-gpu==1.13.1'])
+                check_requirements(['onnxruntime-gpu'])
             elif is_x64 and intel_Devicess:
                 check_requirements(['onnxruntime-openvino'])
             elif is_x64:
                 cpu_device = True
-                check_requirements(['onnxruntime==1.13.1'])
+                check_requirements(['onnxruntime'])
 
         import onnxruntime as onnxrt
         self.runTime = onnxrt
@@ -668,12 +668,13 @@ class ONNX_Engine(object):
 
         session_opt = self.runTime.SessionOptions()
         session_opt.enable_profiling = False
+        session_opt.log_severity_level = 3
+        session_opt.use_deterministic_compute = True
         session_opt.enable_mem_pattern = False if 'DmlExecutionProvider' in self.providers else True
         session_opt.graph_optimization_level = self.runTime.GraphOptimizationLevel.ORT_ENABLE_ALL
         session_opt.execution_mode = self.runTime.ExecutionMode.ORT_PARALLEL if cpu_device else self.runTime.ExecutionMode.ORT_SEQUENTIAL
 
-        self.session = self.runTime.InferenceSession(
-            ONNX_EnginePath, sess_options=session_opt, providers=self.providers)
+        self.session = self.runTime.InferenceSession(ONNX_EnginePath, sess_options=session_opt, providers=self.providers)
         self.session.enable_fallback()
 
         self.imgsz = self.session.get_inputs()[0].shape[2:]

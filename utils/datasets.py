@@ -665,17 +665,17 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         if mosaic:
             # Load mosaic
             if random.random() < 0.8:
-                img, labels = load_mosaic(self, index)
+                img, labels = self.load_mosaic(index)
             else:
-                img, labels = load_mosaic9(self, index)
+                img, labels = self.load_mosaic9(index)
             shapes = None
 
             # MixUp https://arxiv.org/pdf/1710.09412.pdf
             if random.random() < self.hyp['mixup']:
                 if random.random() < 0.8:
-                    img2, labels2 = load_mosaic(self, random.randint(0, len(self.labels) - 1))
+                    img2, labels2 = self.load_mosaic(random.randint(0, len(self.labels) - 1))
                 else:
-                    img2, labels2 = load_mosaic9(self, random.randint(0, len(self.labels) - 1))
+                    img2, labels2 = self.load_mosaic9(random.randint(0, len(self.labels) - 1))
                 r = np.random.beta(8.0, 8.0)  # mixup ratio, alpha=beta=8.0
                 img = (img * r + img2 * (1 - r)).astype(np.uint8)
                 labels = np.concatenate((labels, labels2), 0)
@@ -709,7 +709,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             if random.random() < self.hyp['paste_in']:
                 sample_labels, sample_images, sample_masks = [], [], []
                 while len(sample_labels) < 30:
-                    sample_labels_, sample_images_, sample_masks_ = load_samples(self, random.randint(0,
+                    sample_labels_, sample_images_, sample_masks_ = self.load_samples(random.randint(0,
                                                                                                       len(self.labels) - 1))
                     sample_labels += sample_labels_
                     sample_images += sample_images_

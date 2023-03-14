@@ -82,7 +82,7 @@ class Ensemble(nn.ModuleList):
 
 
 class ORT_NMS(torch.autograd.Function):
-    '''ONNX-Runtime NMS operation'''
+    """ONNX-Runtime NMS operation"""
 
     @staticmethod
     def forward(ctx,

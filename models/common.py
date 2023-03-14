@@ -63,6 +63,7 @@ class ReOrg(nn.Module):
         out = ReOrg_slice(out)
         return out
 
+
 class Concat(nn.Module):
     def __init__(self, dimension=1):
         super(Concat, self).__init__()

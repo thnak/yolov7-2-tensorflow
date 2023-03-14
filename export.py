@@ -1,7 +1,8 @@
 import datetime
 from utils.add_nms import RegisterNMS
 from utils.torch_utils import select_device, prune
-from utils.general import set_logging, check_img_size, check_requirements, colorstr, ONNX_OPSET, ONNX_OPSET_TARGET, gb2mb
+from utils.general import set_logging, check_img_size, check_requirements, colorstr, ONNX_OPSET, ONNX_OPSET_TARGET, \
+    gb2mb
 from utils.general import set_logging, check_img_size, check_requirements, colorstr
 from utils.general import set_logging, check_img_size, check_requirements, colorstr, ONNX_OPSET, ONNX_OPSET_TARGET
 from utils.general import set_logging, check_img_size, check_requirements, colorstr, ONNX_OPSET, ONNX_OPSET_TARGET
@@ -19,6 +20,7 @@ import logging
 import os
 import numpy as np
 from copy import deepcopy
+
 sys.path.append('./')  # to run '$ python *.py' files in subdirectories
 
 if __name__ == '__main__':
@@ -29,8 +31,8 @@ if __name__ == '__main__':
     parser.add_argument('--dynamic-batch', action='store_true', help='dynamic batch onnx for tensorrt and onnx-runtime')
     parser.add_argument('--include', nargs='+', type=str, default='', help='export format')
     parser.add_argument('--end2end', action='store_true', help='export end2end onnx (/end2end/EfficientNMS_TRT)')
-    parser.add_argument('--max-hw', type=int, default=None,
-                        help='None for tensorrt nms, int value for onnx-runtime nms')
+    parser.add_argument('--max-hw', '--ort', action='store_true', default=None,
+                        help='end2end onnxruntime')
     parser.add_argument('--topk-all', type=int, default=100, help='topk objects for every images')
     parser.add_argument('--iou-thres', '-iou', type=float, default=0.45, help='iou threshold for NMS')
     parser.add_argument('--conf-thres', '-conf', type=float, default=0.25, help='conf threshold for NMS')
@@ -55,7 +57,7 @@ if __name__ == '__main__':
     opt.include = [x.lower() for x in opt.include] if isinstance(
         opt.include, list) else [opt.include.lower()]
 
-    torchScript = any(x in ['torchscript'] for x in opt.include)
+    torchScript = any(x in ['torchscript', 'coreml'] for x in opt.include)
     torchScriptLite = any(x in ['torchscriptlite'] for x in opt.include)
     ONNX = any(x in ['onnx', 'open', 'openvino'] for x in opt.include)
     openVINO = any(x in ['openvino', 'open'] for x in opt.include)
@@ -71,9 +73,8 @@ if __name__ == '__main__':
     opt.weights = [os.path.realpath(x) for x in opt.weights] if isinstance(
         opt.weights, (tuple, list)) else [os.path.realpath(opt.weights)]
     warnings.filterwarnings('ignore', category=torch.jit.TracerWarning)
-    s = 'WARNING: The shape inference of prim::Constant type is missing, so it may result in wrong shape ' \
-        'inference for the exported graph. Please consider adding it in symbolic function.'
-    warnings.filterwarnings(action='ignore', message=s)
+    warnings.filterwarnings(action='ignore', category=UserWarning)
+    warnings.filterwarnings(action='ignore', category=FutureWarning)
     for weight in opt.weights:
         logging.info(f'# Load PyTorch model')
         device, gitstatus = select_device(opt.device)
@@ -86,7 +87,6 @@ if __name__ == '__main__':
             model.zero_grad(set_to_none=True)
             model.eval()
             model_ori = deepcopy(model)
-
 
         ckpt['best_fitness'] = ckpt['best_fitness'] if 'best_fitness' in ckpt else -1
         ckpt['best_fitness'] = ckpt['best_fitness'].tolist()[0] if isinstance(ckpt['best_fitness'], np.ndarray) else \
@@ -107,11 +107,7 @@ if __name__ == '__main__':
         for k, m in model.named_modules():
             m._non_persistent_buffers_set = set()  # pytorch 1.6.0 compatibility
             if isinstance(m, models.common.Conv):  # assign export-friendly activations
-                if isinstance(m.act, nn.Hardswish):
-                    m.act = Hardswish()
-                elif isinstance(m.act, nn.SiLU):
-                    m.act = SiLU()
-                elif isinstance(m, (models.yolo.Detect, models.yolo.IDetect, models.yolo.IAuxDetect)):
+                if isinstance(m, (models.yolo.Detect, models.yolo.IDetect, models.yolo.IAuxDetect)):
                     m.dynamic = opt.dynamic
 
         model_Gflop = model.info(verbose=False, img_size=input_shape[1:])
@@ -133,7 +129,7 @@ if __name__ == '__main__':
             try:
                 prefix = colorstr('TorchScript:')
                 logging.info(
-                    f'\n{prefix} Starting TorchScript export with torch %s...{torch.__version__}')
+                    f'\n{prefix} Starting TorchScript export with torch{torch.__version__}')
                 f = weight.replace('.pt', '.torchscript.pt')  # filename
                 ts = torch.jit.trace(model, img, strict=False)
                 ts.save(f)
@@ -148,7 +144,7 @@ if __name__ == '__main__':
                 import coremltools as ct
 
                 logging.info(
-                    f'\n{prefix}Starting CoreML export with coremltools {ct.__version__}')
+                    f'\n{prefix} Starting CoreML export with coremltools {ct.__version__}')
                 ct_model = ct.convert(ts, inputs=[ct.ImageType(
                     'image', shape=img.shape, scale=1 / 255.0, bias=[0, 0, 0])])
                 bits, mode = (8, 'kmeans_lut') if opt.int8 else (
@@ -205,7 +201,7 @@ if __name__ == '__main__':
                     'images': {
                         0: 'batch',
                     }, }
-                if opt.end2end and opt.max_hw is None:
+                if opt.end2end and not opt.max_hw:
                     output_axes = {
                         'num_dets': {0: 'batch'},
                         'det_boxes': {0: 'batch'},
@@ -215,12 +211,11 @@ if __name__ == '__main__':
                     output_axes = {'output': {0: 'batch'}, }
                 dynamic_axes.update(output_axes)
             if opt.end2end:
-                x = 'TensorRT' if opt.max_hw is None else 'ONNXRUNTIME'
-                logging.info(
-                    f'{prefix} Starting export end2end onnx model for {colorstr(x)}')
+                x = 'TensorRT' if not opt.max_hw else 'ONNXRUNTIME'
+                logging.info(f'{prefix} Starting export end2end model for {colorstr(x)}')
                 model = End2End(model, opt.topk_all, opt.iou_thres,
-                                opt.conf_thres, opt.max_hw, map_device, len(labels))
-                if opt.end2end and opt.max_hw is None:
+                                opt.conf_thres, max(input_shape[1:]), map_device, len(labels))
+                if opt.end2end and not opt.max_hw:
                     output_names = ['num_dets', 'det_boxes',
                                     'det_scores', 'det_classes']
                     shapes = [opt.batch_size, 1, opt.batch_size, opt.topk_all, 4,
@@ -240,11 +235,12 @@ if __name__ == '__main__':
                 pass
             except Exception:
                 pass
-            if opt.onnx_opset != ONNX_OPSET_TARGET and dml:
+            if opt.onnx_opset not in ONNX_OPSET_TARGET and dml:
                 logging.info(
                     f'{prefix} onnx opset tested for version {ONNX_OPSET_TARGET}, newer version may have poor performance for ONNXRUNTIME in DmlExecutionProvider')
             torch.onnx.disable_log()
-            torch.onnx.export(model, img, f, verbose=opt.v,
+            torch.onnx.export(torch.jit.trace(model, img, strict=False),
+                              img, f, verbose=opt.v,
                               opset_version=opt.onnx_opset,
                               input_names=['images'],
                               output_names=output_names,
@@ -255,7 +251,7 @@ if __name__ == '__main__':
             onnx_model = onnx.load(f)  # load onnx model
             onnx.checker.check_model(onnx_model)  # check onnx model
 
-            if opt.end2end and opt.max_hw is None:
+            if opt.end2end and not opt.max_hw:
                 for i in onnx_model.graph.output:
                     for j in i.type.tensor_type.shape.dim:
                         j.dim_param = str(shapes.pop(0))
@@ -263,7 +259,6 @@ if __name__ == '__main__':
             if opt.simplify:
                 try:
                     import onnxsim
-
                     logging.info(f'{prefix} Starting to simplify ONNX...')
                     onnx_model, check = onnxsim.simplify(onnx_model)
                     assert check, 'assert check failed'
@@ -346,6 +341,7 @@ if __name__ == '__main__':
             prefix = colorstr('TensorFlow GraphDef:')
             try:
                 from tools.auxexport import export_pb
+
                 outputpath = export_pb(s_models, weight, prefix=prefix)[0]
                 logging.info(
                     f'{prefix} export success✅, saved as {outputpath}')
