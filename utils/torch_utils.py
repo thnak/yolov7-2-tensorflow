@@ -13,7 +13,6 @@ import torch
 import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
-import torchvision
 from torch.optim import Optimizer
 
 from utils.general import check_requirements, colorstr, gb2mb
@@ -321,6 +320,8 @@ def model_info(model, verbose=False, img_size=640):
     for m in model.modules():
         if isinstance(m, nn.Upsample):
             m.recompute_scale_factor = None
+    for m in model.parameters():
+        data_type = m.dtype
     xxx = False
     if xxx:
         print('%5s %40s %9s %12s %20s %10s %10s' % ('layer', 'name', 'gradient', 'parameters', 'shape', 'mu', 'sigma'))
@@ -334,7 +335,7 @@ def model_info(model, verbose=False, img_size=640):
         check_requirements('thop')
         from thop import profile
         img_size = img_size if isinstance(img_size, list) else [img_size, img_size]  # expand if int/float
-        img = torch.zeros((1, 3, *img_size), device=next(model.parameters()).device)
+        img = torch.zeros((1, 3, *img_size), device=next(model.parameters()).device, dtype=data_type)
         flops = profile(deepcopy(model), inputs=(img,), verbose=False)[0] / 1E9 * 2  # stride GFLOPS
         flops = round(flops, 3)
         rect = img_size[0] != img_size[1]
@@ -354,25 +355,6 @@ def model_info(model, verbose=False, img_size=640):
     if verbose:
         logger.info(output)
     return output
-
-
-def load_classifier(name='resnet101', n=2):
-    """Loads a pretrained model reshaped to n-class output"""
-    model = torchvision.models.__dict__[name](pretrained=True)
-
-    # ResNet model properties
-    # input_size = [3, 224, 224]
-    # input_space = 'RGB'
-    # input_range = [0, 1]
-    # mean = [0.485, 0.456, 0.406]
-    # std = [0.229, 0.224, 0.225]
-
-    # Reshape output to n classes
-    filters = model.fc.weight.shape[1]
-    model.fc.bias = nn.Parameter(torch.zeros(n), requires_grad=True)
-    model.fc.weight = nn.Parameter(torch.zeros(n, filters), requires_grad=True)
-    model.fc.out_features = n
-    return model
 
 
 def scale_img(img, ratio=1.0, same_shape=False, gs=32):  # img(16,3,256,416)

@@ -1,5 +1,4 @@
 import datetime
-from utils.add_nms import RegisterNMS
 from utils.torch_utils import select_device, prune
 from utils.general import set_logging, check_img_size, check_requirements, colorstr, ONNX_OPSET, ONNX_OPSET_TARGET, \
     gb2mb
@@ -43,7 +42,7 @@ if __name__ == '__main__':
                         help='registering EfficientNMS_TRT plugin to export TensorRT engine')
     parser.add_argument('--nms', action='store_true', help='TF: add NMS to model')
     parser.add_argument('--agnostic-nms', action='store_true', help='TF: add agnostic NMS to model')
-    parser.add_argument('--fp16', action='store_true', help='CoreML FP16 half-precision export')
+    parser.add_argument('--fp16', '--half', action='store_true', help='CoreML FP16 half-precision export')
     parser.add_argument('--int8', action='store_true', help='CoreML INT8 quantization')
     parser.add_argument('--v', action='store_true', help='Verbose log')
     parser.add_argument('--author', type=str, default='Nguyễn Văn Thạnh', help="author's name")
@@ -98,11 +97,7 @@ if __name__ == '__main__':
 
         input_shape = ckpt['input_shape'] if 'input_shape' in ckpt else ([3, 640, 640] if model.is_p5() else [3, 1280, 1280])
         img = torch.zeros(opt.batch_size, *input_shape, device=map_device)
-        if device.type in ['cuda'] and opt.fp16:
-            img, model = img.half(), model.half()
-        else:
-            if opt.fp16:
-                logging.warning(f'Export with fp16 only support for CUDA device, yours {device.type}')
+
         # Update model
         for k, m in model.named_modules():
             m._non_persistent_buffers_set = set()  # pytorch 1.6.0 compatibility
@@ -115,6 +110,13 @@ if __name__ == '__main__':
         model.model[-1].export = coreML  # set Detect() layer grid export, for coreml export set to True
 
         y = model(img)  # dry run
+
+        if device.type in ['cuda'] and opt.fp16:
+            img = img.half()
+            model = model.half()
+        else:
+            if opt.fp16:
+                logging.warning(f'Export with fp16 only support for CUDA device, yours {device.type}')
 
         # model output shape
         shape = tuple((y[0] if isinstance(y, (tuple, list)) else y).shape)
@@ -153,7 +155,6 @@ if __name__ == '__main__':
                 if bits < 32:
                     if sys.platform.lower() == 'darwin':  # quantization only supported on macOS
                         with warnings.catch_warnings():
-                            # suppress numpy==1.20 float warning
                             warnings.filterwarnings("ignore", category=DeprecationWarning)
                             ct_model = ct.models.neural_network.quantization_utils.quantize_weights(
                                 ct_model, bits, mode)
@@ -190,7 +191,6 @@ if __name__ == '__main__':
             logging.info(
                 f'\n{prefix} Starting ONNX export with onnx {onnx.__version__}')
             f = weight.replace('.pt', '.onnx')  # filename
-            model.eval()
             output_names = ['classes',
                             'boxes'] if y is None else ['output']
             dynamic_axes = None
@@ -241,7 +241,7 @@ if __name__ == '__main__':
                 logging.info(
                     f'{prefix} onnx opset tested for version {ONNX_OPSET_TARGET}, newer version may have poor performance for ONNXRUNTIME in DmlExecutionProvider')
             torch.onnx.disable_log()
-            torch.onnx.export(torch.jit.trace(model, img, strict=False),
+            torch.onnx.export(model,
                               img, f, verbose=opt.v,
                               opset_version=opt.onnx_opset,
                               input_names=['images'],
@@ -299,6 +299,7 @@ if __name__ == '__main__':
             if opt.include_nms:
                 logging.info(
                     f'{prefix} Registering NMS plugin for ONNX...')
+                from utils.add_nms import RegisterNMS
                 mo = RegisterNMS(f)
                 mo.register_nms()
                 mo.save(f)
