@@ -71,7 +71,7 @@ class Detect(nn.Module):
                     xy, wh, conf = y.split((2, 2, self.nc + 1), 4)
                     # new xy
                     xy = xy * (2. * self.stride[i]) + (self.stride[i] * (self.grid[i] - 0.5))
-                    wh = wh ** 2 * (4 * self.anchor_grid[i].detach())  # new wh
+                    wh = wh ** 2 * (4 * self.anchor_grid[i].data)  # new wh
                     y = torch.cat((xy, wh, conf), 4)
                 z.append(y.view(bs, self.na * nx * ny, self.no))
 
@@ -95,7 +95,8 @@ class Detect(nn.Module):
             [torch.arange(ny), torch.arange(nx)], indexing='ij')
         return torch.stack((xv, yv), 2).view((1, 1, ny, nx, 2)).float()
 
-    def convert(self, z):
+    @staticmethod
+    def convert(z):
         z = torch.cat(z, 1)
         box = z[:, :, :4]
         conf = z[:, :, 4:5]
@@ -105,7 +106,7 @@ class Detect(nn.Module):
                                       dtype=torch.float32,
                                       device=z.device)
         box @= convert_matrix
-        return (box, score)
+        return box, score
 
 
 class IDetect(nn.Module):
@@ -226,7 +227,7 @@ class IDetect(nn.Module):
                                       dtype=torch.float32,
                                       device=z.device)
         box @= convert_matrix
-        return (box, score)
+        return box, score
 
 
 class IAuxDetect(nn.Module):
@@ -339,8 +340,8 @@ class IAuxDetect(nn.Module):
         yv, xv = torch.meshgrid([torch.arange(ny), torch.arange(nx)], indexing='ij')
         return torch.stack((xv, yv), 2).view((1, 1, ny, nx, 2)).float()
 
-
-    def convert(self, z):
+    @staticmethod
+    def convert(z):
         z = torch.cat(z, 1)
         box = z[:, :, :4]
         conf = z[:, :, 4:5]
@@ -350,7 +351,7 @@ class IAuxDetect(nn.Module):
                                       dtype=torch.float32,
                                       device=z.device)
         box @= convert_matrix
-        return (box, score)
+        return box, score
 
 
 class Model(nn.Module):
@@ -463,65 +464,29 @@ class Model(nn.Module):
     # initialize biases into Detect(), cf is class frequency
     def _initialize_biases(self, cf=None):
         # https://arxiv.org/abs/1708.02002 section 3.3
-        # cf = torch.bincount(torch.tensor(np.concatenate(dataset.labels, 0)[:, 0]).long(), minlength=nc) + 1.
         m = self.model[-1]  # Detect() module
         for mi, s in zip(m.m, m.stride):  # from
             b = mi.bias.view(m.na, -1).detach()  # conv.bias(255) to (3,85)
             # obj (8 objects per 640 image)
             b[:, 4] += math.log(8 / (640 / s) ** 2)
-            b[:, 5:] += math.log(0.6 / (m.nc - 0.99)
-                                      ) if cf is None else torch.log(cf / cf.sum())  # cls
+            b[:, 5:] += math.log(0.6 / (m.nc - 0.99)) if cf is None else torch.log(cf / cf.sum())  # cls
             mi.bias = torch.nn.Parameter(b.view(-1), requires_grad=True)
 
     # initialize biases into Detect(), cf is class frequency
     def _initialize_aux_biases(self, cf=None):
         # https://arxiv.org/abs/1708.02002 section 3.3
-        # cf = torch.bincount(torch.tensor(np.concatenate(dataset.labels, 0)[:, 0]).long(), minlength=nc) + 1.
         m = self.model[-1]  # Detect() module
         for mi, mi2, s in zip(m.m, m.m2, m.stride):  # from
             b = mi.bias.view(m.na, -1).detach()  # conv.bias(255) to (3,85)
             # obj (8 objects per 640 image)
             b[:, 4] += math.log(8 / (640 / s) ** 2)
-            b[:, 5:] += math.log(0.6 / (m.nc - 0.99)
-                                      ) if cf is None else torch.log(cf / cf.sum())  # cls
+            b[:, 5:] += math.log(0.6 / (m.nc - 0.99)) if cf is None else torch.log(cf / cf.sum())  # cls
             mi.bias = torch.nn.Parameter(b.view(-1), requires_grad=True)
             b2 = mi2.bias.view(m.na, -1).detach()  # conv.bias(255) to (3,85)
             # obj (8 objects per 640 image)
             b2[:, 4] += math.log(8 / (640 / s) ** 2)
-            b2[:, 5:] += math.log(0.6 / (m.nc - 0.99)
-                                       ) if cf is None else torch.log(cf / cf.sum())  # cls
+            b2[:, 5:] += math.log(0.6 / (m.nc - 0.99)) if cf is None else torch.log(cf / cf.sum())  # cls
             mi2.bias = torch.nn.Parameter(b2.view(-1), requires_grad=True)
-
-    # initialize biases into Detect(), cf is class frequency
-    def _initialize_biases_bin(self, cf=None):
-        # https://arxiv.org/abs/1708.02002 section 3.3
-        # cf = torch.bincount(torch.tensor(np.concatenate(dataset.labels, 0)[:, 0]).long(), minlength=nc) + 1.
-        m = self.model[-1]  # Bin() module
-        bc = m.bin_count
-        for mi, s in zip(m.m, m.stride):  # from
-            b = mi.bias.view(m.na, -1).detach()  # conv.bias(255) to (3,85)
-            old = b[:, (0, 1, 2, bc + 3)].detach()
-            obj_idx = 2 * bc + 4
-            b[:, :obj_idx] += math.log(0.6 / (bc + 1 - 0.99))
-            # obj (8 objects per 640 image)
-            b[:, obj_idx] += math.log(8 / (640 / s) ** 2)
-            b[:, (obj_idx + 1):] += math.log(0.6 / (m.nc - 0.99)
-                                                  ) if cf is None else torch.log(cf / cf.sum())  # cls
-            b[:, (0, 1, 2, bc + 3)] = old
-            mi.bias = torch.nn.Parameter(b.view(-1), requires_grad=True)
-
-    # initialize biases into Detect(), cf is class frequency
-    def _initialize_biases_kpt(self, cf=None):
-        # https://arxiv.org/abs/1708.02002 section 3.3
-        # cf = torch.bincount(torch.tensor(np.concatenate(dataset.labels, 0)[:, 0]).long(), minlength=nc) + 1.
-        m = self.model[-1]  # Detect() module
-        for mi, s in zip(m.m, m.stride):  # from
-            b = mi.bias.view(m.na, -1).detach()  # conv.bias(255) to (3,85)
-            # obj (8 objects per 640 image)
-            b[:, 4] += math.log(8 / (640 / s) ** 2)
-            b[:, 5:] += math.log(0.6 / (m.nc - 0.99)
-                                      ) if cf is None else torch.log(cf / cf.sum())  # cls
-            mi.bias = torch.nn.Parameter(b.view(-1), requires_grad=True)
 
     def _print_biases(self):
         m = self.model[-1]  # Detect() module
@@ -551,7 +516,6 @@ class Model(nn.Module):
             elif isinstance(m, (IDetect, IAuxDetect)):
                 m.fuse()
                 m.forward = m.fuseforward
-        # self.info()
         return self
 
     def nms(self, mode=True):  # add or remove NMS module
@@ -641,8 +605,7 @@ class ONNX_Engine(object):
         except onnx.checker.ValidationError as e:
             logger.error(f"{prefix} The model is invalid: {e}")
             exit()
-        else:
-            pass
+
         # self.providers = [
         #     ('TensorrtExecutionProvider',
         #      {
@@ -925,11 +888,11 @@ class TensorRT_Engine(object):
         self.prefix = colorstr(f'TensorRT engine:')
         self.confThres = confThres
         self.iouThes = iouThres
-        logger = self.trt.Logger(self.trt.Logger.WARNING)
-        logger.min_severity = self.trt.Logger.Severity.ERROR
-        runtime = self.trt.Runtime(logger)
+        logger_ = self.trt.Logger(self.trt.Logger.WARNING)
+        logger_.min_severity = self.trt.Logger.Severity.ERROR
+        runtime = self.trt.Runtime(logger_)
         self.trt.init_libnvinfer_plugins(
-            logger, '')  # initialize TensorRT plugins
+            logger_, '')  # initialize TensorRT plugins
 
         try:
             if os.path.exists('mydataset.yaml'):
@@ -1049,9 +1012,9 @@ class TensorRT_Engine(object):
         """ detect single image
             Return: image
         """
-        img, ratio = self.preproc(origin_img, self.imgsz)
+        img_, ratio = self.preproc(origin_img, self.imgsz)
         t1 = time_synchronized()
-        data = self.infer(img)
+        data = self.infer(img_)
         logging.info(f'speed: {time_synchronized() - t1}s')
         if end2end:
             num, final_boxes, final_scores, final_cls_inds = data
@@ -1064,10 +1027,10 @@ class TensorRT_Engine(object):
             dets = self.postprocess(predictions, ratio)
 
         if dets is not None:
-            final_boxes, final_scores, final_cls_inds = dets[:,
-                                                        :4], dets[:, 4], dets[:, 5]
+            final_boxes, final_scores, final_cls_inds = dets[:, :4], dets[:, 4], dets[:, 5]
             origin_img = self.vis(origin_img, final_boxes,
-                                  final_scores, final_cls_inds, names=self.names)
+                                  final_scores, final_cls_inds,
+                                  names=self.names)
         return origin_img
 
     @staticmethod
@@ -1272,25 +1235,6 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
             ch = []
         ch.append(c2)
     return nn.Sequential(*layers), sorted(save)
-
-
-class Segment(Detect):
-    """YOLOv5 Segment head for segmentation models"""
-
-    def __init__(self, nc=80, anchors=(), nm=32, npr=256, ch=(), inplace=True):
-        super().__init__(nc, anchors, ch, inplace)
-        self.nm = nm  # number of masks
-        self.npr = npr  # number of protos
-        self.no = 5 + nc + self.nm  # number of outputs per anchor
-        self.m = nn.ModuleList(nn.Conv2d(x, self.no * self.na, 1)
-                               for x in ch)  # output conv
-        self.proto = Proto(ch[0], self.npr, self.nm)  # protos
-        self.detect = Detect.forward
-
-    def forward(self, x):
-        p = self.proto(x[0])
-        x = self.detect(self, x)
-        return (x, p) if self.training else (x[0], p) if self.export else (x[0], p, x[1])
 
 
 if __name__ == '__main__':
