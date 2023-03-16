@@ -162,13 +162,12 @@ def train(hyp, opt, tb_writer=None,
     # Image sizes
     gs = max(int(model.stride.max()), 32)  # grid size (max stride)
     # verify imgsz are gs-multiples
-    imgsz, imgsz_test = [check_img_size(x, gs) for x in opt.img_size]
-    model.info(verbose=True, img_size=imgsz)
+    imgsz, imgsz_test = [check_img_size(size, gs) for size in opt.img_size]
+    model.info(verbose=True, img_size=[3, imgsz, imgsz] if isinstance(imgsz, int) else [3, *imgsz])
     logger.info('')
     # accumulate loss before optimizing
     accumulate = max(round(nbs / total_batch_size), 1)
-    hyp['weight_decay'] *= total_batch_size * \
-                           accumulate / nbs  # scale weight_decay
+    hyp['weight_decay'] *= total_batch_size * accumulate / nbs  # scale weight_decay
     optimizer = smart_optimizer(model, opt.optimizer,
                                 lr=hyp['lr0'],
                                 decay=hyp['weight_decay'],

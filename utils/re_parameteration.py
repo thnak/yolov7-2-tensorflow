@@ -5,10 +5,10 @@ from utils.torch_utils import is_parallel
 import os
 from utils.general import colorstr
 
-@torch.no_grad()
+
 def Re_parameterization(inputWeightPath='v7-tiny-training.pt',
                         outputWeightPath = 'cfg/deploy/yolov7.pt',
-                        device = None):
+                        device=None):
     prefix = colorstr('Re-parameteration: ')
     model_named = {-1: 'unnamed', 77: 'YOLOv7-tiny', 105: 'YOLOv7', 121: 'YOLOv7-w6', 122: 'YOLOv7x', 144: 'YOLOv7-e6',
                    166: 'YOLOv7-d6', 265: 'YOLOv7-e6e'}
@@ -25,7 +25,7 @@ def Re_parameterization(inputWeightPath='v7-tiny-training.pt',
             cfg.pop('head_deploy', None)
         model = Model(cfg, ch=3, nc=nc).to(device=device, dtype=torch.float32).eval()
         imgsz = ckpt['input_shape']
-        model.info(verbose=True, img_size=imgsz[1:])
+        model.info(verbose=True, img_size=imgsz)
         print(f'{prefix}{"P5" if p5_model else "P6"} branch; named model: {model_named[nodes] if nodes in model_named else model_named[-1]}')
         anchors = len(ckpt['model'].model[-1].anchor_grid.squeeze()[0])
         # d6:: 166, e6:: 144, e6e:: 265, x:: 122
@@ -82,13 +82,19 @@ def Re_parameterization(inputWeightPath='v7-tiny-training.pt',
             model.state_dict()[f'model.{idx[nodes][0]}.m.2.bias'].data *= state_dict[f'model.{idx[nodes][1]}.im.2.implicit'].data.squeeze()
             model.state_dict()[f'model.{idx[nodes][0]}.m.3.bias'].data *= state_dict[f'model.{idx[nodes][1]}.im.3.implicit'].data.squeeze()
 
-        ckpt['model'] = deepcopy(model.module if is_parallel(model) else model)
-        ckpt['model'].half()
-        ckpt['epoch'] = -1
-        torch.save(ckpt, outputWeightPath)
-        print(f'{prefix}saved model at: {outputWeightPath}')
-
-        return True
+        with torch.no_grad():
+            ckpt['model'] = deepcopy(model.module if is_parallel(model) else model).to('cpu')
+            for m in ckpt['model'].parameters():
+                m.requires_grad = False
+            imgsz = ckpt['input_shape']
+            ckpt['model'].info(verbose=True, img_size=imgsz)
+            input_sample = torch.zeros(1, *imgsz, device='cpu', requires_grad=False)
+            y = ckpt['model'](input_sample)
+            ckpt['model'].half()
+            ckpt['epoch'] = -1
+            torch.save(ckpt, outputWeightPath)
+            print(f'{prefix}saved model at: {outputWeightPath}')
+            return True
     else:
         print(f'{prefix}File not found weight: {inputWeightPath}')
         return False

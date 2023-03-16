@@ -5,6 +5,7 @@ import os
 import platform
 import subprocess
 import time
+import warnings
 from contextlib import contextmanager
 from copy import deepcopy
 from pathlib import Path
@@ -315,6 +316,7 @@ def fuse_conv_and_bn(conv, bn):
 
 def model_info(model, verbose=False, img_size=640):
     """Model information. img_size may be int or list, i.e. img_size=640 or img_size=[640, 320]"""
+    warnings.filterwarnings(action='ignore', category=UserWarning)
     n_p = sum(x.numel() for x in model.parameters())  # number parameters
     n_g = sum(x.numel() for x in model.parameters() if x.requires_grad)  # number gradients
     for m in model.modules():
@@ -334,17 +336,16 @@ def model_info(model, verbose=False, img_size=640):
     try:  # FLOPS
         check_requirements('thop')
         from thop import profile
-        img_size = img_size if isinstance(img_size, list) else [img_size, img_size]  # expand if int/float
-        img = torch.zeros((1, 3, *img_size), device=next(model.parameters()).device, dtype=data_type)
+        img_size = img_size if isinstance(img_size, list) else [3, img_size, img_size]  # expand if int/float
+        img = torch.zeros((1, *img_size), device=next(model.parameters()).device, dtype=data_type)
         flops = profile(deepcopy(model), inputs=(img,), verbose=False)[0] / 1E9 * 2  # stride GFLOPS
         flops = round(flops, 3)
-        rect = img_size[0] != img_size[1]
         param_size = sum([param.nelement() * param.element_size() for param in model.parameters()])
         buffer_size = sum([buffer.nelement() * buffer.element_size() for buffer in model.buffers()])
         size_in_mem = gb2mb(param_size + buffer_size)
         numpy_img = np.zeros((*img_size, 3), dtype=np.uint8)
         size_in_mem2 = gb2mb(numpy_img.nbytes)
-        fs = f'{flops} Gflops{" (--rect is using, you will see the final Flops when the training finish)" if rect else ""}\n'  # 640x640 GFLOPS
+        fs = f'{flops} Gflops\n'  # 640x640 GFLOPS
         fs += f'               Model size: {size_in_mem}\n'
         fs += f'               Input shape: {list(img.shape)[1:]}'
 

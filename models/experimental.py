@@ -66,21 +66,6 @@ class MixConv2d(nn.Module):
         return x + self.act(self.bn(torch.cat([m(x) for m in self.m], 1)))
 
 
-class Ensemble(nn.ModuleList):
-    # Ensemble of models
-    def __init__(self):
-        super(Ensemble, self).__init__()
-
-    def forward(self, x, augment=False):
-        y = []
-        for module in self:
-            y.append(module(x, augment)[0])
-        # y = torch.stack(y).max(0)[0]  # max ensemble
-        # y = torch.stack(y).mean(0)  # mean ensemble
-        y = torch.cat(y, 1)  # nms ensemble
-        return y, None  # inference, train output
-
-
 class ORT_NMS(torch.autograd.Function):
     """ONNX-Runtime NMS operation"""
 
@@ -245,6 +230,19 @@ class End2End(nn.Module):
         return x
 
 
+class Ensemble(nn.ModuleList):
+    # Ensemble of models
+    def __init__(self):
+        super(Ensemble, self).__init__()
+
+    def forward(self, x, augment=False):
+        y = [module(x, augment)[0] for module in self]
+        # y = torch.stack(y).max(0)[0]  # max ensemble
+        # y = torch.stack(y).mean(0)  # mean ensemble
+        y = torch.cat(y, 1)  # nms ensemble
+        return y, None  # inference, train output
+
+
 def attempt_load(weights, map_location=None):
     # Loads an ensemble of models weights=[a,b,c] or a single model weights=[a] or weights=a
     model = Ensemble()
@@ -256,7 +254,7 @@ def attempt_load(weights, map_location=None):
     # Compatibility updates
     for m in model.modules():
         if type(m) in [nn.Hardswish, nn.LeakyReLU, nn.ReLU, nn.ReLU6, nn.SiLU, nn.PReLU, nn.Hardsigmoid,
-                       nn.Hardswish, nn.Hardtanh, nn.Hardshrink, nn.ELU, nn.GELU, nn.Softmax, nn.Softsign, nn.Softplus]:
+                       nn.Hardswish, nn.Hardtanh, nn.Hardshrink, nn.ELU, nn.GELU, nn.Softmax, nn.Softsign, nn.Softplus, model]:
             m.inplace = True  # pytorch 1.7.0 compatibility
         elif type(m) is nn.Upsample:
             m.recompute_scale_factor = None  # torch 1.11.0 compatibility

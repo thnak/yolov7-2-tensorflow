@@ -35,7 +35,7 @@ class Detect(nn.Module):
     concat = False
     dynamic = False  # https://github.com/WongKinYiu/yolov7/pull/1270
 
-    def __init__(self, nc=80, anchors=(), ch=(), ignore=None):  # detection layer
+    def __init__(self, nc=80, anchors=(), ch=(), inplace=True):  # detection layer
         super(Detect, self).__init__()
         self.nc = nc  # number of classes
         self.no = nc + 5  # number of outputs per anchor
@@ -48,6 +48,7 @@ class Detect(nn.Module):
             self.nl, 1, -1, 1, 1, 2))  # shape(nl,1,na,1,1,2)
         self.m = nn.ModuleList(nn.Conv2d(x, self.no * self.na, 1)
                                for x in ch)  # output conv
+        self.inplace = inplace
 
     def forward(self, x):
         # x = x.copy()  # for profiling

@@ -81,10 +81,11 @@ if __name__ == '__main__':
         map_device = 'cpu' if device.type == 'privateuseone' else device
         with torch.no_grad():
             model = attempt_load(weight, map_location=map_device).to(map_device).eval()  # load FP32 model
+            for m in model.parameters():
+                m.requires_grad = False
             ckpt = torch.load(weight, map_location=map_device)
             ckpt.pop('model', None)
             # prune(model)
-            model.zero_grad(set_to_none=True)
             model_ori = deepcopy(model)
 
         ckpt['best_fitness'] = ckpt['best_fitness'] if 'best_fitness' in ckpt else -1
@@ -105,7 +106,7 @@ if __name__ == '__main__':
                 if isinstance(m, (models.yolo.Detect, models.yolo.IDetect, models.yolo.IAuxDetect)):
                     m.dynamic = opt.dynamic
 
-        model_Gflop = model.info(verbose=False, img_size=input_shape[1:])
+        model_Gflop = model.info(verbose=False, img_size=input_shape)
         logging.info(model_Gflop)
         model.model[-1].export = coreML  # set Detect() layer grid export, for coreml export set to True
 
@@ -241,7 +242,7 @@ if __name__ == '__main__':
                 logging.info(
                     f'{prefix} onnx opset tested for version {ONNX_OPSET_TARGET}, newer version may have poor performance for ONNXRUNTIME in DmlExecutionProvider')
             torch.onnx.disable_log()
-            torch.onnx.export(model,
+            torch.onnx.export(torch.jit.trace(model, img),
                               img, f, verbose=opt.v,
                               opset_version=opt.onnx_opset,
                               input_names=['images'],
