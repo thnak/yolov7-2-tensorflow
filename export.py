@@ -88,10 +88,7 @@ if __name__ == '__main__':
             # prune(model)
             model_ori = deepcopy(model)
 
-        ckpt['best_fitness'] = ckpt['best_fitness'] if 'best_fitness' in ckpt else -1
-        ckpt['best_fitness'] = ckpt['best_fitness'].tolist()[0] if isinstance(ckpt['best_fitness'], np.ndarray) else \
-            ckpt['best_fitness']
-        best_fitness = str(ckpt['best_fitness'])
+        best_fitness = str(model.best_fitness) if hasattr(model, 'best_fitness') else 'unknown'
 
         labels = model.names
         gs = int(max(model.stride.max(), 32))  # grid size (max stride)
@@ -109,7 +106,6 @@ if __name__ == '__main__':
         model_Gflop = model.info(verbose=False, img_size=input_shape)
         logging.info(model_Gflop)
         model.model[-1].export = coreML  # set Detect() layer grid export, for coreml export set to True
-
         y = model(img)  # dry run
 
         if device.type in ['cuda'] and opt.fp16:
@@ -274,6 +270,7 @@ if __name__ == '__main__':
             onnx.checker.check_model(onnx_model)  # check onnx model
             logging.info(f'{prefix} writing metadata for model...')
             onnx_MetaData = {'export_gitstatus': gitstatus,
+                             'best_fitness': best_fitness,
                              'stride': str(gs),
                              'nc': str(len(labels)),
                              'names': str(labels),

@@ -125,7 +125,7 @@ def train(hyp, opt, tb_writer=None,
                                      exclude=exclude)  # intersect
         model.load_state_dict(state_dict, strict=False)  # load
         ckpt['best_fitness'] = ckpt['best_fitness'] if 'best_fitness' in ckpt else 'unknown'
-        ckpt['best_fitness'] = ckpt['best_fitness'].tolist()[0] if isinstance(ckpt['best_fitness'], np.ndarray) else \
+        ckpt['best_fitness'] = ckpt['best_fitness'].tolist()[0] if isinstance(ckpt['best_fitness'], (torch.Tensor, np.ndarray)) else \
             ckpt['best_fitness']
         model_version = ckpt['model_version'] if 'model_version' in ckpt else 0
         logger.info('Transferred %g/%g items from: %s, best fitness: %s, version: %s\n' % (
@@ -502,7 +502,8 @@ def train(hyp, opt, tb_writer=None,
             # weighted combination of [P, R, mAP@.5, mAP@.5-.95]
             fi = fitness(np.array(results).reshape(1, -1))
             if fi > best_fitness:
-                best_fitness = fi
+                best_fitness = fi.tolist()[0]
+                model.best_fitness = best_fitness
             wandb_logger.end_epoch(best_result=best_fitness == fi)
 
             # Save model
@@ -511,7 +512,6 @@ def train(hyp, opt, tb_writer=None,
                     'p5': p5_model,
                     'model_version': model_version + 1 if not opt.resume else model_version,
                     'epoch': epoch,
-                    'best_fitness': best_fitness,
                     'training_results': results_file.read_text(),
                     'model': deepcopy(model.module if is_parallel(model) else model).half(),
                     'input_shape': input_shape,
@@ -543,7 +543,7 @@ def train(hyp, opt, tb_writer=None,
         # end epoch ----------------------------------------------------------------------------------------------------
     # end training
     prefix = colorstr('best fitness: ')
-    logger.info(f'{prefix}{best_fitness.tolist()[0] if isinstance(best_fitness, torch.Tensor) else (best_fitness[0] if isinstance(best_fitness, list) else best_fitness)}')
+    logger.info(f'{prefix}{best_fitness}')
     if rank in [-1, 0]:
         # Plots
         if plots:

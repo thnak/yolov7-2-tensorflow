@@ -347,6 +347,7 @@ def model_info(model, verbose=False, img_size=640):
         size_in_mem2 = gb2mb(numpy_img.nbytes)
         fs = f'{flops} Gflops\n'  # 640x640 GFLOPS
         fs += f'               Model size (in memory): {size_in_mem} (FP32)\n'
+        fs += f'               Best fitness: {model.best_fitness if hasattr(model, "best_fitness") else "unknown"}\n'
         fs += f'               Input shape: {list(img.shape)[1:]}\n'
         fs += f'               Image size (in memory): {size_in_mem2} (UInt8)\n'
         fs += f'               Stride: {[int(x) for x in model.stride.tolist()]}\n'
