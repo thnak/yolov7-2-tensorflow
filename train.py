@@ -281,7 +281,7 @@ def train(hyp, opt, tb_writer=None,
             else:
                 test_dataloader = data_loader['test_dataloader']
         else:
-            logger.info(colorstr('Val and Test is the same thing or test path does not exists!'))
+            logger.info(colorstr('val and test is the same things or test path does not exists!'))
 
         if not opt.resume:
             labels = np.concatenate(dataset.labels, 0)
@@ -543,7 +543,7 @@ def train(hyp, opt, tb_writer=None,
         # end epoch ----------------------------------------------------------------------------------------------------
     # end training
     prefix = colorstr('best fitness: ')
-    logger.info(f'{prefix}{best_fitness}')
+    logger.info(f'{prefix}{best_fitness.tolist()[0] if isinstance(best_fitness, torch.Tensor) else (best_fitness[0] if isinstance(best_fitness, list) else best_fitness)}')
     if rank in [-1, 0]:
         # Plots
         if plots:

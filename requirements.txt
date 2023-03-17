@@ -1,31 +1,29 @@
 # Usage: pip install -r requirements.txt
 
 # Base ----------------------------------------
-matplotlib>=3.6.2
-numpy>=1.18
-opencv-python>=4.7.0.68
-Pillow>=9.4.0
-PyYAML>=6.0
-requests>=2.28.0
-scipy>=1.10.0
-torch>=1.13.1
-mss>=7.0.1
+matplotlib~=3.6.2
+numpy~=1.23.4
+opencv-python~=4.5.5.62
+PyYAML~=6.0
+requests~=2.27.1
+scipy~=1.10.0
+torch~=1.13.1
+mss
 # torch-directml
-tqdm
-protobuf
+tqdm~=4.64.0
 #pycuda==2022.2.2
 #nvidia-pyindex==1.0.9
 # nvidia-tensorrt==8.4.3.1
 #pafy==0.5.5
 #youtube_dl==2021.12.17
 # Logging -------------------------------------
-tensorboard>=2.11.0
+tensorboard
 # wandb
-termcolor
-# Plotting ------------------------------------
-pandas>=1.3.5
-seaborn>=0.12.2
 
+# Plotting ------------------------------------
+pandas~=1.3.5
+seaborn~=0.12.2
+termcolor~=2.2.0
 # Export --------------------------------------
 
 #coremltools>=6.1  # CoreML export
@@ -39,9 +37,16 @@ seaborn>=0.12.2
 #openvino-dev==2022.3.0 # OpenVINO export
 
 # Extras --------------------------------------
-pyadl
+pyadl~=0.1
 ipython # interactive notebook
-psutil  # system utilization
+psutil~=5.9.4
 # onnx-graphsurgeon==0.3.25
 # pycocotools>=2.0  # COCO mAP
 # roboflow
+
+Pillow~=9.3.0
+onnx~=1.13.1
+torchvision~=0.14.1
+thop~=0.1.1.post2209072238
+tensorflow~=2.9.0
+keras~=2.9.0

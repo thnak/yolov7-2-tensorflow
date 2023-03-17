@@ -9,7 +9,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import warnings
-from PIL import Image
 from torch.cuda import amp
 
 from utils.datasets import letterbox
@@ -33,6 +32,7 @@ class MP(nn.Module):
     def forward(self, x):
         return self.m(x)
 
+
 class AP(nn.Module):
     def __init__(self, k=2):
         super(AP, self).__init__()
@@ -40,6 +40,7 @@ class AP(nn.Module):
 
     def forward(self, x):
         return self.m(x)
+
 
 class SP(nn.Module):
     def __init__(self, k=3, s=1):

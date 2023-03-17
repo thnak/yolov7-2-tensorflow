@@ -71,9 +71,9 @@ def isdocker():
     return Path('/workspace').exists()  # or Path('/.dockerenv').exists()
 
 
-def emojis(str=''):
+def emojis(string=''):
     """Return platform-dependent emoji-safe version of string"""
-    return str.encode().decode('ascii', 'ignore') if platform.system() == 'Windows' else str
+    return string.encode().decode('ascii', 'ignore') if platform.system() == 'Windows' else string
 
 
 def check_online():
@@ -193,9 +193,9 @@ def check_imshow():
 #         return files[0]  # return file
 
 
-def check_dataset(dict):
+def check_dataset(dict_):
     """Download dataset if not found locally"""
-    val, s = dict.get('val'), dict.get('download')
+    val, s = dict_.get('val'), dict_.get('download')
     if val and len(val):
         val = [Path(x).resolve() for x in (val if isinstance(val, list) else [val])]  # val path
         if not all(x.exists() for x in val):
@@ -204,13 +204,14 @@ def check_dataset(dict):
                 print('Downloading %s ...' % s)
                 if s.startswith('http') and s.endswith('.zip'):  # URL
                     f = Path(s).name  # filename
-                    print(f)
-                    f = f"{dict.get('path')}/{f}"
-                    print(f)
+                    f = f"{dict_.get('path')}/{f}"
                     if not os.path.exists(f):
                         torch.hub.download_url_to_file(s, f)
-                    r = os.system(f'tar -xf {f}')
-                    os.system(f'del TrainRes/coco128.zip')
+                    try:
+                        r = os.system(f'tar -xf {f}')
+                        os.system(f'del TrainRes/coco128.zip')
+                    except Exception:
+                        r = os.system('unzip -q %s -d ../ && rm %s' % (f, f))  # unzip
                 else:  # bash script
                     r = os.system(s)
                 print('Dataset autodownload %s\n' % ('success' if r == 0 else 'failure'))  # analyze return value
@@ -1101,20 +1102,21 @@ class BackgroundForegroundColors():
         return len(self.COLOR)
 
 
-def yaml_save(file='data.yaml', data={}):
+def yaml_save(file='data.yaml', data=None):
     """Single-line safe yaml saving"""
+    data = {} if data is None else data
     with open(file, 'w') as f:
         yaml.safe_dump({k: str(v) if isinstance(v, Path) else v for k, v in data.items()}, f, sort_keys=False)
 
 
-def check_version(current='0.0.0', minimum='0.0.0', name='version ', pinned=False, hard=False, verbose=False):
-    """Check version vs. required version"""
-    import pkg_resources as pkg
-    current, minimum = (pkg.parse_version(x) for x in (current, minimum))
-    result = (current == minimum) if pinned else (current >= minimum)  # bool
-    s = f'WARNING ⚠️ {name}{minimum} is required by YOLOv5, but {name}{current} is currently installed'  # string
-    if hard:
-        assert result, emojis(s)  # assert min requirements met
-    if verbose and not result:
-        print(s)
-    return result
+# def check_version(current='0.0.0', minimum='0.0.0', name='version ', pinned=False, hard=False, verbose=False):
+#     """Check version vs. required version"""
+#     import pkg_resources as pkg
+#     current, minimum = (pkg.parse_version(x) for x in (current, minimum))
+#     result = (current == minimum) if pinned else (current >= minimum)  # bool
+#     s = f'WARNING ⚠️ {name}{minimum} is required by YOLOv5, but {name}{current} is currently installed'  # string
+#     if hard:
+#         assert result, emojis(s)  # assert min requirements met
+#     if verbose and not result:
+#         print(s)
+#     return result

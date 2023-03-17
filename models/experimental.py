@@ -92,7 +92,7 @@ class ORT_NMS(torch.autograd.Function):
 
 
 class TRT_NMS(torch.autograd.Function):
-    '''TensorRT NMS operation'''
+    """TensorRT NMS operation"""
 
     @staticmethod
     def forward(
@@ -141,7 +141,7 @@ class TRT_NMS(torch.autograd.Function):
 
 
 class ONNX_ORT(nn.Module):
-    '''onnx module with ONNX-Runtime NMS operation.'''
+    """onnx module with ONNX-Runtime NMS operation."""
 
     def __init__(self, max_obj=100, iou_thres=0.45, score_thres=0.25, max_wh=640, device=None, n_classes=80):
         super().__init__()

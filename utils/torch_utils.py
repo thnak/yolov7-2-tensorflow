@@ -343,16 +343,20 @@ def model_info(model, verbose=False, img_size=640):
         param_size = sum([param.nelement() * param.element_size() for param in model.parameters()])
         buffer_size = sum([buffer.nelement() * buffer.element_size() for buffer in model.buffers()])
         size_in_mem = gb2mb(param_size + buffer_size)
-        numpy_img = np.zeros((*img_size, 3), dtype=np.uint8)
+        numpy_img = np.zeros((1, *img_size), dtype=np.uint8)
         size_in_mem2 = gb2mb(numpy_img.nbytes)
         fs = f'{flops} Gflops\n'  # 640x640 GFLOPS
-        fs += f'               Model size: {size_in_mem}\n'
-        fs += f'               Input shape: {list(img.shape)[1:]}'
+        fs += f'               Model size (in memory): {size_in_mem} (FP32)\n'
+        fs += f'               Input shape: {list(img.shape)[1:]}\n'
+        fs += f'               Image size (in memory): {size_in_mem2} (UInt8)\n'
+        fs += f'               Stride: {[int(x) for x in model.stride.tolist()]}\n'
+        fs += f'               Number of class: {len(model.names)}\n'
+        fs += f'               Branch: {"P5" if model.yaml.get("p5") else "P6"}'
 
     except Exception as ex:
         fs = '? Gflops'
         print(colored(f"{ex}", 'red'))
-    output = f"{header}{colorstr('Model Summary:')} {'P5' if model.is_p5() else 'P6'} branch with {len(list(model.modules())):,} layers; {n_p:,} parameters; {n_g:,} gradients; {fs}{footer}"
+    output = f"{header}{colorstr('Model Summary:')} {len(list(model.modules())):,} layers; {n_p:,} parameters; {n_g:,} gradients; {fs}{footer}"
     if verbose:
         logger.info(output)
     return output
