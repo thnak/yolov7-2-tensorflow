@@ -88,12 +88,17 @@ if __name__ == '__main__':
             # prune(model)
             model_ori = deepcopy(model)
 
-        best_fitness = str(model.best_fitness) if hasattr(model, 'best_fitness') else 'unknown'
+        best_fitness = model.best_fitness if hasattr(model, 'best_fitness') else 0.
+        total_image = model.total_image if hasattr(model, 'total_image') else [0]
+        input_shape = model.input_shape if hasattr(model, 'input_shape') else ([3, 640, 640] if model.is_p5() else [3, 1280, 1280])
+        model_version = model.model_version if hasattr(model, 'model_version') else 0
 
+        model.best_fitness = best_fitness
+        model.model_version = model_version
+        model.total_image = total_image
         labels = model.names
         gs = int(max(model.stride.max(), 32))  # grid size (max stride)
 
-        input_shape = ckpt['input_shape'] if 'input_shape' in ckpt else ([3, 640, 640] if model.is_p5() else [3, 1280, 1280])
         img = torch.zeros(opt.batch_size, *input_shape, device=map_device)
 
         # Update model
@@ -238,7 +243,10 @@ if __name__ == '__main__':
                 logging.info(
                     f'{prefix} onnx opset tested for version {ONNX_OPSET_TARGET}, newer version may have poor performance for ONNXRUNTIME in DmlExecutionProvider')
             torch.onnx.disable_log()
-            torch.onnx.export(torch.jit.trace(model, img),
+            if img.dtype != torch.float16:
+                model = torch.jit.trace(model, img).eval()
+                model = torch.jit.freeze(model)
+            torch.onnx.export(model,
                               img, f, verbose=opt.v,
                               opset_version=opt.onnx_opset,
                               input_names=['images'],
@@ -269,27 +277,29 @@ if __name__ == '__main__':
             # onnx_model = onnx.load(f)  # load onnx model
             onnx.checker.check_model(onnx_model)  # check onnx model
             logging.info(f'{prefix} writing metadata for model...')
-            onnx_MetaData = {'export_gitstatus': gitstatus,
+            onnx_MetaData = {'model_version': model_version,
+                             'export_gitstatus': gitstatus,
                              'best_fitness': best_fitness,
-                             'stride': str(gs),
-                             'nc': str(len(labels)),
-                             'names': str(labels),
+                             'stride': gs,
+                             'nc': len(labels),
+                             'names': labels,
+                             'total_image': total_image,
                              'export_date': datetime.datetime.now().isoformat('#'),
                              'exporting_opt': vars(opt),
                              }
-            key_ = colorstr('yellow', 'key:')
+            key_prefix = colorstr('yellow', 'key:')
             for index, key in enumerate(ckpt):
                 if key == 'model':
                     continue
-                metadata = onnx_model.metadata_props.add()
-                metadata.key = key
-                metadata.value = str(ckpt[key])
-                logging.info(f'{key_} {key}, value: {ckpt[key]}')
+                if key == 'best_fitness':
+                    ckpt[key] = ckpt[key].tolist()[0] if isinstance(ckpt[key], (np.ndarray, torch.Tensor)) else ckpt[key]
+                onnx_MetaData[key] = ckpt[key]
+
             for index, key in enumerate(onnx_MetaData):
                 metadata = onnx_model.metadata_props.add()
                 metadata.key = key
                 metadata.value = str(onnx_MetaData[key])
-                logging.info(f'{key_} {key}, value: {onnx_MetaData[key]}')
+                logging.info(f'{key_prefix} {key}, value: {onnx_MetaData[key]}')
 
             onnxmltools.utils.save_model(onnx_model, f)
             logging.info(f'{prefix} export success✅, saved as {f}')

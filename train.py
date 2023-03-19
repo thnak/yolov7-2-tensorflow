@@ -110,28 +110,44 @@ def train(hyp, opt, tb_writer=None,
     pretrained = weights.endswith('.pt')
     model_version = 0
     nodes, nodes2 = 0, 0
+    total_image = [0]
+    start_epoch, best_fitness = 0, 0.0
+    model_version = 1
     if pretrained:
         with torch_distributed_zero_first(rank):
             attempt_download(weights)  # download if not found locally
         ckpt = torch.load(weights, map_location=map_device)  # load checkpoint
-        model = Model(opt.cfg or ckpt['model'].yaml,
+        pretrained_model = ckpt['model']
+        model = Model(opt.cfg or pretrained_model.yaml,
                       ch=3,
                       nc=nc,
                       anchors=hyp.get('anchors')).to(device)  # create
+
+        total_image = pretrained_model.total_image if hasattr(pretrained_model, 'total_image') else total_image
+        model_version = pretrained_model.model_version if hasattr(pretrained_model, 'model_version') else model_version
+        best_fitness = pretrained_model.best_fitness if hasattr(pretrained_model, 'best_fitness') else 'unknown'
+        best_fitness = best_fitness.tolist()[0] if isinstance(best_fitness, (torch.Tensor, np.ndarray)) else best_fitness
+
+        if not opt.resume:
+            if model_version >= 1:
+                check_it_one = pretrained_model.yaml['backbone']
+                check_it_twice = model.yaml['backbone']
+                pre_names = pretrained_model.names
+                if check_it_one == check_it_twice and pre_names == names:
+                    model_version += 1
+                del check_it_one, check_it_twice, pre_names
+
         exclude = ['anchor'] if (opt.cfg or hyp.get('anchors')) and not opt.resume else []  # exclude keys
-        state_dict = ckpt['model'].float().state_dict()  # to FP32
+        state_dict = pretrained_model.float().state_dict()  # to FP32
         state_dict = intersect_dicts(state_dict,
                                      model.state_dict(),
                                      exclude=exclude)  # intersect
         model.load_state_dict(state_dict, strict=False)  # load
-        ckpt['best_fitness'] = ckpt['best_fitness'] if 'best_fitness' in ckpt else 'unknown'
-        ckpt['best_fitness'] = ckpt['best_fitness'].tolist()[0] if isinstance(ckpt['best_fitness'], (torch.Tensor, np.ndarray)) else \
-            ckpt['best_fitness']
-        model_version = ckpt['model_version'] if 'model_version' in ckpt else 0
-        logger.info('Transferred %g/%g items from: %s, best fitness: %s, version: %s\n' % (
-            len(state_dict), len(model.state_dict()), weights, ckpt['best_fitness'],
-            model_version if (model_version != 0 and not opt.resume) else 'Init new model'))  # report
-        nodes = len(ckpt['model'].yaml['head']) + len(ckpt['model'].yaml['backbone']) - 1
+
+        logger.info('Transferred %g/%g items from: %s, best fitness: %s, dataset %s images\n' % (
+            len(state_dict), len(model.state_dict()), weights, best_fitness, total_image[-1]))  # report
+
+        nodes = len(pretrained_model.yaml['head']) + len(pretrained_model.yaml['backbone']) - 1
         nodes = model.is_p5(nodes)
         nodes2 = model.is_p5()
         assert nodes == nodes2, f'Please paste the same model cfg branch like P5vsP5 or P6vsP6'
@@ -141,6 +157,7 @@ def train(hyp, opt, tb_writer=None,
                       nc=nc,
                       anchors=hyp.get('anchors')).to(device)  # create
     p5_model = model.is_p5()
+
     with torch_distributed_zero_first(rank):
         check_dataset(data_dict)  # check
     train_path = data_dict['train']
@@ -163,6 +180,10 @@ def train(hyp, opt, tb_writer=None,
     gs = max(int(model.stride.max()), 32)  # grid size (max stride)
     # verify imgsz are gs-multiples
     imgsz, imgsz_test = [check_img_size(size, gs) for size in opt.img_size]
+    model.model_version = model_version
+    model.total_image = total_image
+    model.input_shape = [3, imgsz, imgsz] if isinstance(imgsz, int) else [3, *imgsz]
+    model.best_fitness = best_fitness
     model.info(verbose=True, img_size=[3, imgsz, imgsz] if isinstance(imgsz, int) else [3, *imgsz])
     logger.info('')
     # accumulate loss before optimizing
@@ -180,12 +201,11 @@ def train(hyp, opt, tb_writer=None,
     scheduler = LambdaLR(optimizer, lr_lambda=lf)
     ema = ModelEMA(model) if rank in [-1, 0] else None
     # Resume
-    start_epoch, best_fitness = 0, 0.0
+
     if pretrained:
         # Optimizer
         if ckpt['optimizer'] is not None:
             optimizer.load_state_dict(ckpt['optimizer'])
-            best_fitness = ckpt['best_fitness']
 
         # EMA
         if ema and ckpt.get('ema'):
@@ -208,10 +228,8 @@ def train(hyp, opt, tb_writer=None,
             epochs += ckpt['epoch']  # finetune additional epochs
         del ckpt, state_dict, nodes, freeze
 
-
     # number of detection layers (used for scaling hyp['obj'])
     nl = model.model[-1].nl
-
 
     # DP mode
     if cuda and rank == -1 and torch.cuda.device_count() > 1:
@@ -240,6 +258,7 @@ def train(hyp, opt, tb_writer=None,
     else:
         dataloader, dataset = data_loader['dataloader'], data_loader['dataset']
 
+    total_image.append(len(dataset))
     mlc = np.concatenate(dataset.labels, 0)[:, 0].max()  # max label class
     nb = len(dataloader)  # number of batches
     assert mlc < nc, 'Label class %g exceeds nc=%g in %s. Possible class labels are 0-%g' % (
@@ -453,7 +472,7 @@ def train(hyp, opt, tb_writer=None,
         if rank in [-1, 0]:
             # mAP
             ema.update_attr(
-                model, include=['yaml', 'nc', 'hyp', 'gr', 'names', 'stride', 'class_weights'])
+                model, include=['yaml', 'nc', 'hyp', 'gr', 'names', 'stride', 'class_weights', 'best_fitness', 'input_shape', 'model_version', 'total_image'])
             final_epoch = epoch + 1 == epochs
             if not opt.notest or final_epoch:  # Calculate mAP
                 wandb_logger.current_epoch = epoch + 1
@@ -508,14 +527,16 @@ def train(hyp, opt, tb_writer=None,
 
             # Save model
             if (not opt.nosave) or (final_epoch and opt.evolve < 1):  # if save
+                model.input_shape = input_shape
+                if rank in [-1, 0]:
+                    ema.update_attr(model,
+                                    include=['yaml', 'nc', 'hyp', 'gr', 'names', 'stride', 'class_weights', 'best_fitness',
+                                             'input_shape', 'model_version', 'total_image'])
+
                 ckpt = {
-                    'p5': p5_model,
-                    'model_version': model_version + 1 if not opt.resume else model_version,
                     'epoch': epoch,
                     'training_results': results_file.read_text(),
                     'model': deepcopy(model.module if is_parallel(model) else model).half(),
-                    'input_shape': input_shape,
-                    # BCWH to CWH
                     'ema': deepcopy(ema.ema).half(),
                     'updates': ema.updates,
                     'optimizer': optimizer.state_dict(),
@@ -612,14 +633,14 @@ def train(hyp, opt, tb_writer=None,
                     output_path = str(f)
                     output_path = output_path.replace('best.pt',
                                                       'deploy_best.pt')
-                    try:
-                        if opt.evolve <= 1:
+                    # try:
+                    if opt.evolve <= 1:
                             Re_parameterization(inputWeightPath=str(f),
                                                 outputWeightPath=output_path,
                                                 device=map_device)
-                    except Exception as ex:
-                        prefix = colorstr('reparamater: ')
-                        logging.error(f'{prefix}{ex}')
+                    # except Exception as ex:
+                    #     prefix = colorstr('reparamater: ')
+                    #     logging.error(f'{prefix}{ex}')
         if opt.bucket:
             os.system(f'gsutil cp {final} gs://{opt.bucket}/weights')  # upload
         if wandb_logger.wandb and opt.evolve <= 1:  # Log the stripped model
@@ -695,8 +716,7 @@ if __name__ == '__main__':
         ckpt = opt.resume if isinstance(opt.resume, str) else get_latest_run()
         assert os.path.isfile(ckpt), 'ERROR: --resume checkpoint does not exist'
         with open(Path(ckpt).parent.parent / 'opt.yaml') as f:
-            opt = argparse.Namespace(
-                **yaml.load(f, Loader=yaml.SafeLoader))  # replace
+            opt = argparse.Namespace(**yaml.load(f, Loader=yaml.SafeLoader))  # replace
         opt.cfg, opt.weights, opt.resume, opt.batch_size, opt.global_rank, opt.local_rank = '', ckpt, True, opt.total_batch_size, opt.global_rank, opt.local_rank  # reinstate
         logger.info('Resuming training from %s' % ckpt)
     else:

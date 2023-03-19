@@ -15,28 +15,39 @@ def Re_parameterization(inputWeightPath='v7-tiny-training.pt',
     idx = {166: [162, 166], 144: [140, 144], 265: [261, 265], 122: [118, 122]}
     if os.path.exists(inputWeightPath):
         ckpt = torch.load(inputWeightPath, map_location=device)
-        ckpt['model'].eval()
-        nc = ckpt['model'].nc
-        p5_model = ckpt['model'].is_p5()
-        nodes = ckpt['model'].num_nodes()
-        cfg = eval(str(ckpt['model'].yaml).replace('IDetect', 'Detect'))
+        old_model = ckpt['model'].eval()
+        nc = old_model.nc
+        p5_model = old_model.is_p5()
+        nodes = old_model.num_nodes()
+        cfg = eval(str(old_model.yaml).replace('IDetect', 'Detect'))
         if 'head_deploy' in cfg:
             cfg['head'] = cfg['head_deploy']
             cfg.pop('head_deploy', None)
         model = Model(cfg, ch=3, nc=nc).to(device=device, dtype=torch.float32).eval()
-        imgsz = ckpt['input_shape']
+
+        imgsz = old_model.input_shape
+        total_image = old_model.total_image
+        model_version = old_model.model_version
+        best_fitness = old_model.best_fitness
+
+        model.best_fitness = best_fitness
+        model.input_shape = imgsz
+        model.total_image = total_image
+        model.model_version = model_version
+        model.reparam = True
         model.info(verbose=True, img_size=imgsz)
         print(f'{prefix}{"P5" if p5_model else "P6"} branch; named model: {model_named[nodes] if nodes in model_named else model_named[-1]}')
-        anchors = len(ckpt['model'].model[-1].anchor_grid.squeeze()[0])
+        anchors = len(old_model.model[-1].anchor_grid.squeeze()[0])
         # d6:: 166, e6:: 144, e6e:: 265, x:: 122
-        state_dict = ckpt['model'].to(device).float().state_dict()
+        state_dict = old_model.to(device).float().state_dict()
         exclude = []
         intersect_state_dict = {k: v for k, v in state_dict.items() if
                                 k in model.state_dict() and not any(x in k for x in exclude) and v.shape ==
                                 model.state_dict()[k].shape}
         model.load_state_dict(intersect_state_dict, strict=False)
-        model.names = ckpt['model'].names
+        model.names = old_model.names
         model.nc = nc
+        del old_model
 
         if p5_model:
             for i in range((model.nc+5)*anchors):
@@ -86,7 +97,7 @@ def Re_parameterization(inputWeightPath='v7-tiny-training.pt',
             ckpt['model'] = deepcopy(model.module if is_parallel(model) else model).to('cpu')
             for m in ckpt['model'].parameters():
                 m.requires_grad = False
-            imgsz = ckpt['input_shape']
+            imgsz = ckpt['model'].input_shape
             ckpt['model'].info(verbose=True, img_size=imgsz)
             input_sample = torch.zeros(1, *imgsz, device='cpu', requires_grad=False)
             y = ckpt['model'](input_sample)

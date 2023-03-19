@@ -13,7 +13,7 @@ from termcolor import colored
 import torch
 import numpy as np
 import torch.nn as nn
-import torch.nn.functional as F
+import torch.nn.functional as functional
 from torch.optim import Optimizer
 
 from utils.general import check_requirements, colorstr, gb2mb
@@ -160,7 +160,6 @@ def select_device(device='', batch_size=None):
             logger.exception(f'{ex}')
     if device.lower() in [f'xla:{x}' for x in range(10)]:
         try:
-            check_requirements('torch==1.13.0')
             logger.info(
                 f"https://storage.googleapis.com/tpu-pytorch/wheels/tpuvm/torch_xla-1.13-cp38-cp38-linux_x86_64.whl, torch_xla[tpuvm]")
             logger.warning(f'training with xla device is under developing')
@@ -195,7 +194,7 @@ def select_device(device='', batch_size=None):
     else:
         s += 'CPU\n'
     s = s.encode().decode('ascii', 'ignore') if platform.system() == 'Windows' else s
-    logger.info(s)  # emoji-safe
+    logger.info(s)
     return torch.device(f'cuda:{device}' if cuda else 'cpu'), s
 
 
@@ -224,7 +223,7 @@ def profile(x, ops, n=100, device=None):
         dtf, dtb, t = 0., 0., [0., 0., 0.]  # dt forward, backward
         try:
             flops = thop.profile(m, inputs=(x,), verbose=False)[0] / 1E9 * 2  # GFLOPS
-        except:
+        except Exception:
             flops = 0
 
         for _ in range(n):
@@ -234,7 +233,7 @@ def profile(x, ops, n=100, device=None):
             try:
                 _ = y.sum().backward()
                 t[2] = time_synchronized()
-            except:  # no backward method
+            except Exception:  # no backward method
                 t[2] = float('nan')
             dtf += (t[1] - t[0]) * 1000 / n  # ms per op forward
             dtb += (t[2] - t[1]) * 1000 / n  # ms per op backward
@@ -282,12 +281,12 @@ def sparsity(model):
 
 def prune(model, amount=0.3):
     """Prune model to requested global sparsity"""
-    import torch.nn.utils.prune as prune
+    import torch.nn.utils.prune as prune_
     print('Pruning model... ', end='')
     for name, m in model.named_modules():
         if isinstance(m, nn.Conv2d):
-            prune.l1_unstructured(m, name='weight', amount=amount)  # prune
-            prune.remove(m, 'weight')  # make permanent
+            prune_.l1_unstructured(m, name='weight', amount=amount)  # prune
+            prune_.remove(m, 'weight')  # make permanent
     print(' %.3g global sparsity' % sparsity(model))
 
 
@@ -347,8 +346,10 @@ def model_info(model, verbose=False, img_size=640):
         size_in_mem2 = gb2mb(numpy_img.nbytes)
         fs = f'{flops} Gflops\n'  # 640x640 GFLOPS
         fs += f'               Model size (in memory): {size_in_mem} (FP32)\n'
+        fs += f'               Version: {model.model_version if hasattr(model, "model_version") else "?"}\n'
         fs += f'               Best fitness: {model.best_fitness if hasattr(model, "best_fitness") else "unknown"}\n'
-        fs += f'               Input shape: {list(img.shape)[1:]}\n'
+        fs += f'               Dataset: {str(model.total_image[-1])+" images" if hasattr(model, "total_image") else "unknown"}\n'
+        fs += f'               Input shape: {model.input_shape if hasattr(model, "input_shape") else [3, 640, 640]}\n'
         fs += f'               Image size (in memory): {size_in_mem2} (UInt8)\n'
         fs += f'               Stride: {[int(x) for x in model.stride.tolist()]}\n'
         fs += f'               Number of class: {len(model.names)}\n'
@@ -370,10 +371,10 @@ def scale_img(img, ratio=1.0, same_shape=False, gs=32):  # img(16,3,256,416)
     else:
         h, w = img.shape[2:]
         s = (int(h * ratio), int(w * ratio))  # new size
-        img = F.interpolate(img, size=s, mode='bilinear', align_corners=False)  # resize
+        img = functional.interpolate(img, size=s, mode='bilinear', align_corners=False)  # resize
         if not same_shape:  # pad/crop img
             h, w = [math.ceil(x * ratio / gs) * gs for x in (h, w)]
-        return F.pad(img, [0, w - s[1], 0, h - s[0]], value=0.447)  # value = imagenet mean
+        return functional.pad(img, [0, w - s[1], 0, h - s[0]], value=0.447)  # value = imagenet mean
 
 
 def copy_attr(a, b, include=(), exclude=()):
@@ -396,7 +397,7 @@ class ModelEMA:
     """
 
     def __init__(self, model, decay=0.9999, updates=0):
-        # Create EMA
+        """Create EMA"""
         self.ema = deepcopy(model.module if is_parallel(model) else model).eval()  # FP32 EMA
         # if next(model.parameters()).device.type == 'cuda':
         #     self.ema.half()  # FP16 EMA
@@ -406,7 +407,7 @@ class ModelEMA:
             p.requires_grad_(False)
 
     def update(self, model):
-        # Update EMA parameters
+        """Update EMA parameters"""
         with torch.no_grad():
             self.updates += 1
             d = self.decay(self.updates)
@@ -418,7 +419,7 @@ class ModelEMA:
                     v += (1. - d) * msd[k].detach()
 
     def update_attr(self, model, include=(), exclude=('process_group', 'reducer')):
-        # Update EMA attributes
+        """Update EMA attributes"""
         copy_attr(self.ema, model, include, exclude)
 
 
@@ -471,9 +472,9 @@ class Lion(Optimizer):
 
 
 class BatchNormXd(torch.nn.modules.batchnorm._BatchNorm):
-    def _check_input_dim(self, input):
-        """ The only difference between BatchNorm1d, BatchNorm2d, BatchNorm3d, etc
-        is this method that is overwritten by the sub-class
+    def _check_input_dim(self, inputs):
+        """ The only difference between BatchNorm1d, BatchNorm2d, BatchNorm3d, etc.
+        is this method that is overwritten by the subclass
         This original goal of this method was for tensor sanity checks
         If you're ok bypassing those sanity checks (eg. if you trust your inference
         to provide the right dimensional inputs), then you can just use this method
@@ -537,7 +538,7 @@ class TracedModel(nn.Module):
         self.detect_layer.to(device)
         print("model is traced! \n")
 
-    def forward(self, x, augment=False, profile=False):
+    def forward(self, x, augment=False, profile_=False):
         out = self.model(x)
         out = self.detect_layer(out)
         return out

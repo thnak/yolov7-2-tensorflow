@@ -169,16 +169,13 @@ class IDetect(nn.Module):
                     self.grid[i] = self._make_grid(nx, ny).to(x[i].device)
                 y = x[i].sigmoid()
                 if not torch.onnx.is_in_onnx_export():
-                    y[..., 0:2] = (y[..., 0:2] * 2. - 0.5 +
-                                   self.grid[i]) * self.stride[i]  # xy
-                    y[..., 2:4] = (y[..., 2:4] * 2) ** 2 * \
-                                  self.anchor_grid[i]  # wh
+                    y[..., 0:2] = (y[..., 0:2] * 2. - 0.5 + self.grid[i]) * self.stride[i]  # xy
+                    y[..., 2:4] = (y[..., 2:4] * 2) ** 2 * self.anchor_grid[i]  # wh
                 else:
                     # y.tensor_split((2, 4, 5), 4)  # torch 1.8.0
                     xy, wh, conf = y.split((2, 2, self.nc + 1), 4)
                     # new xy
-                    xy = xy * (2. * self.stride[i]) + \
-                         (self.stride[i] * (self.grid[i] - 0.5))
+                    xy = xy * (2. * self.stride[i]) + (self.stride[i] * (self.grid[i] - 0.5))
                     wh = wh ** 2 * (4 * self.anchor_grid[i].detach())  # new wh
                     y = torch.cat((xy, wh, conf), 4)
                 z.append(y.view(bs, self.na * nx * ny, self.no))
@@ -217,7 +214,8 @@ class IDetect(nn.Module):
         yv, xv = torch.meshgrid([torch.arange(ny), torch.arange(nx)], indexing='ij')
         return torch.stack((xv, yv), 2).view((1, 1, ny, nx, 2)).float()
 
-    def convert(self, z):
+    @staticmethod
+    def convert(z):
         z = torch.cat(z, 1)
         box = z[:, :, :4]
         conf = z[:, :, 4:5]
@@ -380,6 +378,10 @@ class Model(nn.Module):
         self.model, self.save = parse_model(deepcopy(self.yaml), ch=[ch])  # model, savelist
         self.names = [str(i) for i in range(self.yaml['nc'])]  # default names
         self.best_fitness = 0.
+        self.model_version = 0
+        self.total_image = [0]
+        self.input_shape = [3, 640, 640]
+        self.reparam = False
         # print([x.shape for x in self.forward(torch.zeros(1, ch, 64, 64))])
 
         # Build strides, anchors
@@ -559,7 +561,7 @@ class ONNX_Engine(object):
     """ONNX Engine class for inference with onnxruntime"""
 
     def __init__(self, ONNX_EnginePath='',
-                 confThres=0.25, iouThres=0.45, device=None,
+                 confThres=0.25, iouThres=0.45,
                  classes_nms=None, agnostic_nms=False, multi_label_nms=False,
                  max_det_nms=300, maxWorkSpace=2, prefix='', ):
 
@@ -574,7 +576,7 @@ class ONNX_Engine(object):
         import platform
         import torch
 
-        self.device = torch.device('cpu') if device is None else device
+        self.device = torch.device('cpu')
         nvidia_GPUDevices = torch.cuda.is_available()
         is_x64 = True if '64' in platform.architecture()[0] else False
         assert is_x64, f'{prefix} not support for 32bit device'
@@ -636,7 +638,8 @@ class ONNX_Engine(object):
         session_opt.graph_optimization_level = self.runTime.GraphOptimizationLevel.ORT_ENABLE_ALL
         session_opt.execution_mode = self.runTime.ExecutionMode.ORT_PARALLEL if cpu_device else self.runTime.ExecutionMode.ORT_SEQUENTIAL
 
-        self.session = self.runTime.InferenceSession(ONNX_EnginePath, sess_options=session_opt, providers=self.providers)
+        self.session = self.runTime.InferenceSession(ONNX_EnginePath, sess_options=session_opt,
+                                                     providers=self.providers)
         self.session.enable_fallback()
 
         self.imgsz = self.session.get_inputs()[0].shape[2:]
@@ -684,7 +687,8 @@ class ONNX_Engine(object):
         im = im.cpu().numpy()
         return im
 
-    def concat(self, im):
+    @staticmethod
+    def concat(im):
         if len(im) > 1:
             im = np.concatenate(im)
         else:
@@ -707,7 +711,8 @@ class ONNX_Engine(object):
     def from_numpy(self, x):
         return torch.from_numpy(x).to(self.device) if isinstance(x, np.ndarray) else x
 
-    def xyxy2xywh(self, x, dim):
+    @staticmethod
+    def xyxy2xywh(x, dim):
         y = [0] * 4
         y[0] = ((x[0] + x[2]) / 2) / dim[1]  # x center
         y[1] = ((x[1] + x[3]) / 2) / dim[0]  # y center
@@ -996,8 +1001,7 @@ class TensorRT_Engine(object):
             logging.info(f'{self.prefix} FPS: {round(fps, 3)}, ' +
                          f'nms: {round(time_synchronized() - t2, 3)}' if end2end else 'postprocess:' + f' {round(time_synchronized() - t2, 3)}')
             if dets is not None:
-                final_boxes, final_scores, final_cls_inds = dets[:,
-                                                            :4], dets[:, 4], dets[:, 5]
+                final_boxes, final_scores, final_cls_inds = dets[:, :4], dets[:, 4], dets[:, 5]
                 frame = self.vis(frame, final_boxes, final_scores,
                                  final_cls_inds, names=self.names)
             if not noSave:
@@ -1116,8 +1120,7 @@ class TensorRT_Engine(object):
         r = min(input_size[0] / img.shape[0], input_size[1] / img.shape[1])
         resized_img = self.cv2.resize(img, (int(img.shape[1] * r), int(
             img.shape[0] * r)), interpolation=self.cv2.INTER_LINEAR, ).astype(np.float32)
-        padded_img[: int(img.shape[0] * r),
-        : int(img.shape[1] * r)] = resized_img
+        padded_img[: int(img.shape[0] * r), : int(img.shape[1] * r)] = resized_img
         padded_img = padded_img[:, :, ::-1]
         padded_img /= 255.0
 
@@ -1147,8 +1150,7 @@ class TensorRT_Engine(object):
                                                                                                    txt_size[0], c1[1]),
                                                   (c1[0] + txt_size[0] + txt_size[1] + 3, c1[1])])], 0, txt_bk_color,
                                   -1, 16)
-            self.cv2.rectangle(img, c1, c2, txt_bk_color, -
-            1, self.cv2.LINE_AA)  # filled
+            self.cv2.rectangle(img, c1, c2, txt_bk_color, - 1, self.cv2.LINE_AA)  # filled
             self.cv2.putText(img, text, (c1[0], c1[1] - 2), 0, 0.4,
                              txt_color, thickness=1, lineType=self.cv2.LINE_AA)
         return img
