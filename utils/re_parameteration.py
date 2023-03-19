@@ -4,10 +4,11 @@ import torch
 from utils.torch_utils import is_parallel
 import os
 from utils.general import colorstr
+import argparse
 
 
 def Re_parameterization(inputWeightPath='v7-tiny-training.pt',
-                        outputWeightPath = 'cfg/deploy/yolov7.pt',
+                        outputWeightPath='cfg/deploy/yolov7.pt',
                         device=None):
     prefix = colorstr('Re-parameteration: ')
     model_named = {-1: 'unnamed', 77: 'YOLOv7-tiny', 105: 'YOLOv7', 121: 'YOLOv7-w6', 122: 'YOLOv7x', 144: 'YOLOv7-e6',
@@ -109,3 +110,11 @@ def Re_parameterization(inputWeightPath='v7-tiny-training.pt',
     else:
         print(f'{prefix}File not found weight: {inputWeightPath}')
         return False
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--input-path', type=str, help='model for pre-paramter')
+    parser.add_argument('--output-path', type=str, help='model path output')
+    opt = parser.parse_args()
+    result = Re_parameterization(opt.input_path, opt.output_path, device='cpu')

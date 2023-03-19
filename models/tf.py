@@ -1,15 +1,3 @@
-# YOLOv5 🚀 by Ultralytics, GPL-3.0 license
-"""
-TensorFlow, Keras and TFLite versions of YOLOv5
-Authored by https://github.com/zldrobit in PR https://github.com/ultralytics/yolov5/pull/1127
-
-Usage:
-    $ python models/tf.py --weights yolov5s.pt
-
-Export:
-    $ python export.py --weights yolov5s.pt --include saved_model pb tflite tfjs
-"""
-
 import argparse
 import sys
 from copy import deepcopy
@@ -23,18 +11,9 @@ from keras.layers import Layer
 import logging
 import inspect
 from typing import Optional
-from models.common import C3, SPP, SPPF, Bottleneck, BottleneckCSP, SP, C3x, Concat, Conv, CrossConv, DWConv, \
-    DWConvTranspose2d, Focus, autopad, MP, Shortcut, \
-    Chuncat, Foldcut, ReOrg, Expand, Contract
+from models.common import *
 from models.experimental import MixConv2d, attempt_load
-from models.yolo import Detect, Segment, IDetect, RobustConv, RobustConv2, GhostConv, RepConv, RepConv_OREPA, DownC, \
-    Stem, GhostStem, \
-    SPPCSPC, GhostSPPCSPC, BottleneckCSPA, BottleneckCSPB, BottleneckCSPC, RepBottleneck, RepBottleneckCSPA, \
-    RepBottleneckCSPB, RepBottleneckCSPC, \
-    Res, ResCSPA, ResCSPB, ResCSPC, RepRes, RepResCSPA, RepResCSPB, RepResCSPC, ResX, ResXCSPA, ResXCSPB, ResXCSPC, \
-    RepResX, RepResXCSPA, RepResXCSPB, RepResXCSPC, Ghost, GhostCSPA, GhostCSPB, GhostCSPC, SwinTransformerBlock, \
-    STCSPA, STCSPB, STCSPC, \
-    SwinTransformer2Block, ST2CSPA, ST2CSPB, ST2CSPC, IAuxDetect
+from models.yolo import *
 from utils.activations import SiLU, Hardswish
 from utils.general import make_divisible, colorstr
 
@@ -558,6 +537,7 @@ def parse_model(d, ch, model, imgsz):  # model_dict, input_channels(3)
         elif m is ReOrg:
             c2 = ch[f] * 4
         elif m in [Detect, IDetect, IAuxDetect]:
+            assert m is Detect, 'IDetect and IAuxDetect is not support, please preparameter'
             args.append([ch[x + 1] for x in f])
             if isinstance(args[1], int):  # number of anchors
                 args[1] = [list(range(args[1] * 2))] * len(f)
@@ -595,14 +575,14 @@ class TFModel:
             self.yaml['nc'] = nc  # override yaml value
         self.model, self.savelist = parse_model(deepcopy(self.yaml), ch=[ch], model=model, imgsz=imgsz)
 
-    def predict(self,
-                inputs,
-                tf_nms=False,
-                agnostic_nms=False,
-                topk_per_class=100,
-                topk_all=100,
-                iou_thres=0.45,
-                conf_thres=0.25):
+    def __call__(self,
+                 inputs,
+                 tf_nms=False,
+                 agnostic_nms=False,
+                 topk_per_class=100,
+                 topk_all=100,
+                 iou_thres=0.45,
+                 conf_thres=0.25):
         y = []  # outputs
         x = inputs
         for index, (m) in enumerate(self.model.layers):
@@ -628,7 +608,8 @@ class TFModel:
                                                             iou_thres,
                                                             conf_thres,
                                                             clip_boxes=False)
-            return (nms,)
+            out = (nms,)
+            return out
         return x  # output [1,6300,85] = [xywh, conf, class0, class1, ...]
 
     @staticmethod
@@ -640,6 +621,9 @@ class TFModel:
 
 class AgnosticNMS(Layer):
     # TF Agnostic NMS
+    def __init__(self):
+        super(AgnosticNMS, self).__init__()
+
     def call(self, inputs, topk_all, iou_thres, conf_thres):
         # wrap map_fn to avoid TypeSpec related error https://stackoverflow.com/a/65809989/3036450
         return tf.map_fn(lambda x: self._nms(x, topk_all, iou_thres, conf_thres),
