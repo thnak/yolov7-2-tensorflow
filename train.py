@@ -348,14 +348,14 @@ def train(hyp, opt, tb_writer=None,
     # P, R, mAP@.5, mAP@.5-.95, val_loss(box, obj, cls)
     results = (0, 0, 0, 0, 0, 0, 0)
     scheduler.last_epoch = start_epoch - 1  # do not move
-    scaler = GradScaler(enabled=cuda)
+    scaler = GradScaler()
 
     hyp['loss_ota'] = 0 if not model.use_anchor else hyp.get('loss_ota', 0)
-
-    compute_loss_ota = (ComputeLossOTA(model) if p5_model else ComputeLossAuxOTA(model)) if model.use_anchor else None
-    compute_loss_ = ComputeLoss(model) if model.use_anchor else ComputeLoss_AnchorFree(model)
-    use_loss_ota = 'loss_ota' not in hyp or hyp['loss_ota'] == 1 or not model.is_p5()
-    compute_loss = compute_loss_ota if use_loss_ota else compute_loss_
+    use_loss_ota = 'loss_ota' not in hyp or hyp['loss_ota'] >= 1 or not model.is_p5()
+    if use_loss_ota:
+        compute_loss = (ComputeLossOTA(model) if p5_model else ComputeLossAuxOTA(model)) if model.use_anchor else None
+    else:
+        compute_loss = ComputeLoss(model) if model.use_anchor else ComputeLoss_AnchorFree(model)
     logger.info(f'Image sizes {imgsz} train, {imgsz_test} test\n'
                 f'Using {dataloader.num_workers} dataloader workers\n'
                 f'Logging results to {save_dir}\n'
@@ -442,6 +442,8 @@ def train(hyp, opt, tb_writer=None,
 
             # Optimize
             if ni % accumulate == 0:
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)  # clip gradients
                 scaler.step(optimizer)  # optimizer.step
                 scaler.update()
                 optimizer.zero_grad(set_to_none=True)

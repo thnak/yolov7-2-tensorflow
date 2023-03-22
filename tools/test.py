@@ -107,7 +107,12 @@ def test(data,
     confusion_matrix = ConfusionMatrix(nc=nc)
     names = {k: v for k, v in enumerate(model.names if hasattr(model, 'names') else model.module.names)}
     coco91class = coco80_to_coco91_class()
-    s = ('%22s' if model.use_anchor else '%11s' + '%11s' * 6) % ('Class', 'Images', 'Labels', 'P', 'R', 'mAP@.5', 'mAP@.5:.95')
+    if model.use_anchor:
+        s = ('%22s' + '%11s' * 6) % ('Class', 'Images', 'Labels', 'P', 'R', 'mAP@.5', 'mAP@.5:.95')
+        pf = '%22s' + '%11i' * 2 + '%11.3g' * 4  # print format
+    else:
+        s = ('%11s' + '%11s' * 6) % ('Class', 'Images', 'Labels', 'P', 'R', 'mAP@.5', 'mAP@.5:.95')
+        pf = '%11s' + '%11i' * 2 + '%11.3g' * 4  # print format
     p, r, f1, mp, mr, map50, map_, t0, t1 = 0., 0., 0., 0., 0., 0., 0., 0., 0.
     loss = torch.zeros(3, device=device)
     jdict, stats, ap, ap_class, wandb_images = [], [], [], [], []
@@ -245,7 +250,7 @@ def test(data,
         nt = torch.zeros(1)
 
     # Print results
-    pf = '%22s' if model.use_anchor else '%11s' + '%11i' * 2 + '%11.3g' * 4  # print format
+
     print(pf % ('all', seen, nt.sum(), mp, mr, map50, map_))
 
     # Print results per class
