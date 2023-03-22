@@ -12,6 +12,7 @@ obj: 0.755
 obj_pw: 1.2
 iou_t: 0.271
 anchor_t: 3.48
+loss_ota: 0
 # anchors: 3.0
 fl_gamma: 0.0
 # Data argument
@@ -24,7 +25,6 @@ mosaic: 1
 mixup: 0.15
 copy_paste: 0
 paste_in: 0.15
-loss_ota: 1
 toGray: 0.1
 CLAHE: 0.05
 CLAHE_clip_limit: 4

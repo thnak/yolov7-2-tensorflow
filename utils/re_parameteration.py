@@ -20,7 +20,8 @@ def Re_parameterization(inputWeightPath='v7-tiny-training.pt',
         nc = old_model.nc
         p5_model = old_model.is_p5()
         nodes = old_model.num_nodes()
-        cfg = eval(str(old_model.yaml).replace('IDetect', 'Detect'))
+        string_cfg = str(old_model.yaml).replace('IDetect', 'Detect').replace('IV6Detect', 'V6Detect')
+        cfg = eval(string_cfg)
         if 'head_deploy' in cfg:
             cfg['head'] = cfg['head_deploy']
             cfg.pop('head_deploy', None)

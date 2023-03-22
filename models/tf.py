@@ -447,7 +447,7 @@ class TFDetect(Layer):
         self.na = len(anchors[0]) // 2  # number of anchors
         self.grid = [tf.zeros(1)] * self.nl  # init grid
         self.anchors = tf.convert_to_tensor(w.anchors.detach().cpu().numpy(), dtype=tf.float32)
-        self.anchor_grid = tf.reshape(self.anchors * tf.reshape(self.stride, [self.nl, 1, 1]), [self.nl, 1, -1, 1, 2])
+        self.anchor_grid = tf.reshape(self.anchors * tf.reshape(self.stride, [self.nl, 1, 1]), [self.nl, 1, -1, 2])
         self.m = [TFConv2d(x, self.no * self.na, 1, w=w.m[i]) for i, x in enumerate(ch)]
         self.imgsz = imgsz
         for i in range(self.nl):
@@ -459,13 +459,13 @@ class TFDetect(Layer):
         x = []
         for i in range(self.nl):
             x.append(self.m[i](inputs[i]))
-            # x(bs,20,20,255) to x(bs,3,20,20,85)
             ny, nx = self.imgsz[0] // self.stride[i], self.imgsz[1] // self.stride[i]
             x[i] = tf.reshape(x[i], [-1, ny * nx, self.na, self.no])
 
             y = tf.sigmoid(x[i])
             grid = tf.transpose(self.grid[i], [0, 2, 1, 3])
-            anchor_grid = tf.transpose(self.anchor_grid[i], [0, 2, 1, 3])
+            anchor_grid = tf.repeat(self.anchor_grid[i], repeats=tf.cast(ny * nx, tf.int32), axis=0)
+
             xy = (y[..., 0:2] * 2. - 0.5 + grid) * self.stride[i]  # xy
             wh = (y[..., 2:4] * 2) ** 2 * anchor_grid  # wh
             # Normalize xywh to 0-1 to reduce calibration error

@@ -352,6 +352,165 @@ class IAuxDetect(nn.Module):
         return box, score
 
 
+class V6Detect(nn.Module):
+    # YOLOv5 Detect head for detection models
+    dynamic = False  # force grid reconstruction
+    export = False  # export mode
+    shape = None
+    anchors = torch.empty(0)  # init
+    strides = torch.empty(0)  # init
+
+    def __init__(self, nc=80, ch=(), inplace=True):  # detection layer
+        super().__init__()
+        self.nc = nc  # number of classes
+        self.nl = len(ch)  # number of detection layers
+        self.reg_max = 16
+        self.no = nc + self.reg_max * 4  # number of outputs per anchor
+        self.inplace = inplace  # use inplace ops (e.g. slice assignment)
+        self.stride = torch.zeros(self.nl)  # strides computed during build
+
+        c2, c3 = max(ch[0] // 4, 16), max(ch[0], self.no - 4)  # channels
+        self.cv2 = nn.ModuleList(
+            nn.Sequential(Conv(x, c2, 3), Conv(c2, c2, 3), nn.Conv2d(c2, 4 * self.reg_max, 1)) for x in ch)
+        self.cv3 = nn.ModuleList(
+            nn.Sequential(Conv(x, c3, 3), Conv(c3, c3, 3), nn.Conv2d(c3, self.nc, 1)) for x in ch)
+        self.dfl = DFL(self.reg_max)
+
+    def forward(self, x):
+        shape = x[0].shape  # BCHW
+        for i in range(self.nl):
+            x[i] = torch.cat((self.cv2[i](x[i]), self.cv3[i](x[i])), 1)
+        box, cls = torch.cat([xi.view(shape[0], self.no, -1) for xi in x], 2).split((self.reg_max * 4, self.nc), 1)
+        if self.training:
+            return x, box, cls
+        elif self.dynamic or self.shape != shape:
+            self.anchors, self.strides = (x.transpose(0, 1) for x in self.make_anchors(x, self.stride, 0.5))
+            self.shape = shape
+
+        dbox = self.dist2bbox(self.dfl(box), self.anchors.unsqueeze(0), xywh=True, dim=1) * self.strides
+        y = torch.cat((dbox, cls.sigmoid()), 1)
+        return y if self.export else (y, (x, box, cls))
+
+    @staticmethod
+    def make_anchors(feats, strides, grid_cell_offset=0.5):
+        """Generate anchors from features."""
+        anchor_points, stride_tensor = [], []
+        assert feats is not None
+        dtype, device = feats[0].dtype, feats[0].device
+        for i, stride in enumerate(strides):
+            _, _, h, w = feats[i].shape
+            sx = torch.arange(end=w, device=device, dtype=dtype) + grid_cell_offset  # shift x
+            sy = torch.arange(end=h, device=device, dtype=dtype) + grid_cell_offset  # shift y
+            sy, sx = torch.meshgrid(sy, sx, indexing='ij')
+            anchor_points.append(torch.stack((sx, sy), -1).view(-1, 2))
+            stride_tensor.append(torch.full((h * w, 1), stride, dtype=dtype, device=device))
+        return torch.cat(anchor_points), torch.cat(stride_tensor)
+
+    @staticmethod
+    def dist2bbox(distance, anchor_points, xywh=True, dim=-1):
+        """Transform distance(ltrb) to box(xywh or xyxy)."""
+        lt, rb = torch.split(distance, 2, dim)
+        x1y1 = anchor_points - lt
+        x2y2 = anchor_points + rb
+        if xywh:
+            c_xy = (x1y1 + x2y2) / 2
+            wh = x2y2 - x1y1
+            return torch.cat((c_xy, wh), dim)  # xywh bbox
+        return torch.cat((x1y1, x2y2), dim)  # xyxy bbox
+
+    def bias_init(self):
+        # Initialize Detect() biases, WARNING: requires stride availability
+        m = self  # self.model[-1]  # Detect() module
+        # cf = torch.bincount(torch.tensor(np.concatenate(dataset.labels, 0)[:, 0]).long(), minlength=nc) + 1
+        # ncf = math.log(0.6 / (m.nc - 0.999999)) if cf is None else torch.log(cf / cf.sum())  # nominal class frequency
+        for a, b, s in zip(m.cv2, m.cv3, m.stride):  # from
+            a[-1].bias.data[:] = 1.0  # box
+            b[-1].bias.data[:m.nc] = math.log(5 / m.nc / (640 / s) ** 2)  # cls (5 objects and 80 classes per 640 image)
+
+
+class IV6Detect(nn.Module):
+    # YOLOv5 Detect head for detection models
+    dynamic = False  # force grid reconstruction
+    export = False  # export mode
+    shape = None
+    anchors = torch.empty(0)  # init
+    strides = torch.empty(0)  # init
+
+    def __init__(self, nc=80, ch=(), inplace=True):  # detection layer
+        super().__init__()
+        self.nc = nc  # number of classes
+        self.nl = len(ch)  # number of detection layers
+        self.reg_max = 16
+        self.no = nc + self.reg_max * 4  # number of outputs per anchor
+        self.inplace = inplace  # use inplace ops (e.g. slice assignment)
+        self.stride = torch.zeros(self.nl)  # strides computed during build
+
+        c2, c3 = max(ch[0] // 4, 16), max(ch[0], self.no - 4)  # channels
+        self.cv2 = nn.ModuleList(
+            nn.Sequential(Conv(x, c2, 3), Conv(c2, c2, 3), nn.Conv2d(c2, 4 * self.reg_max, 1)) for x in ch)
+        self.cv3 = nn.ModuleList(
+            nn.Sequential(Conv(x, c3, 3), Conv(c3, c3, 3), nn.Conv2d(c3, self.nc, 1)) for x in ch)
+        self.dfl = DFL(self.reg_max)
+
+        self.ia2 = nn.ModuleList(ImplicitA(x) for x in ch)
+        self.ia3 = nn.ModuleList(ImplicitA(x) for x in ch)
+        self.im2 = nn.ModuleList(ImplicitM(4 * self.reg_max) for _ in ch)
+        self.im3 = nn.ModuleList(ImplicitM(self.nc) for _ in ch)
+
+    def forward(self, x):
+        shape = x[0].shape  # BCHW
+        for i in range(self.nl):
+            # x[i] = torch.cat((self.cv2[i](x[i]), self.cv3[i](x[i])), 1)
+            x[i] = torch.cat((self.im2[i](self.cv2[i](self.ia2[i](x[i]))), self.im3[i](self.cv3[i](self.ia3[i](x[i])))),
+                             1)
+        box, cls = torch.cat([xi.view(shape[0], self.no, -1) for xi in x], 2).split((self.reg_max * 4, self.nc), 1)
+        if self.training:
+            return x, box, cls
+        elif self.dynamic or self.shape != shape:
+            self.anchors, self.strides = (x.transpose(0, 1) for x in self.make_anchors(x, self.stride, 0.5))
+            self.shape = shape
+
+        dbox = self.dist2bbox(self.dfl(box), self.anchors.unsqueeze(0), xywh=True, dim=1) * self.strides
+        y = torch.cat((dbox, cls.sigmoid()), 1)
+        return y if self.export else (y, (x, box, cls))
+
+    @staticmethod
+    def make_anchors(feats, strides, grid_cell_offset=0.5):
+        """Generate anchors from features."""
+        anchor_points, stride_tensor = [], []
+        assert feats is not None
+        dtype, device = feats[0].dtype, feats[0].device
+        for i, stride in enumerate(strides):
+            _, _, h, w = feats[i].shape
+            sx = torch.arange(end=w, device=device, dtype=dtype) + grid_cell_offset  # shift x
+            sy = torch.arange(end=h, device=device, dtype=dtype) + grid_cell_offset  # shift y
+            sy, sx = torch.meshgrid(sy, sx, indexing='ij')
+            anchor_points.append(torch.stack((sx, sy), -1).view(-1, 2))
+            stride_tensor.append(torch.full((h * w, 1), stride, dtype=dtype, device=device))
+        return torch.cat(anchor_points), torch.cat(stride_tensor)
+
+    @staticmethod
+    def dist2bbox(distance, anchor_points, xywh=True, dim=-1):
+        """Transform distance(ltrb) to box(xywh or xyxy)."""
+        lt, rb = torch.split(distance, 2, dim)
+        x1y1 = anchor_points - lt
+        x2y2 = anchor_points + rb
+        if xywh:
+            c_xy = (x1y1 + x2y2) / 2
+            wh = x2y2 - x1y1
+            return torch.cat((c_xy, wh), dim)  # xywh bbox
+        return torch.cat((x1y1, x2y2), dim)  # xyxy bbox
+
+    def bias_init(self):
+        # Initialize Detect() biases, WARNING: requires stride availability
+        m = self  # self.model[-1]  # Detect() module
+        # cf = torch.bincount(torch.tensor(np.concatenate(dataset.labels, 0)[:, 0]).long(), minlength=nc) + 1
+        # ncf = math.log(0.6 / (m.nc - 0.999999)) if cf is None else torch.log(cf / cf.sum())  # nominal class frequency
+        for a, b, s in zip(m.cv2, m.cv3, m.stride):  # from
+            a[-1].bias.data[:] = 1.0  # box
+            b[-1].bias.data[:m.nc] = math.log(5 / m.nc / (640 / s) ** 2)  # cls (5 objects and 80 classes per 640 image)
+
+
 class Model(nn.Module):
     # model, input channels, number of classes
     def __init__(self, cfg='yolor-csp-c.yaml', ch=3, nc=None, anchors=None):
@@ -382,33 +541,37 @@ class Model(nn.Module):
         self.total_image = [0]
         self.input_shape = [3, 640, 640]
         self.reparam = False
-        # print([x.shape for x in self.forward(torch.zeros(1, ch, 64, 64))])
-
+        self.inplace = self.yaml.get('inplace', True)
+        self.use_anchor = False
         # Build strides, anchors
         m = self.model[-1]  # Detect()
+        s = 256
         if isinstance(m, (Detect, IDetect)):
-            s = 256  # 2x min stride
+            m.inplace = self.inplace
             m.stride = torch.tensor([s / x.shape[-2] for x in self.forward(torch.zeros(1, ch, s, s))])  # forward
             check_anchor_order(m)
             m.anchors /= m.stride.view(-1, 1, 1)
             self.stride = m.stride
             self._initialize_biases()  # only run once
-            # print('Strides: %s' % m.stride.tolist())
+            self.use_anchor = True
 
-        if isinstance(m, IAuxDetect):
-            s = 256  # 2x min stride
+        elif isinstance(m, IAuxDetect):
+            m.inplace = self.inplace
             m.stride = torch.tensor([s / x.shape[-2] for x in self.forward(torch.zeros(1, ch, s, s))[:4]])  # forward
-            # print(m.stride)
             check_anchor_order(m)
             m.anchors /= m.stride.view(-1, 1, 1)
             self.stride = m.stride
             self._initialize_aux_biases()  # only run once
-            # print('Strides: %s' % m.stride.tolist())
+            self.use_anchor = True
+
+        elif isinstance(m, (V6Detect, IV6Detect)):
+            m.inplace = self.inplace
+            m.stride = torch.tensor([s / x.shape[-2] for x in self.forward(torch.zeros(1, ch, s, s))[0]])  # forward
+            self.stride = m.stride
+            m.bias_init()
 
         # Init weights, biases
         initialize_weights(self)
-        # self.info()
-        # logger.info('inited')
 
     def forward(self, x, augment=False, profile=False):
         if augment:
@@ -1215,6 +1378,8 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
             args.append([ch[x] for x in f])
             if isinstance(args[1], int):  # number of anchors
                 args[1] = [list(range(args[1] * 2))] * len(f)
+        elif m in [IV6Detect, V6Detect]:
+            args.append([ch[x] for x in f])
         elif m is ReOrg:
             c2 = ch[f] * 4
         elif m is Contract:

@@ -423,10 +423,10 @@ def img2label_paths(img_paths):
     return ['txt'.join(x.replace(sa, sb, 1).rsplit(x.split('.')[-1], 1)) for x in img_paths]
 
 
-
 class LoadImagesAndLabels(Dataset):  # for training/testing
     version = 0.1
     image_8bit = True
+    minimum_size = 100
 
     def __init__(self, path, img_size=640, batch_size=16, augment=False, hyp=None, rect=False, image_weights=False,
                  cache_images='ram', single_cls=False, stride=32, pad=0.0, single_channel=False, prefix=''):
@@ -468,8 +468,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         cache_path = (p if p.is_file() else Path(self.label_files[0]).parent).with_suffix('.cache')  # cached labels
         if cache_path.is_file():
             cache, exists = torch.load(cache_path), True  # load
-            if cache['hash'] != get_hash(self.label_files + self.img_files) or cache[
-                'version'] != self.version:  # changed
+            if cache['hash'] != get_hash(self.label_files + self.img_files) or cache['version'] != self.version:  # changed
                 cache, exists = self.cache_labels(cache_path, prefix), False  # re-cache
         else:
             cache, exists = self.cache_labels(cache_path, prefix), False  # cache
@@ -581,7 +580,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         return cache
 
     def cache_labels(self, path=Path('./labels.cache'), prefix=''):
-        # Cache dataset labels, check images and read shapes
+        """Cache dataset labels, check images and read shapes"""
         x = {}  # dict
         nm, nf, ne, nc = 0, 0, 0, 0  # number missing, found, empty, duplicate
         pbar = tqdm(zip(self.img_files, self.label_files),
@@ -598,7 +597,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                 im.verify()  # PIL verify
                 shape = exif_size(im)  # image size
                 segments = []  # instance segments
-                assert (shape[0] > 9) & (shape[1] > 9), f'image size {shape} <10 pixels'
+                assert shape[0]*shape[1] > self.minimum_size, f'image size {shape} < {self.minimum_size} pixels'
                 assert im.format.lower() in IMG_FORMATS, f'invalid image format {im.format} the format must be {IMG_FORMATS}'
                 del im
                 # verify labels
@@ -640,6 +639,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         return x
 
     def load_image(self, index):
+        """Load image from disk if not in cached or from cached if use --cache RAM"""
         img = self.imgs[index]
         imgnpy = self.img_npy[index]
         imgnpy = imgnpy if isinstance(imgnpy, str) else 'imgnpy.npy'
@@ -660,9 +660,11 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             return img, img.shape[:2], img.shape[:2]
 
     def __len__(self):
+        """Return number of valid image include background"""
         return len(self.img_files)
 
     def __getitem__(self, index):
+        """Torch get item for training"""
         index = self.indices[index]  # linear, shuffled, or image_weights
 
         mosaic = True if self.mosaic and random.random() < self.hyp['mosaic'] else False
@@ -823,7 +825,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         return img4, labels4
 
     def load_mosaic9(self, index):
-        # loads images in a 9-mosaic
+        """loads images in a 9-mosaic"""
 
         labels9, segments9 = [], []
         s = self.img_size
@@ -898,7 +900,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         return img9, labels9
 
     def load_samples(self, index):
-        # loads images in a 4-mosaic
+        """loads images in a 4-mosaic"""
 
         labels4, segments4 = [], []
         s = self.img_size
@@ -949,7 +951,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
 
 
 def copy_paste(img, labels, segments, probability=0.5):
-    # Implement Copy-Paste augmentation https://arxiv.org/abs/2012.07177, labels as nx5 np.array(cls, xyxy)
+    """SEE Implement Copy-Paste augmentation https://arxiv.org/abs/2012.07177, labels as nx5 np.array(cls, xyxy)"""
     n = len(segments)
     if probability and n:
         h, w, c = img.shape  # height, width, channels

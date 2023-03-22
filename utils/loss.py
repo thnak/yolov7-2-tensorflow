@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import os
 
 from utils.general import bbox_iou, bbox_alpha_iou, box_iou, box_giou, box_diou, box_ciou, xywh2xyxy
 from utils.torch_utils import is_parallel
@@ -32,9 +33,10 @@ class SigmoidBin(nn.Module):
     stride = None  # strides computed during build
     export = False  # onnx export
 
-    def __init__(self, bin_count=10, min=0.0, max=1.0, reg_scale = 2.0, use_loss_regression=True, use_fw_regression=True, BCE_weight=1.0, smooth_eps=0.0):
+    def __init__(self, bin_count=10, min=0.0, max=1.0, reg_scale=2.0, use_loss_regression=True, use_fw_regression=True,
+                 BCE_weight=1.0, smooth_eps=0.0):
         super(SigmoidBin, self).__init__()
-        
+
         self.bin_count = bin_count
         self.length = bin_count + 1
         self.min = min
@@ -47,15 +49,14 @@ class SigmoidBin(nn.Module):
         self.reg_scale = reg_scale
         self.BCE_weight = BCE_weight
 
-        start = min + (self.scale/2.0) / self.bin_count
-        end = max - (self.scale/2.0) / self.bin_count
+        start = min + (self.scale / 2.0) / self.bin_count
+        end = max - (self.scale / 2.0) / self.bin_count
         step = self.scale / self.bin_count
         self.step = step
-        #print(f" start = {start}, end = {end}, step = {step} ")
+        # print(f" start = {start}, end = {end}, step = {step} ")
 
-        bins = torch.range(start, end + 0.0001, step).float() 
-        self.register_buffer('bins', bins) 
-               
+        bins = torch.range(start, end + 0.0001, step).float()
+        self.register_buffer('bins', bins)
 
         self.cp = 1.0 - 0.5 * smooth_eps
         self.cn = 0.5 * smooth_eps
@@ -67,10 +68,11 @@ class SigmoidBin(nn.Module):
         return self.length
 
     def forward(self, pred):
-        assert pred.shape[-1] == self.length, 'pred.shape[-1]=%d is not equal to self.length=%d' % (pred.shape[-1], self.length)
+        assert pred.shape[-1] == self.length, 'pred.shape[-1]=%d is not equal to self.length=%d' % (
+        pred.shape[-1], self.length)
 
-        pred_reg = (pred[..., 0] * self.reg_scale - self.reg_scale/2.0) * self.step
-        pred_bin = pred[..., 1:(1+self.bin_count)]
+        pred_reg = (pred[..., 0] * self.reg_scale - self.reg_scale / 2.0) * self.step
+        pred_bin = pred[..., 1:(1 + self.bin_count)]
 
         _, bin_idx = torch.max(pred_bin, dim=-1)
         bin_bias = self.bins[bin_idx]
@@ -83,30 +85,31 @@ class SigmoidBin(nn.Module):
 
         return result
 
-
     def training_loss(self, pred, target):
-        assert pred.shape[-1] == self.length, 'pred.shape[-1]=%d is not equal to self.length=%d' % (pred.shape[-1], self.length)
-        assert pred.shape[0] == target.shape[0], 'pred.shape=%d is not equal to the target.shape=%d' % (pred.shape[0], target.shape[0])
+        assert pred.shape[-1] == self.length, 'pred.shape[-1]=%d is not equal to self.length=%d' % (
+        pred.shape[-1], self.length)
+        assert pred.shape[0] == target.shape[0], 'pred.shape=%d is not equal to the target.shape=%d' % (
+        pred.shape[0], target.shape[0])
         device = pred.device
 
-        pred_reg = (pred[..., 0].sigmoid() * self.reg_scale - self.reg_scale/2.0) * self.step
-        pred_bin = pred[..., 1:(1+self.bin_count)]
+        pred_reg = (pred[..., 0].sigmoid() * self.reg_scale - self.reg_scale / 2.0) * self.step
+        pred_bin = pred[..., 1:(1 + self.bin_count)]
 
         diff_bin_target = torch.abs(target[..., None] - self.bins)
         _, bin_idx = torch.min(diff_bin_target, dim=-1)
-    
+
         bin_bias = self.bins[bin_idx]
         bin_bias.requires_grad = False
         result = pred_reg + bin_bias
 
         target_bins = torch.full_like(pred_bin, self.cn, device=device)  # targets
-        n = pred.shape[0] 
+        n = pred.shape[0]
         target_bins[range(n), bin_idx] = self.cp
 
-        loss_bin = self.BCEbins(pred_bin, target_bins) # BCE
+        loss_bin = self.BCEbins(pred_bin, target_bins)  # BCE
 
         if self.use_loss_regression:
-            loss_regression = self.MSELoss(result, target)  # MSE        
+            loss_regression = self.MSELoss(result, target)  # MSE
             loss = loss_bin + loss_regression
         else:
             loss = loss_bin
@@ -118,6 +121,7 @@ class SigmoidBin(nn.Module):
 
 class FocalLoss(nn.Module):
     """Wraps focal loss around existing loss_fcn(), i.e. criteria = FocalLoss(nn.BCEWithLogitsLoss(), gamma=1.5)"""
+
     def __init__(self, loss_fcn, gamma=1.5, alpha=0.25):
         super(FocalLoss, self).__init__()
         self.loss_fcn = loss_fcn  # must be nn.BCEWithLogitsLoss()
@@ -148,6 +152,7 @@ class FocalLoss(nn.Module):
 
 class QFocalLoss(nn.Module):
     """Wraps Quality focal loss around existing loss_fcn(), i.e. criteria = FocalLoss(nn.BCEWithLogitsLoss(), gamma=1.5)"""
+
     def __init__(self, loss_fcn, gamma=1.5, alpha=0.25):
         super(QFocalLoss, self).__init__()
         self.loss_fcn = loss_fcn  # must be nn.BCEWithLogitsLoss()
@@ -171,95 +176,96 @@ class QFocalLoss(nn.Module):
         else:  # 'none'
             return loss
 
+
 class RankSort(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, logits, targets, delta_RS=0.50, eps=1e-10): 
+    def forward(ctx, logits, targets, delta_RS=0.50, eps=1e-10):
 
-        classification_grads=torch.zeros(logits.shape).cuda()
-        
-        #Filter fg logits
+        classification_grads = torch.zeros(logits.shape).cuda()
+
+        # Filter fg logits
         fg_labels = (targets > 0.)
         fg_logits = logits[fg_labels]
         fg_targets = targets[fg_labels]
         fg_num = len(fg_logits)
 
-        #Do not use bg with scores less than minimum fg logit
-        #since changing its score does not have an effect on precision
-        threshold_logit = torch.min(fg_logits)-delta_RS
-        relevant_bg_labels=((targets==0) & (logits>=threshold_logit))
-        
-        relevant_bg_logits = logits[relevant_bg_labels] 
-        relevant_bg_grad=torch.zeros(len(relevant_bg_logits)).cuda()
-        sorting_error=torch.zeros(fg_num).cuda()
-        ranking_error=torch.zeros(fg_num).cuda()
-        fg_grad=torch.zeros(fg_num).cuda()
-        
-        #sort the fg logits
-        order=torch.argsort(fg_logits)
-        #Loops over each positive following the order
+        # Do not use bg with scores less than minimum fg logit
+        # since changing its score does not have an effect on precision
+        threshold_logit = torch.min(fg_logits) - delta_RS
+        relevant_bg_labels = ((targets == 0) & (logits >= threshold_logit))
+
+        relevant_bg_logits = logits[relevant_bg_labels]
+        relevant_bg_grad = torch.zeros(len(relevant_bg_logits)).cuda()
+        sorting_error = torch.zeros(fg_num).cuda()
+        ranking_error = torch.zeros(fg_num).cuda()
+        fg_grad = torch.zeros(fg_num).cuda()
+
+        # sort the fg logits
+        order = torch.argsort(fg_logits)
+        # Loops over each positive following the order
         for ii in order:
             # Difference Transforms (x_ij)
-            fg_relations=fg_logits-fg_logits[ii] 
-            bg_relations=relevant_bg_logits-fg_logits[ii]
+            fg_relations = fg_logits - fg_logits[ii]
+            bg_relations = relevant_bg_logits - fg_logits[ii]
 
             if delta_RS > 0:
-                fg_relations=torch.clamp(fg_relations/(2*delta_RS)+0.5,min=0,max=1)
-                bg_relations=torch.clamp(bg_relations/(2*delta_RS)+0.5,min=0,max=1)
+                fg_relations = torch.clamp(fg_relations / (2 * delta_RS) + 0.5, min=0, max=1)
+                bg_relations = torch.clamp(bg_relations / (2 * delta_RS) + 0.5, min=0, max=1)
             else:
                 fg_relations = (fg_relations >= 0).float()
                 bg_relations = (bg_relations >= 0).float()
 
             # Rank of ii among pos and false positive number (bg with larger scores)
-            rank_pos=torch.sum(fg_relations)
-            FP_num=torch.sum(bg_relations)
+            rank_pos = torch.sum(fg_relations)
+            FP_num = torch.sum(bg_relations)
 
             # Rank of ii among all examples
-            rank=rank_pos+FP_num
-                            
+            rank = rank_pos + FP_num
+
             # Ranking error of example ii. target_ranking_error is always 0. (Eq. 7)
-            ranking_error[ii]=FP_num/rank      
+            ranking_error[ii] = FP_num / rank
 
             # Current sorting error of example ii. (Eq. 7)
-            current_sorting_error = torch.sum(fg_relations*(1-fg_targets))/rank_pos
+            current_sorting_error = torch.sum(fg_relations * (1 - fg_targets)) / rank_pos
 
-            #Find examples in the target sorted order for example ii         
+            # Find examples in the target sorted order for example ii
             iou_relations = (fg_targets >= fg_targets[ii])
             target_sorted_order = iou_relations * fg_relations
 
-            #The rank of ii among positives in sorted order
+            # The rank of ii among positives in sorted order
             rank_pos_target = torch.sum(target_sorted_order)
 
-            #Compute target sorting error. (Eq. 8)
-            #Since target ranking error is 0, this is also total target error 
-            target_sorting_error= torch.sum(target_sorted_order*(1-fg_targets))/rank_pos_target
+            # Compute target sorting error. (Eq. 8)
+            # Since target ranking error is 0, this is also total target error
+            target_sorting_error = torch.sum(target_sorted_order * (1 - fg_targets)) / rank_pos_target
 
-            #Compute sorting error on example ii
+            # Compute sorting error on example ii
             sorting_error[ii] = current_sorting_error - target_sorting_error
-  
-            #Identity Update for Ranking Error 
-            if FP_num > eps:
-                #For ii the update is the ranking error
-                fg_grad[ii] -= ranking_error[ii]
-                #For negatives, distribute error via ranking pmf (i.e. bg_relations/FP_num)
-                relevant_bg_grad += (bg_relations*(ranking_error[ii]/FP_num))
 
-            #Find the positives that are misranked (the cause of the error)
-            #These are the ones with smaller IoU but larger logits
+            # Identity Update for Ranking Error
+            if FP_num > eps:
+                # For ii the update is the ranking error
+                fg_grad[ii] -= ranking_error[ii]
+                # For negatives, distribute error via ranking pmf (i.e. bg_relations/FP_num)
+                relevant_bg_grad += (bg_relations * (ranking_error[ii] / FP_num))
+
+            # Find the positives that are misranked (the cause of the error)
+            # These are the ones with smaller IoU but larger logits
             missorted_examples = (~ iou_relations) * fg_relations
 
-            #Denominotor of sorting pmf 
+            # Denominotor of sorting pmf
             sorting_pmf_denom = torch.sum(missorted_examples)
 
-            #Identity Update for Sorting Error 
+            # Identity Update for Sorting Error
             if sorting_pmf_denom > eps:
-                #For ii the update is the sorting error
+                # For ii the update is the sorting error
                 fg_grad[ii] -= sorting_error[ii]
-                #For positives, distribute error via sorting pmf (i.e. missorted_examples/sorting_pmf_denom)
-                fg_grad += (missorted_examples*(sorting_error[ii]/sorting_pmf_denom))
+                # For positives, distribute error via sorting pmf (i.e. missorted_examples/sorting_pmf_denom)
+                fg_grad += (missorted_examples * (sorting_error[ii] / sorting_pmf_denom))
 
-        #Normalize gradients by number of positives 
-        classification_grads[fg_labels]= (fg_grad/fg_num)
-        classification_grads[relevant_bg_labels]= (relevant_bg_grad/fg_num)
+        # Normalize gradients by number of positives
+        classification_grads[fg_labels] = (fg_grad / fg_num)
+        classification_grads[relevant_bg_labels] = (relevant_bg_grad / fg_num)
 
         ctx.save_for_backward(classification_grads)
 
@@ -267,162 +273,607 @@ class RankSort(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, out_grad1, out_grad2):
-        g1, =ctx.saved_tensors
-        return g1*out_grad1, None, None, None
+        g1, = ctx.saved_tensors
+        return g1 * out_grad1, None, None, None
+
 
 class aLRPLoss(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, logits, targets, regression_losses, delta=1., eps=1e-5): 
-        classification_grads=torch.zeros(logits.shape).cuda()
-        
-        #Filter fg logits
+    def forward(ctx, logits, targets, regression_losses, delta=1., eps=1e-5):
+        classification_grads = torch.zeros(logits.shape).cuda()
+
+        # Filter fg logits
         fg_labels = (targets == 1)
         fg_logits = logits[fg_labels]
         fg_num = len(fg_logits)
 
-        #Do not use bg with scores less than minimum fg logit
-        #since changing its score does not have an effect on precision
-        threshold_logit = torch.min(fg_logits)-delta
+        # Do not use bg with scores less than minimum fg logit
+        # since changing its score does not have an effect on precision
+        threshold_logit = torch.min(fg_logits) - delta
 
-        #Get valid bg logits
-        relevant_bg_labels=((targets==0)&(logits>=threshold_logit))
-        relevant_bg_logits=logits[relevant_bg_labels] 
-        relevant_bg_grad=torch.zeros(len(relevant_bg_logits)).cuda()
-        rank=torch.zeros(fg_num).cuda()
-        prec=torch.zeros(fg_num).cuda()
-        fg_grad=torch.zeros(fg_num).cuda()
-        
-        max_prec=0                                           
-        #sort the fg logits
-        order=torch.argsort(fg_logits)
-        #Loops over each positive following the order
+        # Get valid bg logits
+        relevant_bg_labels = ((targets == 0) & (logits >= threshold_logit))
+        relevant_bg_logits = logits[relevant_bg_labels]
+        relevant_bg_grad = torch.zeros(len(relevant_bg_logits)).cuda()
+        rank = torch.zeros(fg_num).cuda()
+        prec = torch.zeros(fg_num).cuda()
+        fg_grad = torch.zeros(fg_num).cuda()
+
+        max_prec = 0
+        # sort the fg logits
+        order = torch.argsort(fg_logits)
+        # Loops over each positive following the order
         for ii in order:
-            #x_ij s as score differences with fgs
-            fg_relations=fg_logits-fg_logits[ii] 
-            #Apply piecewise linear function and determine relations with fgs
-            fg_relations=torch.clamp(fg_relations/(2*delta)+0.5,min=0,max=1)
-            #Discard i=j in the summation in rank_pos
-            fg_relations[ii]=0
+            # x_ij s as score differences with fgs
+            fg_relations = fg_logits - fg_logits[ii]
+            # Apply piecewise linear function and determine relations with fgs
+            fg_relations = torch.clamp(fg_relations / (2 * delta) + 0.5, min=0, max=1)
+            # Discard i=j in the summation in rank_pos
+            fg_relations[ii] = 0
 
-            #x_ij s as score differences with bgs
-            bg_relations=relevant_bg_logits-fg_logits[ii]
-            #Apply piecewise linear function and determine relations with bgs
-            bg_relations=torch.clamp(bg_relations/(2*delta)+0.5,min=0,max=1)
+            # x_ij s as score differences with bgs
+            bg_relations = relevant_bg_logits - fg_logits[ii]
+            # Apply piecewise linear function and determine relations with bgs
+            bg_relations = torch.clamp(bg_relations / (2 * delta) + 0.5, min=0, max=1)
 
-            #Compute the rank of the example within fgs and number of bgs with larger scores
-            rank_pos=1+torch.sum(fg_relations)
-            FP_num=torch.sum(bg_relations)
-            #Store the total since it is normalizer also for aLRP Regression error
-            rank[ii]=rank_pos+FP_num
-                            
-            #Compute precision for this example to compute classification loss 
-            prec[ii]=rank_pos/rank[ii]                
-            #For stability, set eps to a infinitesmall value (e.g. 1e-6), then compute grads
-            if FP_num > eps:   
-                fg_grad[ii] = -(torch.sum(fg_relations*regression_losses)+FP_num)/rank[ii]
-                relevant_bg_grad += (bg_relations*(-fg_grad[ii]/FP_num))   
-                    
-        #aLRP with grad formulation fg gradient
-        classification_grads[fg_labels]= fg_grad
-        #aLRP with grad formulation bg gradient
-        classification_grads[relevant_bg_labels]= relevant_bg_grad 
- 
+            # Compute the rank of the example within fgs and number of bgs with larger scores
+            rank_pos = 1 + torch.sum(fg_relations)
+            FP_num = torch.sum(bg_relations)
+            # Store the total since it is normalizer also for aLRP Regression error
+            rank[ii] = rank_pos + FP_num
+
+            # Compute precision for this example to compute classification loss
+            prec[ii] = rank_pos / rank[ii]
+            # For stability, set eps to a infinitesmall value (e.g. 1e-6), then compute grads
+            if FP_num > eps:
+                fg_grad[ii] = -(torch.sum(fg_relations * regression_losses) + FP_num) / rank[ii]
+                relevant_bg_grad += (bg_relations * (-fg_grad[ii] / FP_num))
+
+        # aLRP with grad formulation fg gradient
+        classification_grads[fg_labels] = fg_grad
+        # aLRP with grad formulation bg gradient
+        classification_grads[relevant_bg_labels] = relevant_bg_grad
+
         classification_grads /= (fg_num)
-    
-        cls_loss=1-prec.mean()
+
+        cls_loss = 1 - prec.mean()
         ctx.save_for_backward(classification_grads)
 
         return cls_loss, rank, order
 
     @staticmethod
     def backward(ctx, out_grad1, out_grad2, out_grad3):
-        g1, =ctx.saved_tensors
-        return g1*out_grad1, None, None, None, None
-    
-    
+        g1, = ctx.saved_tensors
+        return g1 * out_grad1, None, None, None, None
+
+
 class APLoss(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, logits, targets, delta=1.): 
-        classification_grads=torch.zeros(logits.shape).cuda()
-        
-        #Filter fg logits
+    def forward(ctx, logits, targets, delta=1.):
+        classification_grads = torch.zeros(logits.shape).cuda()
+
         fg_labels = (targets == 1)
         fg_logits = logits[fg_labels]
         fg_num = len(fg_logits)
 
-        #Do not use bg with scores less than minimum fg logit
-        #since changing its score does not have an effect on precision
-        threshold_logit = torch.min(fg_logits)-delta
+        threshold_logit = torch.min(fg_logits) - delta
 
-        #Get valid bg logits
-        relevant_bg_labels=((targets==0)&(logits>=threshold_logit))
-        relevant_bg_logits=logits[relevant_bg_labels] 
-        relevant_bg_grad=torch.zeros(len(relevant_bg_logits)).cuda()
-        rank=torch.zeros(fg_num).cuda()
-        prec=torch.zeros(fg_num).cuda()
-        fg_grad=torch.zeros(fg_num).cuda()
-        
-        max_prec=0                                           
-        #sort the fg logits
-        order=torch.argsort(fg_logits)
-        #Loops over each positive following the order
+        relevant_bg_labels = ((targets == 0) & (logits >= threshold_logit))
+        relevant_bg_logits = logits[relevant_bg_labels]
+        relevant_bg_grad = torch.zeros(len(relevant_bg_logits)).cuda()
+        rank = torch.zeros(fg_num).cuda()
+        prec = torch.zeros(fg_num).cuda()
+        fg_grad = torch.zeros(fg_num).cuda()
+
+        max_prec = 0
+        order = torch.argsort(fg_logits)
         for ii in order:
-            #x_ij s as score differences with fgs
-            fg_relations=fg_logits-fg_logits[ii] 
-            #Apply piecewise linear function and determine relations with fgs
-            fg_relations=torch.clamp(fg_relations/(2*delta)+0.5,min=0,max=1)
-            #Discard i=j in the summation in rank_pos
-            fg_relations[ii]=0
+            fg_relations = fg_logits - fg_logits[ii]
+            # Apply piecewise linear function and determine relations with fgs
+            fg_relations = torch.clamp(fg_relations / (2 * delta) + 0.5, min=0, max=1)
+            # Discard i=j in the summation in rank_pos
+            fg_relations[ii] = 0
 
-            #x_ij s as score differences with bgs
-            bg_relations=relevant_bg_logits-fg_logits[ii]
-            #Apply piecewise linear function and determine relations with bgs
-            bg_relations=torch.clamp(bg_relations/(2*delta)+0.5,min=0,max=1)
+            # x_ij s as score differences with bgs
+            bg_relations = relevant_bg_logits - fg_logits[ii]
+            # Apply piecewise linear function and determine relations with bgs
+            bg_relations = torch.clamp(bg_relations / (2 * delta) + 0.5, min=0, max=1)
 
-            #Compute the rank of the example within fgs and number of bgs with larger scores
-            rank_pos=1+torch.sum(fg_relations)
-            FP_num=torch.sum(bg_relations)
-            #Store the total since it is normalizer also for aLRP Regression error
-            rank[ii]=rank_pos+FP_num
-                            
-            #Compute precision for this example 
-            current_prec=rank_pos/rank[ii]
-            
-            #Compute interpolated AP and store gradients for relevant bg examples
-            if (max_prec<=current_prec):
-                max_prec=current_prec
-                relevant_bg_grad += (bg_relations/rank[ii])
+            # Compute the rank of the example within fgs and number of bgs with larger scores
+            rank_pos = 1 + torch.sum(fg_relations)
+            FP_num = torch.sum(bg_relations)
+            # Store the total since it is normalizer also for aLRP Regression error
+            rank[ii] = rank_pos + FP_num
+
+            # Compute precision for this example
+            current_prec = rank_pos / rank[ii]
+
+            # Compute interpolated AP and store gradients for relevant bg examples
+            if max_prec <= current_prec:
+                max_prec = current_prec
+                relevant_bg_grad += (bg_relations / rank[ii])
             else:
-                relevant_bg_grad += (bg_relations/rank[ii])*(((1-max_prec)/(1-current_prec)))
-            
-            #Store fg gradients
-            fg_grad[ii]=-(1-max_prec)
-            prec[ii]=max_prec 
+                relevant_bg_grad += (bg_relations / rank[ii]) * ((1 - max_prec) / (1 - current_prec))
 
-        #aLRP with grad formulation fg gradient
-        classification_grads[fg_labels]= fg_grad
-        #aLRP with grad formulation bg gradient
-        classification_grads[relevant_bg_labels]= relevant_bg_grad 
- 
+            # Store fg gradients
+            fg_grad[ii] = -(1 - max_prec)
+            prec[ii] = max_prec
+
+        # aLRP with grad formulation fg gradient
+        classification_grads[fg_labels] = fg_grad
+        # aLRP with grad formulation bg gradient
+        classification_grads[relevant_bg_labels] = relevant_bg_grad
+
         classification_grads /= fg_num
-    
-        cls_loss=1-prec.mean()
+
+        cls_loss = 1 - prec.mean()
         ctx.save_for_backward(classification_grads)
 
         return cls_loss
 
     @staticmethod
     def backward(ctx, out_grad1):
-        g1, =ctx.saved_tensors
-        return g1*out_grad1, None, None
+        g1, = ctx.saved_tensors
+        return g1 * out_grad1, None, None
+
+
+class TaskAlignedAssigner(nn.Module):
+    def __init__(self, topk=13, num_classes=80, alpha=1.0, beta=6.0, eps=1e-9):
+        super().__init__()
+        self.topk = topk
+        self.num_classes = num_classes
+        self.bg_idx = num_classes
+        self.alpha = alpha
+        self.beta = beta
+        self.eps = eps
+
+    @torch.no_grad()
+    def forward(self, pd_scores, pd_bboxes, anc_points, gt_labels, gt_bboxes, mask_gt):
+        """This code referenced to
+           https://github.com/Nioolek/PPYOLOE_pytorch/blob/master/ppyoloe/assigner/tal_assigner.py
+
+        Args:
+            pd_scores (Tensor): shape(bs, num_total_anchors, num_classes)
+            pd_bboxes (Tensor): shape(bs, num_total_anchors, 4)
+            anc_points (Tensor): shape(num_total_anchors, 2)
+            gt_labels (Tensor): shape(bs, n_max_boxes, 1)
+            gt_bboxes (Tensor): shape(bs, n_max_boxes, 4)
+            mask_gt (Tensor): shape(bs, n_max_boxes, 1)
+        Returns:
+            target_labels (Tensor): shape(bs, num_total_anchors)
+            target_bboxes (Tensor): shape(bs, num_total_anchors, 4)
+            target_scores (Tensor): shape(bs, num_total_anchors, num_classes)
+            fg_mask (Tensor): shape(bs, num_total_anchors)
+        """
+        self.bs = pd_scores.size(0)
+        self.n_max_boxes = gt_bboxes.size(1)
+
+        if self.n_max_boxes == 0:
+            device = gt_bboxes.device
+            return (torch.full_like(pd_scores[..., 0], self.bg_idx).to(device),
+                    torch.zeros_like(pd_bboxes).to(device),
+                    torch.zeros_like(pd_scores).to(device),
+                    torch.zeros_like(pd_scores[..., 0]).to(device))
+
+        mask_pos, align_metric, overlaps = self.get_pos_mask(pd_scores, pd_bboxes, gt_labels, gt_bboxes, anc_points,
+                                                             mask_gt)
+
+        target_gt_idx, fg_mask, mask_pos = self.select_highest_overlaps(mask_pos, overlaps, self.n_max_boxes)
+
+        # assigned target
+        target_labels, target_bboxes, target_scores = self.get_targets(gt_labels, gt_bboxes, target_gt_idx, fg_mask)
+
+        # normalize
+        align_metric *= mask_pos
+        pos_align_metrics = align_metric.amax(axis=-1, keepdim=True)  # b, max_num_obj
+        pos_overlaps = (overlaps * mask_pos).amax(axis=-1, keepdim=True)  # b, max_num_obj
+        norm_align_metric = (align_metric * pos_overlaps / (pos_align_metrics + self.eps)).amax(-2).unsqueeze(-1)
+        target_scores = target_scores * norm_align_metric
+
+        return target_labels, target_bboxes, target_scores, fg_mask.bool()
+
+    def get_pos_mask(self, pd_scores, pd_bboxes, gt_labels, gt_bboxes, anc_points, mask_gt):
+
+        # get anchor_align metric, (b, max_num_obj, h*w)
+        align_metric, overlaps = self.get_box_metrics(pd_scores, pd_bboxes, gt_labels, gt_bboxes)
+        # get in_gts mask, (b, max_num_obj, h*w)
+        mask_in_gts = self.select_candidates_in_gts(anc_points, gt_bboxes)
+        # get topk_metric mask, (b, max_num_obj, h*w)
+        mask_topk = self.select_topk_candidates(align_metric * mask_in_gts,
+                                                topk_mask=mask_gt.repeat([1, 1, self.topk]).bool())
+        # merge all mask to a final mask, (b, max_num_obj, h*w)
+        mask_pos = mask_topk * mask_in_gts * mask_gt
+
+        return mask_pos, align_metric, overlaps
+
+    @staticmethod
+    def select_candidates_in_gts(xy_centers, gt_bboxes, eps=1e-9):
+        """select the positive anchor center in gt
+
+        Args:
+            xy_centers (Tensor): shape(h*w, 4)
+            gt_bboxes (Tensor): shape(b, n_boxes, 4)
+        Return:
+            (Tensor): shape(b, n_boxes, h*w)
+        """
+        n_anchors = xy_centers.shape[0]
+        bs, n_boxes, _ = gt_bboxes.shape
+        lt, rb = gt_bboxes.view(-1, 1, 4).chunk(2, 2)  # left-top, right-bottom
+        bbox_deltas = torch.cat((xy_centers[None] - lt, rb - xy_centers[None]), dim=2).view(bs, n_boxes, n_anchors, -1)
+        # return (bbox_deltas.min(3)[0] > eps).to(gt_bboxes.dtype)
+        return bbox_deltas.amin(3).gt_(eps)
+
+    @staticmethod
+    def select_highest_overlaps(mask_pos, overlaps, n_max_boxes):
+        """if an anchor box is assigned to multiple gts,
+            the one with the highest iou will be selected.
+
+        Args:
+            mask_pos (Tensor): shape(b, n_max_boxes, h*w)
+            overlaps (Tensor): shape(b, n_max_boxes, h*w)
+        Return:
+            target_gt_idx (Tensor): shape(b, h*w)
+            fg_mask (Tensor): shape(b, h*w)
+            mask_pos (Tensor): shape(b, n_max_boxes, h*w)
+        """
+        # (b, n_max_boxes, h*w) -> (b, h*w)
+        fg_mask = mask_pos.sum(-2)
+        if fg_mask.max() > 1:  # one anchor is assigned to multiple gt_bboxes
+            mask_multi_gts = (fg_mask.unsqueeze(1) > 1).repeat([1, n_max_boxes, 1])  # (b, n_max_boxes, h*w)
+            max_overlaps_idx = overlaps.argmax(1)  # (b, h*w)
+            is_max_overlaps = F.one_hot(max_overlaps_idx, n_max_boxes)  # (b, h*w, n_max_boxes)
+            is_max_overlaps = is_max_overlaps.permute(0, 2, 1).to(overlaps.dtype)  # (b, n_max_boxes, h*w)
+            mask_pos = torch.where(mask_multi_gts, is_max_overlaps, mask_pos)  # (b, n_max_boxes, h*w)
+            fg_mask = mask_pos.sum(-2)
+        # find each grid serve which gt(index)
+        target_gt_idx = mask_pos.argmax(-2)  # (b, h*w)
+        return target_gt_idx, fg_mask, mask_pos
+
+    @staticmethod
+    def bbox_iou(box1, box2, xywh=True, GIoU=False, DIoU=False, CIoU=False, eps=1e-7):
+        # Returns Intersection over Union (IoU) of box1(1,4) to box2(n,4)
+
+        # Get the coordinates of bounding boxes
+        if xywh:  # transform from xywh to xyxy
+            (x1, y1, w1, h1), (x2, y2, w2, h2) = box1.chunk(4, -1), box2.chunk(4, -1)
+            w1_, h1_, w2_, h2_ = w1 / 2, h1 / 2, w2 / 2, h2 / 2
+            b1_x1, b1_x2, b1_y1, b1_y2 = x1 - w1_, x1 + w1_, y1 - h1_, y1 + h1_
+            b2_x1, b2_x2, b2_y1, b2_y2 = x2 - w2_, x2 + w2_, y2 - h2_, y2 + h2_
+        else:  # x1, y1, x2, y2 = box1
+            b1_x1, b1_y1, b1_x2, b1_y2 = box1.chunk(4, -1)
+            b2_x1, b2_y1, b2_x2, b2_y2 = box2.chunk(4, -1)
+            w1, h1 = b1_x2 - b1_x1, b1_y2 - b1_y1 + eps
+            w2, h2 = b2_x2 - b2_x1, b2_y2 - b2_y1 + eps
+
+        # Intersection area
+        inter = (torch.min(b1_x2, b2_x2) - torch.max(b1_x1, b2_x1)).clamp(0) * \
+                (torch.min(b1_y2, b2_y2) - torch.max(b1_y1, b2_y1)).clamp(0)
+
+        # Union Area
+        union = w1 * h1 + w2 * h2 - inter + eps
+
+        # IoU
+        iou = inter / union
+        if CIoU or DIoU or GIoU:
+            cw = torch.max(b1_x2, b2_x2) - torch.min(b1_x1, b2_x1)  # convex (smallest enclosing box) width
+            ch = torch.max(b1_y2, b2_y2) - torch.min(b1_y1, b2_y1)  # convex height
+            if CIoU or DIoU:  # Distance or Complete IoU https://arxiv.org/abs/1911.08287v1
+                c2 = cw ** 2 + ch ** 2 + eps  # convex diagonal squared
+                rho2 = ((b2_x1 + b2_x2 - b1_x1 - b1_x2) ** 2 + (
+                            b2_y1 + b2_y2 - b1_y1 - b1_y2) ** 2) / 4  # center dist ** 2
+                if CIoU:  # https://github.com/Zzh-tju/DIoU-SSD-pytorch/blob/master/utils/box/box_utils.py#L47
+                    v = (4 / torch.pi ** 2) * torch.pow(torch.atan(w2 / h2) - torch.atan(w1 / h1), 2)
+                    with torch.no_grad():
+                        alpha = v / (v - iou + (1 + eps))
+                    return iou - (rho2 / c2 + v * alpha)  # CIoU
+                return iou - rho2 / c2  # DIoU
+            c_area = cw * ch + eps  # convex area
+            return iou - (c_area - union) / c_area  # GIoU https://arxiv.org/pdf/1902.09630.pdf
+        return iou  # IoU
+
+    def get_box_metrics(self, pd_scores, pd_bboxes, gt_labels, gt_bboxes):
+
+        gt_labels = gt_labels.to(torch.long)  # b, max_num_obj, 1
+        ind = torch.zeros([2, self.bs, self.n_max_boxes], dtype=torch.long)  # 2, b, max_num_obj
+        ind[0] = torch.arange(end=self.bs).view(-1, 1).repeat(1, self.n_max_boxes)  # b, max_num_obj
+        ind[1] = gt_labels.squeeze(-1)  # b, max_num_obj
+        # get the scores of each grid for each gt cls
+        bbox_scores = pd_scores[ind[0], :, ind[1]]  # b, max_num_obj, h*w
+
+        overlaps = self.bbox_iou(gt_bboxes.unsqueeze(2), pd_bboxes.unsqueeze(1), xywh=False, CIoU=True).squeeze(3).clamp(0)
+        align_metric = bbox_scores.pow(self.alpha) * overlaps.pow(self.beta)
+        return align_metric, overlaps
+
+    def select_topk_candidates(self, metrics, largest=True, topk_mask=None):
+        """
+        Args:
+            metrics: (b, max_num_obj, h*w).
+            topk_mask: (b, max_num_obj, topk) or None
+        """
+
+        num_anchors = metrics.shape[-1]  # h*w
+        # (b, max_num_obj, topk)
+        topk_metrics, topk_idxs = torch.topk(metrics, self.topk, dim=-1, largest=largest)
+        if topk_mask is None:
+            topk_mask = (topk_metrics.max(-1, keepdim=True) > self.eps).tile([1, 1, self.topk])
+        # (b, max_num_obj, topk)
+        topk_idxs = torch.where(topk_mask, topk_idxs, 0)
+        # (b, max_num_obj, topk, h*w) -> (b, max_num_obj, h*w)
+        is_in_topk = F.one_hot(topk_idxs, num_anchors).sum(-2)
+        # filter invalid bboxes
+        # assigned topk should be unique, this is for dealing with empty labels
+        # since empty labels will generate index `0` through `F.one_hot`
+        # NOTE: but what if the topk_idxs include `0`?
+        is_in_topk = torch.where(is_in_topk > 1, 0, is_in_topk)
+        return is_in_topk.to(metrics.dtype)
+
+    def get_targets(self, gt_labels, gt_bboxes, target_gt_idx, fg_mask):
+        """
+        Args:
+            gt_labels: (b, max_num_obj, 1)
+            gt_bboxes: (b, max_num_obj, 4)
+            target_gt_idx: (b, h*w)
+            fg_mask: (b, h*w)
+        """
+
+        # assigned target labels, (b, 1)
+        batch_ind = torch.arange(end=self.bs, dtype=torch.int64, device=gt_labels.device)[..., None]
+        target_gt_idx = target_gt_idx + batch_ind * self.n_max_boxes  # (b, h*w)
+        target_labels = gt_labels.long().flatten()[target_gt_idx]  # (b, h*w)
+
+        # assigned target boxes, (b, max_num_obj, 4) -> (b, h*w)
+        target_bboxes = gt_bboxes.view(-1, 4)[target_gt_idx]
+
+        # assigned target scores
+        target_labels.clamp(0)
+        target_scores = F.one_hot(target_labels, self.num_classes)  # (b, h*w, 80)
+        fg_scores_mask = fg_mask[:, :, None].repeat(1, 1, self.num_classes)  # (b, h*w, 80)
+        target_scores = torch.where(fg_scores_mask > 0, target_scores, 0)
+
+        return target_labels, target_bboxes, target_scores
+
+
+class BboxLoss(nn.Module):
+    def __init__(self, reg_max, use_dfl=False):
+        super().__init__()
+        self.reg_max = reg_max
+        self.use_dfl = use_dfl
+
+    def forward(self, pred_dist, pred_bboxes, anchor_points, target_bboxes, target_scores, target_scores_sum, fg_mask):
+        # iou loss
+        bbox_mask = fg_mask.unsqueeze(-1).repeat([1, 1, 4])  # (b, h*w, 4)
+        pred_bboxes_pos = torch.masked_select(pred_bboxes, bbox_mask).view(-1, 4)
+        target_bboxes_pos = torch.masked_select(target_bboxes, bbox_mask).view(-1, 4)
+        bbox_weight = torch.masked_select(target_scores.sum(-1), fg_mask).unsqueeze(-1)
+        iou = self.bbox_iou(pred_bboxes_pos, target_bboxes_pos, xywh=False, CIoU=True)
+        loss_iou = 1.0 - iou
+
+        loss_iou *= bbox_weight
+        loss_iou = loss_iou.sum() / target_scores_sum
+        # loss_iou = loss_iou.mean()
+
+        # dfl loss
+        if self.use_dfl:
+            dist_mask = fg_mask.unsqueeze(-1).repeat([1, 1, (self.reg_max + 1) * 4])
+            pred_dist_pos = torch.masked_select(pred_dist, dist_mask).view(-1, 4, self.reg_max + 1)
+            target_ltrb = self.bbox2dist(anchor_points, target_bboxes, self.reg_max)
+            target_ltrb_pos = torch.masked_select(target_ltrb, bbox_mask).view(-1, 4)
+            loss_dfl = self._df_loss(pred_dist_pos, target_ltrb_pos) * bbox_weight
+            loss_dfl = loss_dfl.sum() / target_scores_sum
+        else:
+            loss_dfl = torch.tensor(0.0).to(pred_dist.device)
+
+        return loss_iou, loss_dfl, iou
+
+    def _df_loss(self, pred_dist, target):
+        target_left = target.to(torch.long)
+        target_right = target_left + 1
+        weight_left = target_right.to(torch.float) - target
+        weight_right = 1 - weight_left
+        loss_left = F.cross_entropy(pred_dist.view(-1, self.reg_max + 1), target_left.view(-1), reduction="none").view(
+            target_left.shape) * weight_left
+        loss_right = F.cross_entropy(pred_dist.view(-1, self.reg_max + 1), target_right.view(-1),
+                                     reduction="none").view(target_left.shape) * weight_right
+        return (loss_left + loss_right).mean(-1, keepdim=True)
+
+    @staticmethod
+    def bbox2dist(anchor_points, bbox, reg_max):
+        """Transform bbox(xyxy) to dist(ltrb)."""
+        x1y1, x2y2 = torch.split(bbox, 2, -1)
+        return torch.cat((anchor_points - x1y1, x2y2 - anchor_points), -1).clamp(0, reg_max - 0.01)  # dist (lt, rb)
+
+    @staticmethod
+    def bbox_iou(box1, box2, xywh=True, GIoU=False, DIoU=False, CIoU=False, eps=1e-7):
+        # Returns Intersection over Union (IoU) of box1(1,4) to box2(n,4)
+
+        # Get the coordinates of bounding boxes
+        if xywh:  # transform from xywh to xyxy
+            (x1, y1, w1, h1), (x2, y2, w2, h2) = box1.chunk(4, -1), box2.chunk(4, -1)
+            w1_, h1_, w2_, h2_ = w1 / 2, h1 / 2, w2 / 2, h2 / 2
+            b1_x1, b1_x2, b1_y1, b1_y2 = x1 - w1_, x1 + w1_, y1 - h1_, y1 + h1_
+            b2_x1, b2_x2, b2_y1, b2_y2 = x2 - w2_, x2 + w2_, y2 - h2_, y2 + h2_
+        else:  # x1, y1, x2, y2 = box1
+            b1_x1, b1_y1, b1_x2, b1_y2 = box1.chunk(4, -1)
+            b2_x1, b2_y1, b2_x2, b2_y2 = box2.chunk(4, -1)
+            w1, h1 = b1_x2 - b1_x1, b1_y2 - b1_y1 + eps
+            w2, h2 = b2_x2 - b2_x1, b2_y2 - b2_y1 + eps
+
+        # Intersection area
+        inter = (torch.min(b1_x2, b2_x2) - torch.max(b1_x1, b2_x1)).clamp(0) * \
+                (torch.min(b1_y2, b2_y2) - torch.max(b1_y1, b2_y1)).clamp(0)
+
+        # Union Area
+        union = w1 * h1 + w2 * h2 - inter + eps
+
+        # IoU
+        iou = inter / union
+        if CIoU or DIoU or GIoU:
+            cw = torch.max(b1_x2, b2_x2) - torch.min(b1_x1, b2_x1)  # convex (smallest enclosing box) width
+            ch = torch.max(b1_y2, b2_y2) - torch.min(b1_y1, b2_y1)  # convex height
+            if CIoU or DIoU:  # Distance or Complete IoU https://arxiv.org/abs/1911.08287v1
+                c2 = cw ** 2 + ch ** 2 + eps  # convex diagonal squared
+                rho2 = ((b2_x1 + b2_x2 - b1_x1 - b1_x2) ** 2 + (
+                            b2_y1 + b2_y2 - b1_y1 - b1_y2) ** 2) / 4  # center dist ** 2
+                if CIoU:  # https://github.com/Zzh-tju/DIoU-SSD-pytorch/blob/master/utils/box/box_utils.py#L47
+                    v = (4 / torch.pi ** 2) * torch.pow(torch.atan(w2 / h2) - torch.atan(w1 / h1), 2)
+                    with torch.no_grad():
+                        alpha = v / (v - iou + (1 + eps))
+                    return iou - (rho2 / c2 + v * alpha)  # CIoU
+                return iou - rho2 / c2  # DIoU
+            c_area = cw * ch + eps  # convex area
+            return iou - (c_area - union) / c_area  # GIoU https://arxiv.org/pdf/1902.09630.pdf
+        return iou  # IoU
+
+
+class ComputeLoss_AnchorFree:
+    def __init__(self, model, use_dfl=True):
+        device = next(model.parameters()).device  # get model device
+        device = device if device.type != 'privateuseone' else 'cpu'  # get model device
+        h = model.hyp  # hyperparameters
+
+        # Define criteria
+        BCEcls = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([h["cls_pw"]], device=device), reduction='none')
+
+        # Class label smoothing https://arxiv.org/pdf/1902.04103.pdf eqn 3
+        self.cp, self.cn = smooth_BCE(eps=h.get("label_smoothing", 0.0))  # positive, negative BCE targets
+
+        # Focal loss
+        g = h["fl_gamma"]  # focal loss gamma
+        if g > 0:
+            BCEcls = FocalLoss(BCEcls, g)
+
+        m = model.module.model[-1] if is_parallel(model) else model.model[-1]
+        self.balance = {3: [4.0, 1.0, 0.4]}.get(m.nl, [4.0, 1.0, 0.25, 0.06, 0.02])  # P3-P7
+        self.BCEcls = BCEcls
+        self.hyp = h
+        self.stride = m.stride  # model strides
+        self.nc = m.nc  # number of classes
+        self.nl = m.nl  # number of layers
+        self.device = device
+
+        self.assigner = TaskAlignedAssigner(topk=int(os.getenv('YOLOM', 10)),
+                                            num_classes=self.nc,
+                                            alpha=float(os.getenv('YOLOA', 0.5)),
+                                            beta=float(os.getenv('YOLOB', 6.0)))
+        self.bbox_loss = BboxLoss(m.reg_max - 1, use_dfl=use_dfl).to(device)
+        self.proj = torch.arange(m.reg_max).float().to(device)  # / 120.0
+        self.use_dfl = use_dfl
+
+    def preprocess(self, targets, batch_size, scale_tensor):
+        if targets.shape[0] == 0:
+            out = torch.zeros(batch_size, 0, 5, device=self.device)
+        else:
+            i = targets[:, 0]  # image index
+            _, counts = i.unique(return_counts=True)
+            out = torch.zeros(batch_size, counts.max(), 5, device=self.device)
+            for j in range(batch_size):
+                matches = i == j
+                n = matches.sum()
+                if n:
+                    out[j, :n] = targets[matches, 1:]
+            out[..., 1:5] = xywh2xyxy(out[..., 1:5].mul_(scale_tensor))
+        return out
+
+    def bbox_decode(self, anchor_points, pred_dist):
+        if self.use_dfl:
+            # pred_dist = pred_dist.to(self.device)
+            # anchor_points = anchor_points.to(self.device)
+            b, a, c = pred_dist.shape  # batch, anchors, channels
+            pred_dist = pred_dist.view(b, a, 4, c // 4)
+            pred_dist = pred_dist.softmax(3)
+            pred_dist = torch.matmul(pred_dist, self.proj.to(dtype=pred_dist.dtype))
+        return self.dist2bbox(pred_dist, anchor_points, xywh=False)
+
+    @staticmethod
+    def dist2bbox(distance, anchor_points, xywh=True, dim=-1):
+        """Transform distance(ltrb) to box(xywh or xyxy)."""
+        lt, rb = torch.split(distance, 2, dim)
+        x1y1 = anchor_points - lt
+        x2y2 = anchor_points + rb
+        if xywh:
+            c_xy = (x1y1 + x2y2) / 2
+            wh = x2y2 - x1y1
+            return torch.cat((c_xy, wh), dim)  # xywh bbox
+        return torch.cat((x1y1, x2y2), dim)  # xyxy bbox
+
+    @staticmethod
+    def make_anchors(feats, strides, grid_cell_offset=0.5):
+        """Generate anchors from features."""
+        anchor_points, stride_tensor = [], []
+        assert feats is not None
+        dtype, device = feats[0].dtype, feats[0].device
+        for i, stride in enumerate(strides):
+            _, _, h, w = feats[i].shape
+            sx = torch.arange(end=w, device=device, dtype=dtype) + grid_cell_offset  # shift x
+            sy = torch.arange(end=h, device=device, dtype=dtype) + grid_cell_offset  # shift y
+            sy, sx = torch.meshgrid(sy, sx, indexing='ij')
+            anchor_points.append(torch.stack((sx, sy), -1).view(-1, 2))
+            stride_tensor.append(torch.full((h * w, 1), stride, dtype=dtype, device=device))
+        return torch.cat(anchor_points), torch.cat(stride_tensor)
+
+    def __call__(self, p, targets, imgs=None):
+        """compute loss for free anchor model"""
+        targets = targets.to(self.device)
+        feats, pred_distri, pred_scores = p
+
+        pred_scores = pred_scores.permute(0, 2, 1).contiguous().to(self.device)
+        pred_distri = pred_distri.permute(0, 2, 1).contiguous().to(self.device)
+        feats = [x.to(self.device) for x in feats]
+
+        dtype = pred_scores.dtype
+        loss = torch.zeros(3, device=self.device, dtype=dtype)  # box, cls, dfl
+        batch_size, grid_size = pred_scores.shape[:2]
+        imgsz = torch.tensor(feats[0].shape[2:], device=self.device, dtype=dtype) * self.stride[0]  # image size (h,w)
+        anchor_points, stride_tensor = self.make_anchors(feats, self.stride, 0.5)
+
+        # targets
+        targets = self.preprocess(targets, batch_size, scale_tensor=imgsz[[1, 0, 1, 0]])
+        gt_labels, gt_bboxes = targets.split((1, 4), 2)  # cls, xyxy
+        mask_gt = gt_bboxes.sum(2, keepdim=True).gt_(0)
+
+        # pboxes
+        pred_bboxes = self.bbox_decode(anchor_points, pred_distri)  # xyxy, (b, h*w, 4)
+        a = (pred_bboxes.detach() * stride_tensor).type(gt_bboxes.dtype)
+        target_labels, target_bboxes, target_scores, fg_mask = self.assigner(
+            pred_scores.detach().sigmoid(),
+            a,
+            anchor_points * stride_tensor,
+            gt_labels,
+            gt_bboxes,
+            mask_gt)
+
+        target_bboxes /= stride_tensor
+        target_scores_sum = target_scores.sum()
+
+        # cls loss
+        loss[1] = self.BCEcls(pred_scores, target_scores.to(dtype)).sum() / target_scores_sum  # BCE
+
+        # bbox loss
+        if fg_mask.sum():
+            loss[0], loss[2], iou = self.bbox_loss(pred_distri,
+                                                   pred_bboxes,
+                                                   anchor_points,
+                                                   target_bboxes,
+                                                   target_scores,
+                                                   target_scores_sum,
+                                                   fg_mask)
+
+        loss[0] *= 7.5  # box gain
+        loss[1] *= 0.5  # cls gain
+        loss[2] *= 1.5  # dfl gain
+
+        return loss.sum() * batch_size, loss.detach()  # loss(box, cls, dfl)
 
 
 class ComputeLoss:
     """Compute losses"""
+
     def __init__(self, model, autobalance=False):
         super(ComputeLoss, self).__init__()
         # device = next(model.parameters()).device  # get model device
-        device = next(model.parameters()).device if next(model.parameters()).device.type != 'privateuseone' else 'cpu' # get model device
+        device = next(model.parameters()).device
+        device = device if device.type != 'privateuseone' else 'cpu'  # get model device
+        self.device = device
         h = model.hyp  # hyperparameters
 
         # Define criteria
@@ -439,22 +890,22 @@ class ComputeLoss:
 
         det = model.module.model[-1] if is_parallel(model) else model.model[-1]  # Detect() module
         self.balance = {3: [4.0, 1.0, 0.4]}.get(det.nl, [4.0, 1.0, 0.25, 0.06, .02])  # P3-P7
-        #self.balance = {3: [4.0, 1.0, 0.4]}.get(det.nl, [4.0, 1.0, 0.25, 0.1, .05])  # P3-P7
-        #self.balance = {3: [4.0, 1.0, 0.4]}.get(det.nl, [4.0, 1.0, 0.5, 0.4, .1])  # P3-P7
         self.ssi = list(det.stride).index(16) if autobalance else 0  # stride 16 index
         self.BCEcls, self.BCEobj, self.gr, self.hyp, self.autobalance = BCEcls, BCEobj, model.gr, h, autobalance
         for k in 'na', 'nc', 'nl', 'anchors':
             setattr(self, k, getattr(det, k))
 
-    def __call__(self, p, targets):  # predictions, targets, model
-        device = targets.device
+    def __call__(self, p, targets, imgs=None):  # predictions, targets, model
+        device = self.device
+        targets = targets.to(device, non_blocking=False)
+        p = [x.to(device, non_blocking=False) for x in p]
         lcls, lbox, lobj = torch.zeros(1, device=device), torch.zeros(1, device=device), torch.zeros(1, device=device)
         tcls, tbox, indices, anchors = self.build_targets(p, targets)  # targets
 
         # Losses
         for i, pi in enumerate(p):  # layer index, layer predictions
             b, a, gj, gi = indices[i]  # image, anchor, gridy, gridx
-            tobj = torch.zeros_like(pi[..., 0], device=device)  # target obj
+            tobj = torch.zeros_like(pi[..., 0], dtype=pi.dtype, device=device)  # target obj
 
             n = b.shape[0]  # number of targets
             if n:
@@ -474,7 +925,7 @@ class ComputeLoss:
                 if self.nc > 1:  # cls loss (only if multiple classes)
                     t = torch.full_like(ps[:, 5:], self.cn, device=device)  # targets
                     t[range(n), tcls[i]] = self.cp
-                    #t[t==self.cp] = iou.detach().clamp(0).type(t.dtype)
+                    # t[t==self.cp] = iou.detach().clamp(0).type(t.dtype)
                     lcls += self.BCEcls(ps[:, 5:], t)  # BCE
 
                 # Append targets to text file
@@ -500,20 +951,18 @@ class ComputeLoss:
         """Build targets for compute_loss(), input targets(image,class,x,y,w,h)"""
         na, nt = self.na, targets.shape[0]  # number of anchors, targets
         tcls, tbox, indices, anch = [], [], [], []
-        device = targets.device
+        device = self.device
         gain = torch.ones(7, device=device).long()  # normalized to gridspace gain
         ai = torch.arange(na, device=device).float().view(na, 1).repeat(1, nt)  # same as .repeat_interleave(nt)
         targets = torch.cat((targets.repeat(na, 1, 1), ai[:, :, None]), 2)  # append anchor indices
 
         g = 0.5  # bias
-        off = torch.tensor([[0, 0],
-                            [1, 0], [0, 1], [-1, 0], [0, -1],  # j,k,l,m
-                            # [1, 1], [1, -1], [-1, 1], [-1, -1],  # jk,jm,lk,lm
-                            ], device=device).float() * g  # offsets
+        off = torch.tensor([[0, 0], [1, 0], [0, 1], [-1, 0], [0, -1], ], device=device).float() * g  # offsets
 
         for i in range(self.nl):
             anchors = self.anchors[i].to(device)
-            gain[2:6] = torch.tensor(p[i].shape, device=device)[[3, 2, 3, 2]]  # xyxy gain
+            shape = p[i].shape
+            gain[2:6] = torch.tensor(shape, device=device)[[3, 2, 3, 2]]  # xyxy gain
 
             # Match targets to anchors
             t = targets * gain
@@ -545,19 +994,23 @@ class ComputeLoss:
 
             # Append
             a = t[:, 6].long()  # anchor indices
-            indices.append((b, a, gj.clamp_(0, (gain[3] - 1).to(torch.int64)), gi.clamp_(0, (gain[2] - 1).to(torch.int64))))  # image, anchor, grid indices
+            indices.append((b, a, gj.clamp_(0, (gain[3] - 1).to(torch.int64)),
+                            gi.clamp_(0, (gain[2] - 1).to(torch.int64))))  # image, anchor, grid indices
             tbox.append(torch.cat((gxy - gij, gwh), 1))  # box
             anch.append(anchors[a])  # anchors
             tcls.append(c)  # class
-            
+
         return tcls, tbox, indices, anch
 
 
 class ComputeLossOTA:
     """Compute losses"""
+
     def __init__(self, model, autobalance=False):
         super(ComputeLossOTA, self).__init__()
-        device = next(model.parameters()).device if next(model.parameters()).device.type != 'privateuseone' else 'cpu' # get model device
+        device = next(model.parameters()).device
+        device = device if device.type != 'privateuseone' else 'cpu'  # get model device
+        self.device = device
         h = model.hyp  # hyperparameters
         # Define criteria
         BCEcls = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([h['cls_pw']], device=device))
@@ -578,12 +1031,14 @@ class ComputeLossOTA:
         for k in 'na', 'nc', 'nl', 'anchors', 'stride':
             setattr(self, k, getattr(det, k))
 
-    def __call__(self, p, targets, imgs):  # predictions, targets, model   
-        device = targets.device
+    def __call__(self, p, targets, imgs):  # predictions, targets, model
+        device = self.device
+        p = [x.to(device, non_blocking=True) for x in p]
+        targets = targets.to(device, non_blocking=True)
+        imgs = imgs.to(device, non_blocking=True)
         lcls, lbox, lobj = torch.zeros(1, device=device), torch.zeros(1, device=device), torch.zeros(1, device=device)
         bs, as_, gjs, gis, targets, anchors = self.build_targets(p, targets, imgs)
-        pre_gen_gains = [torch.tensor(pp.shape, device=device)[[3, 2, 3, 2]] for pp in p] 
-    
+        pre_gen_gains = [torch.tensor(pp.shape, device=device)[[3, 2, 3, 2]] for pp in p]
 
         # Losses
         for i, pi in enumerate(p):  # layer index, layer predictions
@@ -597,7 +1052,7 @@ class ComputeLossOTA:
                 # Regression
                 grid = torch.stack([gi, gj], dim=1)
                 pxy = ps[:, :2].sigmoid() * 2. - 0.5
-                #pxy = ps[:, :2].sigmoid() * 3. - 1.
+                # pxy = ps[:, :2].sigmoid() * 3. - 1.
                 pwh = (ps[:, 2:4].sigmoid() * 2) ** 2 * anchors[i]
                 pbox = torch.cat((pxy, pwh), 1)  # predicted box
                 selected_tbox = targets[i][:, 2:6] * pre_gen_gains[i]
@@ -635,12 +1090,12 @@ class ComputeLossOTA:
         return loss * bs, torch.cat((lbox, lobj, lcls, loss)).detach()
 
     def build_targets(self, p, targets, imgs):
-        
-        #indices, anch = self.find_positive(p, targets)
+
+        # indices, anch = self.find_positive(p, targets)
         indices, anch = self.find_3_positive(p, targets)
-        #indices, anch = self.find_4_positive(p, targets)
-        #indices, anch = self.find_5_positive(p, targets)
-        #indices, anch = self.find_9_positive(p, targets)
+        # indices, anch = self.find_4_positive(p, targets)
+        # indices, anch = self.find_5_positive(p, targets)
+        # indices, anch = self.find_9_positive(p, targets)
 
         matching_bs = [[] for pp in p]
         matching_as = [[] for pp in p]
@@ -648,20 +1103,20 @@ class ComputeLossOTA:
         matching_gis = [[] for pp in p]
         matching_targets = [[] for pp in p]
         matching_anchs = [[] for pp in p]
-        
-        nl = len(p)    
+
+        nl = len(p)
         device = targets.device
-    
+
         for batch_idx in range(p[0].shape[0]):
-        
-            b_idx = targets[:, 0]==batch_idx
+
+            b_idx = targets[:, 0] == batch_idx
             this_target = targets[b_idx]
             if this_target.shape[0] == 0:
                 continue
-                
+
             txywh = torch.clone(this_target[:, 2:6])
-            txywh[:, [0,2]] *= imgs[batch_idx].shape[2] # x, w * img width
-            txywh[:, [1,3]] *= imgs[batch_idx].shape[1]            
+            txywh[:, [0, 2]] *= imgs[batch_idx].shape[2]  # x, w * img width
+            txywh[:, [1, 3]] *= imgs[batch_idx].shape[1]
             txyxy = xywh2xyxy(txywh)
 
             pxyxys = []
@@ -673,31 +1128,30 @@ class ComputeLossOTA:
             all_gj = []
             all_gi = []
             all_anch = []
-            
+
             for i, pi in enumerate(p):
-                
                 b, a, gj, gi = indices[i]
                 idx = (b == batch_idx)
-                b, a, gj, gi = b[idx], a[idx], gj[idx], gi[idx]                
+                b, a, gj, gi = b[idx], a[idx], gj[idx], gi[idx]
                 all_b.append(b)
                 all_a.append(a)
                 all_gj.append(gj)
                 all_gi.append(gi)
                 all_anch.append(anch[i][idx])
                 from_which_layer.append((torch.ones(size=(len(b),)) * i).to(device))
-                
-                fg_pred = pi[b, a, gj, gi]                
+
+                fg_pred = pi[b, a, gj, gi]
                 p_obj.append(fg_pred[:, 4:5])
                 p_cls.append(fg_pred[:, 5:])
-                
+
                 grid = torch.stack([gi, gj], dim=1)
-                pxy = (fg_pred[:, :2].sigmoid() * 2. - 0.5 + grid) * self.stride[i] #/ 8.
-                #pxy = (fg_pred[:, :2].sigmoid() * 3. - 1. + grid) * self.stride[i]
-                pwh = (fg_pred[:, 2:4].sigmoid() * 2) ** 2 * anch[i][idx] * self.stride[i] #/ 8.
+                pxy = (fg_pred[:, :2].sigmoid() * 2. - 0.5 + grid) * self.stride[i]  # / 8.
+                # pxy = (fg_pred[:, :2].sigmoid() * 3. - 1. + grid) * self.stride[i]
+                pwh = (fg_pred[:, 2:4].sigmoid() * 2) ** 2 * anch[i][idx] * self.stride[i]  # / 8.
                 pxywh = torch.cat([pxy, pwh], dim=-1)
                 pxyxy = xywh2xyxy(pxywh)
                 pxyxys.append(pxyxy)
-            
+
             pxyxys = torch.cat(pxyxys, dim=0)
             if pxyxys.shape[0] == 0:
                 continue
@@ -709,7 +1163,7 @@ class ComputeLossOTA:
             all_gj = torch.cat(all_gj, dim=0)
             all_gi = torch.cat(all_gi, dim=0)
             all_anch = torch.cat(all_anch, dim=0)
-        
+
             pair_wise_iou = box_iou(txyxy, pxyxys)
 
             pair_wise_iou_loss = -torch.log(pair_wise_iou + 1e-8)
@@ -726,25 +1180,25 @@ class ComputeLossOTA:
 
             num_gt = this_target.shape[0]
             cls_preds_ = (
-                p_cls.float().unsqueeze(0).repeat(num_gt, 1, 1).sigmoid_()
-                * p_obj.unsqueeze(0).repeat(num_gt, 1, 1).sigmoid_()
+                    p_cls.float().unsqueeze(0).repeat(num_gt, 1, 1).sigmoid_()
+                    * p_obj.unsqueeze(0).repeat(num_gt, 1, 1).sigmoid_()
             )
 
             y = cls_preds_.sqrt_()
             pair_wise_cls_loss = F.binary_cross_entropy_with_logits(
-               torch.log(y/(1-y)) , gt_cls_per_image, reduction="none"
+                torch.log(y / (1 - y)), gt_cls_per_image, reduction="none"
             ).sum(-1)
             del cls_preds_
-        
+
             cost = (
-                pair_wise_cls_loss
-                + 3.0 * pair_wise_iou_loss
+                    pair_wise_cls_loss
+                    + 3.0 * pair_wise_iou_loss
             )
             try:
                 matching_matrix = torch.zeros_like(cost, device=device)
             except Exception as e:
-                matching_matrix = torch.zeros_like(cost,device='cpu')
-                print(e,'\nError. Switching cpu')
+                matching_matrix = torch.zeros_like(cost, device='cpu')
+                print(e, '\nError. Switching cpu')
 
             for gt_idx in range(num_gt):
                 _, pos_idx = torch.topk(
@@ -760,16 +1214,16 @@ class ComputeLossOTA:
                 matching_matrix[cost_argmin, anchor_matching_gt > 1] = 1.0
             fg_mask_inboxes = (matching_matrix.sum(0) > 0.0).to(device)
             matched_gt_inds = matching_matrix[:, fg_mask_inboxes].argmax(0)
-        
+
             from_which_layer = from_which_layer[fg_mask_inboxes]
             all_b = all_b[fg_mask_inboxes]
             all_a = all_a[fg_mask_inboxes]
             all_gj = all_gj[fg_mask_inboxes]
             all_gi = all_gi[fg_mask_inboxes]
             all_anch = all_anch[fg_mask_inboxes]
-        
+
             this_target = this_target[matched_gt_inds]
-        
+
             for i in range(nl):
                 layer_idx = from_which_layer == i
                 matching_bs[i].append(all_b[layer_idx])
@@ -795,7 +1249,7 @@ class ComputeLossOTA:
                 matching_targets[i] = torch.tensor([], device=device, dtype=torch.int64)
                 matching_anchs[i] = torch.tensor([], device=device, dtype=torch.int64)
 
-        return matching_bs, matching_as, matching_gjs, matching_gis, matching_targets, matching_anchs           
+        return matching_bs, matching_as, matching_gjs, matching_gis, matching_targets, matching_anchs
 
     def find_3_positive(self, p, targets):
         """Build targets for compute_loss(), input targets(image,class,x,y,w,h)"""
@@ -850,19 +1304,21 @@ class ComputeLossOTA:
             anch.append(anchors[a])  # anchors
 
         return indices, anch
-    
+
 
 class ComputeLossBinOTA:
     """Compute losses"""
+
     def __init__(self, model, autobalance=False):
         super(ComputeLossBinOTA, self).__init__()
-        device = next(model.parameters()).device if next(model.parameters()).device.type != 'privateuseone' else 'cpu' # get model device
+        device = next(model.parameters()).device if next(
+            model.parameters()).device.type != 'privateuseone' else 'cpu'  # get model device
         h = model.hyp  # hyperparameters
 
         # Define criteria
         BCEcls = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([h['cls_pw']], device=device))
         BCEobj = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([h['obj_pw']], device=device))
-        #MSEangle = nn.MSELoss().to(device)
+        # MSEangle = nn.MSELoss().to(device)
 
         # Class label smoothing https://arxiv.org/pdf/1902.04103.pdf eqn 3
         self.cp, self.cn = smooth_BCE(eps=h.get('label_smoothing', 0.0))  # positive, negative BCE targets
@@ -879,24 +1335,23 @@ class ComputeLossBinOTA:
         for k in 'na', 'nc', 'nl', 'anchors', 'stride', 'bin_count':
             setattr(self, k, getattr(det, k))
 
-        #xy_bin_sigmoid = SigmoidBin(bin_count=11, min=-0.5, max=1.5, use_loss_regression=False).to(device)
+        # xy_bin_sigmoid = SigmoidBin(bin_count=11, min=-0.5, max=1.5, use_loss_regression=False).to(device)
         wh_bin_sigmoid = SigmoidBin(bin_count=self.bin_count, min=0.0, max=4.0, use_loss_regression=False).to(device)
-        #angle_bin_sigmoid = SigmoidBin(bin_count=31, min=-1.1, max=1.1, use_loss_regression=False).to(device)
+        # angle_bin_sigmoid = SigmoidBin(bin_count=31, min=-1.1, max=1.1, use_loss_regression=False).to(device)
         self.wh_bin_sigmoid = wh_bin_sigmoid
 
     def __call__(self, p, targets, imgs):  # predictions, targets, model   
         device = targets.device
         lcls, lbox, lobj = torch.zeros(1, device=device), torch.zeros(1, device=device), torch.zeros(1, device=device)
         bs, as_, gjs, gis, targets, anchors = self.build_targets(p, targets, imgs)
-        pre_gen_gains = [torch.tensor(pp.shape, device=device)[[3, 2, 3, 2]] for pp in p] 
-    
+        pre_gen_gains = [torch.tensor(pp.shape, device=device)[[3, 2, 3, 2]] for pp in p]
 
         # Losses
         for i, pi in enumerate(p):  # layer index, layer predictions
             b, a, gj, gi = bs[i], as_[i], gjs[i], gis[i]  # image, anchor, gridy, gridx
             tobj = torch.zeros_like(pi[..., 0], device=device)  # target obj
 
-            obj_idx = self.wh_bin_sigmoid.get_length()*2 + 2     # x,y, w-bce, h-bce     # xy_bin_sigmoid.get_length()*2
+            obj_idx = self.wh_bin_sigmoid.get_length() * 2 + 2  # x,y, w-bce, h-bce     # xy_bin_sigmoid.get_length()*2
 
             n = b.shape[0]  # number of targets
             if n:
@@ -906,16 +1361,18 @@ class ComputeLossBinOTA:
                 grid = torch.stack([gi, gj], dim=1)
                 selected_tbox = targets[i][:, 2:6] * pre_gen_gains[i]
                 selected_tbox[:, :2] -= grid
-                
-                #pxy = ps[:, :2].sigmoid() * 2. - 0.5
-                ##pxy = ps[:, :2].sigmoid() * 3. - 1.
-                #pwh = (ps[:, 2:4].sigmoid() * 2) ** 2 * anchors[i]
-                #pbox = torch.cat((pxy, pwh), 1)  # predicted box
 
-                #x_loss, px = xy_bin_sigmoid.training_loss(ps[..., 0:12], tbox[i][..., 0])
-                #y_loss, py = xy_bin_sigmoid.training_loss(ps[..., 12:24], tbox[i][..., 1])
-                w_loss, pw = self.wh_bin_sigmoid.training_loss(ps[..., 2:(3+self.bin_count)], selected_tbox[..., 2] / anchors[i][..., 0])
-                h_loss, ph = self.wh_bin_sigmoid.training_loss(ps[..., (3+self.bin_count):obj_idx], selected_tbox[..., 3] / anchors[i][..., 1])
+                # pxy = ps[:, :2].sigmoid() * 2. - 0.5
+                ##pxy = ps[:, :2].sigmoid() * 3. - 1.
+                # pwh = (ps[:, 2:4].sigmoid() * 2) ** 2 * anchors[i]
+                # pbox = torch.cat((pxy, pwh), 1)  # predicted box
+
+                # x_loss, px = xy_bin_sigmoid.training_loss(ps[..., 0:12], tbox[i][..., 0])
+                # y_loss, py = xy_bin_sigmoid.training_loss(ps[..., 12:24], tbox[i][..., 1])
+                w_loss, pw = self.wh_bin_sigmoid.training_loss(ps[..., 2:(3 + self.bin_count)],
+                                                               selected_tbox[..., 2] / anchors[i][..., 0])
+                h_loss, ph = self.wh_bin_sigmoid.training_loss(ps[..., (3 + self.bin_count):obj_idx],
+                                                               selected_tbox[..., 3] / anchors[i][..., 1])
 
                 pw *= anchors[i][..., 0]
                 ph *= anchors[i][..., 1]
@@ -923,15 +1380,13 @@ class ComputeLossBinOTA:
                 px = ps[:, 0].sigmoid() * 2. - 0.5
                 py = ps[:, 1].sigmoid() * 2. - 0.5
 
-                lbox += w_loss + h_loss # + x_loss + y_loss
+                lbox += w_loss + h_loss  # + x_loss + y_loss
 
-                #print(f"\n px = {px.shape}, py = {py.shape}, pw = {pw.shape}, ph = {ph.shape} \n")
+                # print(f"\n px = {px.shape}, py = {py.shape}, pw = {pw.shape}, ph = {ph.shape} \n")
 
-                pbox = torch.cat((px.unsqueeze(1), py.unsqueeze(1), pw.unsqueeze(1), ph.unsqueeze(1)), 1).to(device)  # predicted box
+                pbox = torch.cat((px.unsqueeze(1), py.unsqueeze(1), pw.unsqueeze(1), ph.unsqueeze(1)), 1).to(
+                    device)  # predicted box
 
-                
-                
-                
                 iou = bbox_iou(pbox.T, selected_tbox, x1y1x2y2=False, CIoU=True)  # iou(prediction, target)
                 lbox += (1.0 - iou).mean()  # iou loss
 
@@ -941,9 +1396,9 @@ class ComputeLossBinOTA:
                 # Classification
                 selected_tcls = targets[i][:, 1].long()
                 if self.nc > 1:  # cls loss (only if multiple classes)
-                    t = torch.full_like(ps[:, (1+obj_idx):], self.cn, device=device)  # targets
+                    t = torch.full_like(ps[:, (1 + obj_idx):], self.cn, device=device)  # targets
                     t[range(n), selected_tcls] = self.cp
-                    lcls += self.BCEcls(ps[:, (1+obj_idx):], t)  # BCE
+                    lcls += self.BCEcls(ps[:, (1 + obj_idx):], t)  # BCE
 
                 # Append targets to text file
                 # with open('targets.txt', 'a') as file:
@@ -965,12 +1420,12 @@ class ComputeLossBinOTA:
         return loss * bs, torch.cat((lbox, lobj, lcls, loss)).detach()
 
     def build_targets(self, p, targets, imgs):
-        
-        #indices, anch = self.find_positive(p, targets)
+
+        # indices, anch = self.find_positive(p, targets)
         indices, anch = self.find_3_positive(p, targets)
-        #indices, anch = self.find_4_positive(p, targets)
-        #indices, anch = self.find_5_positive(p, targets)
-        #indices, anch = self.find_9_positive(p, targets)
+        # indices, anch = self.find_4_positive(p, targets)
+        # indices, anch = self.find_5_positive(p, targets)
+        # indices, anch = self.find_9_positive(p, targets)
 
         matching_bs = [[] for pp in p]
         matching_as = [[] for pp in p]
@@ -978,16 +1433,16 @@ class ComputeLossBinOTA:
         matching_gis = [[] for pp in p]
         matching_targets = [[] for pp in p]
         matching_anchs = [[] for pp in p]
-        
-        nl = len(p)    
-    
+
+        nl = len(p)
+
         for batch_idx in range(p[0].shape[0]):
-        
-            b_idx = targets[:, 0]==batch_idx
+
+            b_idx = targets[:, 0] == batch_idx
             this_target = targets[b_idx]
             if this_target.shape[0] == 0:
                 continue
-                
+
             txywh = this_target[:, 2:6] * imgs[batch_idx].shape[1]
             txyxy = xywh2xyxy(txywh)
 
@@ -1000,35 +1455,37 @@ class ComputeLossBinOTA:
             all_gj = []
             all_gi = []
             all_anch = []
-            
+
             for i, pi in enumerate(p):
-                
-                obj_idx = self.wh_bin_sigmoid.get_length()*2 + 2
-                
+                obj_idx = self.wh_bin_sigmoid.get_length() * 2 + 2
+
                 b, a, gj, gi = indices[i]
                 idx = (b == batch_idx)
-                b, a, gj, gi = b[idx], a[idx], gj[idx], gi[idx]                
+                b, a, gj, gi = b[idx], a[idx], gj[idx], gi[idx]
                 all_b.append(b)
                 all_a.append(a)
                 all_gj.append(gj)
                 all_gi.append(gi)
                 all_anch.append(anch[i][idx])
                 from_which_layer.append(torch.ones(size=(len(b),)) * i)
-                
-                fg_pred = pi[b, a, gj, gi]                
-                p_obj.append(fg_pred[:, obj_idx:(obj_idx+1)])
-                p_cls.append(fg_pred[:, (obj_idx+1):])
-                
+
+                fg_pred = pi[b, a, gj, gi]
+                p_obj.append(fg_pred[:, obj_idx:(obj_idx + 1)])
+                p_cls.append(fg_pred[:, (obj_idx + 1):])
+
                 grid = torch.stack([gi, gj], dim=1)
-                pxy = (fg_pred[:, :2].sigmoid() * 2. - 0.5 + grid) * self.stride[i] #/ 8.
-                #pwh = (fg_pred[:, 2:4].sigmoid() * 2) ** 2 * anch[i][idx] * self.stride[i] #/ 8.
-                pw = self.wh_bin_sigmoid.forward(fg_pred[..., 2:(3+self.bin_count)].sigmoid()) * anch[i][idx][:, 0] * self.stride[i]
-                ph = self.wh_bin_sigmoid.forward(fg_pred[..., (3+self.bin_count):obj_idx].sigmoid()) * anch[i][idx][:, 1] * self.stride[i]
-                
+                pxy = (fg_pred[:, :2].sigmoid() * 2. - 0.5 + grid) * self.stride[i]  # / 8.
+                # pwh = (fg_pred[:, 2:4].sigmoid() * 2) ** 2 * anch[i][idx] * self.stride[i] #/ 8.
+                pw = self.wh_bin_sigmoid.forward(fg_pred[..., 2:(3 + self.bin_count)].sigmoid()) * anch[i][idx][:, 0] * \
+                     self.stride[i]
+                ph = self.wh_bin_sigmoid.forward(fg_pred[..., (3 + self.bin_count):obj_idx].sigmoid()) * anch[i][idx][:,
+                                                                                                         1] * \
+                     self.stride[i]
+
                 pxywh = torch.cat([pxy, pw.unsqueeze(1), ph.unsqueeze(1)], dim=-1)
                 pxyxy = xywh2xyxy(pxywh)
                 pxyxys.append(pxyxy)
-            
+
             pxyxys = torch.cat(pxyxys, dim=0)
             if pxyxys.shape[0] == 0:
                 continue
@@ -1040,7 +1497,7 @@ class ComputeLossBinOTA:
             all_gj = torch.cat(all_gj, dim=0)
             all_gi = torch.cat(all_gi, dim=0)
             all_anch = torch.cat(all_anch, dim=0)
-        
+
             pair_wise_iou = box_iou(txyxy, pxyxys)
 
             pair_wise_iou_loss = -torch.log(pair_wise_iou + 1e-8)
@@ -1055,21 +1512,21 @@ class ComputeLossBinOTA:
                 .repeat(1, pxyxys.shape[0], 1)
             )
 
-            num_gt = this_target.shape[0]            
+            num_gt = this_target.shape[0]
             cls_preds_ = (
-                p_cls.float().unsqueeze(0).repeat(num_gt, 1, 1).sigmoid_()
-                * p_obj.unsqueeze(0).repeat(num_gt, 1, 1).sigmoid_()
+                    p_cls.float().unsqueeze(0).repeat(num_gt, 1, 1).sigmoid_()
+                    * p_obj.unsqueeze(0).repeat(num_gt, 1, 1).sigmoid_()
             )
 
             y = cls_preds_.sqrt_()
             pair_wise_cls_loss = F.binary_cross_entropy_with_logits(
-               torch.log(y/(1-y)) , gt_cls_per_image, reduction="none"
+                torch.log(y / (1 - y)), gt_cls_per_image, reduction="none"
             ).sum(-1)
             del cls_preds_
-        
+
             cost = (
-                pair_wise_cls_loss
-                + 3.0 * pair_wise_iou_loss
+                    pair_wise_cls_loss
+                    + 3.0 * pair_wise_iou_loss
             )
 
             matching_matrix = torch.zeros_like(cost)
@@ -1088,16 +1545,16 @@ class ComputeLossBinOTA:
                 matching_matrix[cost_argmin, anchor_matching_gt > 1] = 1.0
             fg_mask_inboxes = matching_matrix.sum(0) > 0.0
             matched_gt_inds = matching_matrix[:, fg_mask_inboxes].argmax(0)
-        
+
             from_which_layer = from_which_layer[fg_mask_inboxes]
             all_b = all_b[fg_mask_inboxes]
             all_a = all_a[fg_mask_inboxes]
             all_gj = all_gj[fg_mask_inboxes]
             all_gi = all_gi[fg_mask_inboxes]
             all_anch = all_anch[fg_mask_inboxes]
-        
+
             this_target = this_target[matched_gt_inds]
-        
+
             for i in range(nl):
                 layer_idx = from_which_layer == i
                 matching_bs[i].append(all_b[layer_idx])
@@ -1123,7 +1580,7 @@ class ComputeLossBinOTA:
                 matching_targets[i] = torch.tensor([], device='cuda:0', dtype=torch.int64)
                 matching_anchs[i] = torch.tensor([], device='cuda:0', dtype=torch.int64)
 
-        return matching_bs, matching_as, matching_gjs, matching_gis, matching_targets, matching_anchs       
+        return matching_bs, matching_as, matching_gjs, matching_gis, matching_targets, matching_anchs
 
     def find_3_positive(self, p, targets):
         """Build targets for compute_loss(), input targets(image,class,x,y,w,h)"""
@@ -1181,9 +1638,11 @@ class ComputeLossBinOTA:
 
 class ComputeLossAuxOTA:
     """Compute losses"""
+
     def __init__(self, model, autobalance=False):
         super(ComputeLossAuxOTA, self).__init__()
-        device = next(model.parameters()).device if next(model.parameters()).device.type != 'privateuseone' else 'cpu' # get model device
+        device = next(model.parameters()).device if next(
+            model.parameters()).device.type != 'privateuseone' else 'cpu'  # get model device
         h = model.hyp  # hyperparameters
 
         # Define criteria
@@ -1210,14 +1669,13 @@ class ComputeLossAuxOTA:
         lcls, lbox, lobj = torch.zeros(1, device=device), torch.zeros(1, device=device), torch.zeros(1, device=device)
         bs_aux, as_aux_, gjs_aux, gis_aux, targets_aux, anchors_aux = self.build_targets2(p[:self.nl], targets, imgs)
         bs, as_, gjs, gis, targets, anchors = self.build_targets(p[:self.nl], targets, imgs)
-        pre_gen_gains_aux = [torch.tensor(pp.shape, device=device)[[3, 2, 3, 2]] for pp in p[:self.nl]] 
-        pre_gen_gains = [torch.tensor(pp.shape, device=device)[[3, 2, 3, 2]] for pp in p[:self.nl]] 
-    
+        pre_gen_gains_aux = [torch.tensor(pp.shape, device=device)[[3, 2, 3, 2]] for pp in p[:self.nl]]
+        pre_gen_gains = [torch.tensor(pp.shape, device=device)[[3, 2, 3, 2]] for pp in p[:self.nl]]
 
         # Losses
         for i in range(self.nl):  # layer index, layer predictions
             pi = p[i]
-            pi_aux = p[i+self.nl]
+            pi_aux = p[i + self.nl]
             b, a, gj, gi = bs[i], as_[i], gjs[i], gis[i]  # image, anchor, gridy, gridx
             b_aux, a_aux, gj_aux, gi_aux = bs_aux[i], as_aux_[i], gjs_aux[i], gis_aux[i]  # image, anchor, gridy, gridx
             tobj = torch.zeros_like(pi[..., 0], device=device)  # target obj
@@ -1250,13 +1708,13 @@ class ComputeLossAuxOTA:
                 # Append targets to text file
                 # with open('targets.txt', 'a') as file:
                 #     [file.write('%11.5g ' * 4 % tuple(x) + '\n') for x in torch.cat((txy[i], twh[i]), 1)]
-            
+
             n_aux = b_aux.shape[0]  # number of targets
             if n_aux:
                 ps_aux = pi_aux[b_aux, a_aux, gj_aux, gi_aux]  # prediction subset corresponding to targets
                 grid_aux = torch.stack([gi_aux, gj_aux], dim=1)
                 pxy_aux = ps_aux[:, :2].sigmoid() * 2. - 0.5
-                #pxy_aux = ps_aux[:, :2].sigmoid() * 3. - 1.
+                # pxy_aux = ps_aux[:, :2].sigmoid() * 3. - 1.
                 pwh_aux = (ps_aux[:, 2:4].sigmoid() * 2) ** 2 * anchors_aux[i]
                 pbox_aux = torch.cat((pxy_aux, pwh_aux), 1)  # predicted box
                 selected_tbox_aux = targets_aux[i][:, 2:6] * pre_gen_gains_aux[i]
@@ -1265,7 +1723,8 @@ class ComputeLossAuxOTA:
                 lbox += 0.25 * (1.0 - iou_aux).mean()  # iou loss
 
                 # Objectness
-                tobj_aux[b_aux, a_aux, gj_aux, gi_aux] = (1.0 - self.gr) + self.gr * iou_aux.detach().clamp(0).type(tobj_aux.dtype)  # iou ratio
+                tobj_aux[b_aux, a_aux, gj_aux, gi_aux] = (1.0 - self.gr) + self.gr * iou_aux.detach().clamp(0).type(
+                    tobj_aux.dtype)  # iou ratio
 
                 # Classification
                 selected_tcls_aux = targets_aux[i][:, 1].long()
@@ -1276,7 +1735,7 @@ class ComputeLossAuxOTA:
 
             obji = self.BCEobj(pi[..., 4], tobj)
             obji_aux = self.BCEobj(pi_aux[..., 4], tobj_aux)
-            lobj += obji * self.balance[i] + 0.25 * obji_aux * self.balance[i] # obj loss
+            lobj += obji * self.balance[i] + 0.25 * obji_aux * self.balance[i]  # obj loss
             if self.autobalance:
                 self.balance[i] = self.balance[i] * 0.9999 + 0.0001 / obji.detach().item()
 
@@ -1291,7 +1750,7 @@ class ComputeLossAuxOTA:
         return loss * bs, torch.cat((lbox, lobj, lcls, loss)).detach()
 
     def build_targets(self, p, targets, imgs):
-        
+
         indices, anch = self.find_3_positive(p, targets)
 
         matching_bs = [[] for pp in p]
@@ -1301,15 +1760,15 @@ class ComputeLossAuxOTA:
         matching_targets = [[] for pp in p]
         matching_anchs = [[] for pp in p]
         device = targets.device
-        nl = len(p)    
-    
+        nl = len(p)
+
         for batch_idx in range(p[0].shape[0]):
-        
-            b_idx = targets[:, 0]==batch_idx
+
+            b_idx = targets[:, 0] == batch_idx
             this_target = targets[b_idx]
             if this_target.shape[0] == 0:
                 continue
-                
+
             txywh = this_target[:, 2:6] * imgs[batch_idx].shape[1]
             txyxy = xywh2xyxy(txywh)
 
@@ -1322,31 +1781,30 @@ class ComputeLossAuxOTA:
             all_gj = []
             all_gi = []
             all_anch = []
-            
+
             for i, pi in enumerate(p):
-                
                 b, a, gj, gi = indices[i]
                 idx = (b == batch_idx)
-                b, a, gj, gi = b[idx], a[idx], gj[idx], gi[idx]                
+                b, a, gj, gi = b[idx], a[idx], gj[idx], gi[idx]
                 all_b.append(b)
                 all_a.append(a)
                 all_gj.append(gj)
                 all_gi.append(gi)
                 all_anch.append(anch[i][idx])
                 from_which_layer.append((torch.ones(size=(len(b),)) * i).to(device))
-                
-                fg_pred = pi[b, a, gj, gi]                
+
+                fg_pred = pi[b, a, gj, gi]
                 p_obj.append(fg_pred[:, 4:5])
                 p_cls.append(fg_pred[:, 5:])
-                
+
                 grid = torch.stack([gi, gj], dim=1)
-                pxy = (fg_pred[:, :2].sigmoid() * 2. - 0.5 + grid) * self.stride[i] #/ 8.
-                #pxy = (fg_pred[:, :2].sigmoid() * 3. - 1. + grid) * self.stride[i]
-                pwh = (fg_pred[:, 2:4].sigmoid() * 2) ** 2 * anch[i][idx] * self.stride[i] #/ 8.
+                pxy = (fg_pred[:, :2].sigmoid() * 2. - 0.5 + grid) * self.stride[i]  # / 8.
+                # pxy = (fg_pred[:, :2].sigmoid() * 3. - 1. + grid) * self.stride[i]
+                pwh = (fg_pred[:, 2:4].sigmoid() * 2) ** 2 * anch[i][idx] * self.stride[i]  # / 8.
                 pxywh = torch.cat([pxy, pwh], dim=-1)
                 pxyxy = xywh2xyxy(pxywh)
                 pxyxys.append(pxyxy)
-            
+
             pxyxys = torch.cat(pxyxys, dim=0)
             if pxyxys.shape[0] == 0:
                 continue
@@ -1358,7 +1816,7 @@ class ComputeLossAuxOTA:
             all_gj = torch.cat(all_gj, dim=0)
             all_gi = torch.cat(all_gi, dim=0)
             all_anch = torch.cat(all_anch, dim=0)
-        
+
             pair_wise_iou = box_iou(txyxy, pxyxys)
 
             pair_wise_iou_loss = -torch.log(pair_wise_iou + 1e-8)
@@ -1375,26 +1833,26 @@ class ComputeLossAuxOTA:
 
             num_gt = this_target.shape[0]
             cls_preds_ = (
-                p_cls.float().unsqueeze(0).repeat(num_gt, 1, 1).sigmoid_()
-                * p_obj.unsqueeze(0).repeat(num_gt, 1, 1).sigmoid_()
+                    p_cls.float().unsqueeze(0).repeat(num_gt, 1, 1).sigmoid_()
+                    * p_obj.unsqueeze(0).repeat(num_gt, 1, 1).sigmoid_()
             )
 
             y = cls_preds_.sqrt_()
             pair_wise_cls_loss = F.binary_cross_entropy_with_logits(
-               torch.log(y/(1-y)) , gt_cls_per_image, reduction="none"
+                torch.log(y / (1 - y)), gt_cls_per_image, reduction="none"
             ).sum(-1)
             del cls_preds_
-        
+
             cost = (
-                pair_wise_cls_loss
-                + 3.0 * pair_wise_iou_loss
+                    pair_wise_cls_loss
+                    + 3.0 * pair_wise_iou_loss
             )
 
             try:
                 matching_matrix = torch.zeros_like(cost, device=device)
             except Exception as e:
-                matching_matrix = torch.zeros_like(cost,device='cpu')
-                print(e,'\nError. Switching cpu')
+                matching_matrix = torch.zeros_like(cost, device='cpu')
+                print(e, '\nError. Switching cpu')
 
             for gt_idx in range(num_gt):
                 _, pos_idx = torch.topk(
@@ -1410,16 +1868,16 @@ class ComputeLossAuxOTA:
                 matching_matrix[cost_argmin, anchor_matching_gt > 1] = 1.0
             fg_mask_inboxes = (matching_matrix.sum(0) > 0.0).to(device)
             matched_gt_inds = matching_matrix[:, fg_mask_inboxes].argmax(0)
-        
+
             from_which_layer = from_which_layer[fg_mask_inboxes]
             all_b = all_b[fg_mask_inboxes]
             all_a = all_a[fg_mask_inboxes]
             all_gj = all_gj[fg_mask_inboxes]
             all_gi = all_gi[fg_mask_inboxes]
             all_anch = all_anch[fg_mask_inboxes]
-        
+
             this_target = this_target[matched_gt_inds]
-        
+
             for i in range(nl):
                 layer_idx = from_which_layer == i
                 matching_bs[i].append(all_b[layer_idx])
@@ -1448,7 +1906,7 @@ class ComputeLossAuxOTA:
         return matching_bs, matching_as, matching_gjs, matching_gis, matching_targets, matching_anchs
 
     def build_targets2(self, p, targets, imgs):
-        
+
         indices, anch = self.find_5_positive(p, targets)
 
         matching_bs = [[] for pp in p]
@@ -1458,15 +1916,15 @@ class ComputeLossAuxOTA:
         matching_targets = [[] for pp in p]
         matching_anchs = [[] for pp in p]
         device = targets.device
-        nl = len(p)    
-    
+        nl = len(p)
+
         for batch_idx in range(p[0].shape[0]):
-        
-            b_idx = targets[:, 0]==batch_idx
+
+            b_idx = targets[:, 0] == batch_idx
             this_target = targets[b_idx]
             if this_target.shape[0] == 0:
                 continue
-                
+
             txywh = this_target[:, 2:6] * imgs[batch_idx].shape[1]
             txyxy = xywh2xyxy(txywh)
 
@@ -1479,31 +1937,30 @@ class ComputeLossAuxOTA:
             all_gj = []
             all_gi = []
             all_anch = []
-            
+
             for i, pi in enumerate(p):
-                
                 b, a, gj, gi = indices[i]
                 idx = (b == batch_idx)
-                b, a, gj, gi = b[idx], a[idx], gj[idx], gi[idx]                
+                b, a, gj, gi = b[idx], a[idx], gj[idx], gi[idx]
                 all_b.append(b)
                 all_a.append(a)
                 all_gj.append(gj)
                 all_gi.append(gi)
                 all_anch.append(anch[i][idx])
                 from_which_layer.append((torch.ones(size=(len(b),)) * i).to(device))
-                
-                fg_pred = pi[b, a, gj, gi]                
+
+                fg_pred = pi[b, a, gj, gi]
                 p_obj.append(fg_pred[:, 4:5])
                 p_cls.append(fg_pred[:, 5:])
-                
+
                 grid = torch.stack([gi, gj], dim=1)
-                pxy = (fg_pred[:, :2].sigmoid() * 2. - 0.5 + grid) * self.stride[i] #/ 8.
-                #pxy = (fg_pred[:, :2].sigmoid() * 3. - 1. + grid) * self.stride[i]
-                pwh = (fg_pred[:, 2:4].sigmoid() * 2) ** 2 * anch[i][idx] * self.stride[i] #/ 8.
+                pxy = (fg_pred[:, :2].sigmoid() * 2. - 0.5 + grid) * self.stride[i]  # / 8.
+                # pxy = (fg_pred[:, :2].sigmoid() * 3. - 1. + grid) * self.stride[i]
+                pwh = (fg_pred[:, 2:4].sigmoid() * 2) ** 2 * anch[i][idx] * self.stride[i]  # / 8.
                 pxywh = torch.cat([pxy, pwh], dim=-1)
                 pxyxy = xywh2xyxy(pxywh)
                 pxyxys.append(pxyxy)
-            
+
             pxyxys = torch.cat(pxyxys, dim=0)
             if pxyxys.shape[0] == 0:
                 continue
@@ -1515,7 +1972,7 @@ class ComputeLossAuxOTA:
             all_gj = torch.cat(all_gj, dim=0)
             all_gi = torch.cat(all_gi, dim=0)
             all_anch = torch.cat(all_anch, dim=0)
-        
+
             pair_wise_iou = box_iou(txyxy, pxyxys)
 
             pair_wise_iou_loss = -torch.log(pair_wise_iou + 1e-8)
@@ -1532,26 +1989,26 @@ class ComputeLossAuxOTA:
 
             num_gt = this_target.shape[0]
             cls_preds_ = (
-                p_cls.float().unsqueeze(0).repeat(num_gt, 1, 1).sigmoid_()
-                * p_obj.unsqueeze(0).repeat(num_gt, 1, 1).sigmoid_()
+                    p_cls.float().unsqueeze(0).repeat(num_gt, 1, 1).sigmoid_()
+                    * p_obj.unsqueeze(0).repeat(num_gt, 1, 1).sigmoid_()
             )
 
             y = cls_preds_.sqrt_()
             pair_wise_cls_loss = F.binary_cross_entropy_with_logits(
-               torch.log(y/(1-y)) , gt_cls_per_image, reduction="none"
+                torch.log(y / (1 - y)), gt_cls_per_image, reduction="none"
             ).sum(-1)
             del cls_preds_
-        
+
             cost = (
-                pair_wise_cls_loss
-                + 3.0 * pair_wise_iou_loss
+                    pair_wise_cls_loss
+                    + 3.0 * pair_wise_iou_loss
             )
 
             try:
                 matching_matrix = torch.zeros_like(cost, device=device)
             except Exception as e:
-                matching_matrix = torch.zeros_like(cost,device='cpu')
-                print(e,'\nError. Switching cpu')
+                matching_matrix = torch.zeros_like(cost, device='cpu')
+                print(e, '\nError. Switching cpu')
 
             for gt_idx in range(num_gt):
                 _, pos_idx = torch.topk(
@@ -1567,16 +2024,16 @@ class ComputeLossAuxOTA:
                 matching_matrix[cost_argmin, anchor_matching_gt > 1] = 1.0
             fg_mask_inboxes = (matching_matrix.sum(0) > 0.0).to(device)
             matched_gt_inds = matching_matrix[:, fg_mask_inboxes].argmax(0)
-        
+
             from_which_layer = from_which_layer[fg_mask_inboxes]
             all_b = all_b[fg_mask_inboxes]
             all_a = all_a[fg_mask_inboxes]
             all_gj = all_gj[fg_mask_inboxes]
             all_gi = all_gi[fg_mask_inboxes]
             all_anch = all_anch[fg_mask_inboxes]
-        
+
             this_target = this_target[matched_gt_inds]
-        
+
             for i in range(nl):
                 layer_idx = from_which_layer == i
                 matching_bs[i].append(all_b[layer_idx])
@@ -1602,25 +2059,25 @@ class ComputeLossAuxOTA:
                 matching_targets[i] = torch.tensor([], device=device, dtype=torch.int64)
                 matching_anchs[i] = torch.tensor([], device=device, dtype=torch.int64)
 
-        return matching_bs, matching_as, matching_gjs, matching_gis, matching_targets, matching_anchs              
+        return matching_bs, matching_as, matching_gjs, matching_gis, matching_targets, matching_anchs
 
     def find_5_positive(self, p, targets):
         """Build targets for compute_loss(), input targets(image,class,x,y,w,h)"""
         na, nt = self.na, targets.shape[0]  # number of anchors, targets
         indices, anch = [], []
         device = targets.device
-        gain = torch.ones(7, device= device).long()  # normalized to gridspace gain
-        ai = torch.arange(na, device= device).float().view(na, 1).repeat(1, nt)  # same as .repeat_interleave(nt)
+        gain = torch.ones(7, device=device).long()  # normalized to gridspace gain
+        ai = torch.arange(na, device=device).float().view(na, 1).repeat(1, nt)  # same as .repeat_interleave(nt)
         targets = torch.cat((targets.repeat(na, 1, 1), ai[:, :, None]), 2)  # append anchor indices
 
         g = 1.0  # bias
         off = torch.tensor([[0, 0],
                             [1, 0], [0, 1], [-1, 0], [0, -1],  # j,k,l,m
                             # [1, 1], [1, -1], [-1, 1], [-1, -1],  # jk,jm,lk,lm
-                            ], device= device).float() * g  # offsets
+                            ], device=device).float() * g  # offsets
 
         for i in range(self.nl):
-            anchors = self.anchors[i].to( device)
+            anchors = self.anchors[i].to(device)
             gain[2:6] = torch.tensor(p[i].shape)[[3, 2, 3, 2]]  # xyxy gain
 
             # Match targets to anchors
@@ -1656,22 +2113,22 @@ class ComputeLossAuxOTA:
             indices.append((b, a, gj.clamp_(0, gain[3] - 1), gi.clamp_(0, gain[2] - 1)))  # image, anchor, grid indices
             anch.append(anchors[a])  # anchors
 
-        return indices, anch                 
+        return indices, anch
 
     def find_3_positive(self, p, targets):
         """Build targets for compute_loss(), input targets(image,class,x,y,w,h)"""
         na, nt = self.na, targets.shape[0]  # number of anchors, targets
         indices, anch = [], []
         device = targets.device
-        gain = torch.ones(7, device= device).long()  # normalized to gridspace gain
-        ai = torch.arange(na, device= device).float().view(na, 1).repeat(1, nt)  # same as .repeat_interleave(nt)
+        gain = torch.ones(7, device=device).long()  # normalized to gridspace gain
+        ai = torch.arange(na, device=device).float().view(na, 1).repeat(1, nt)  # same as .repeat_interleave(nt)
         targets = torch.cat((targets.repeat(na, 1, 1), ai[:, :, None]), 2)  # append anchor indices
 
         g = 0.5  # bias
         off = torch.tensor([[0, 0],
                             [1, 0], [0, 1], [-1, 0], [0, -1],  # j,k,l,m
                             # [1, 1], [1, -1], [-1, 1], [-1, -1],  # jk,jm,lk,lm
-                            ], device= device).float() * g  # offsets
+                            ], device=device).float() * g  # offsets
 
         for i in range(self.nl):
             anchors = self.anchors[i].to(device)

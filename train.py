@@ -32,7 +32,7 @@ from utils.general import labels_to_class_weights, increment_path, labels_to_ima
     fitness, strip_optimizer, get_latest_run, check_dataset, check_file, check_img_size, \
     print_mutation, set_logging, one_cycle, colorstr, TQDM_BAR_FORMAT
 from utils.google_utils import attempt_download
-from utils.loss import ComputeLoss, ComputeLossOTA, ComputeLossAuxOTA
+from utils.loss import ComputeLoss, ComputeLossOTA, ComputeLossAuxOTA, ComputeLoss_AnchorFree
 from utils.plots import plot_images, plot_results, plot_evolution
 from utils.torch_utils import ModelEMA, select_device, intersect_dicts, torch_distributed_zero_first, is_parallel, \
     time_synchronized, smart_optimizer, save_model, prune
@@ -119,7 +119,7 @@ def train(hyp, opt, tb_writer=None,
         ckpt = torch.load(weights, map_location=map_device)  # load checkpoint
         pretrained_model = ckpt['model']
         model = Model(opt.cfg or pretrained_model.yaml,
-                      ch=3,
+                      ch=hyp.get('ch', 3),
                       nc=nc,
                       anchors=hyp.get('anchors')).to(device)  # create
 
@@ -153,10 +153,15 @@ def train(hyp, opt, tb_writer=None,
         assert nodes == nodes2, f'Please paste the same model cfg branch like P5vsP5 or P6vsP6'
     else:
         model = Model(opt.cfg,
-                      ch=3,
+                      ch=hyp.get('ch', 3),
                       nc=nc,
                       anchors=hyp.get('anchors')).to(device)  # create
     p5_model = model.is_p5()
+
+    if not model.use_anchor:
+        tag_results = list(tag_results)
+        tag_results.remove('labels')
+        tag_results = tuple(tag_results)
 
     with torch_distributed_zero_first(rank):
         check_dataset(data_dict)  # check
@@ -312,8 +317,9 @@ def train(hyp, opt, tb_writer=None,
 
             # Anchors
             if not opt.noautoanchor:
-                check_anchors(dataset, model=model,
-                              thr=hyp['anchor_t'], imgsz=imgsz, device='cpu')
+                if model.use_anchor:
+                    check_anchors(dataset, model=model,
+                                  thr=hyp['anchor_t'], imgsz=imgsz, device='cpu')
             model.half().float() if device.type == 'xla' else model.to(device).half().float()
 
     # DDP mode
@@ -343,8 +349,13 @@ def train(hyp, opt, tb_writer=None,
     results = (0, 0, 0, 0, 0, 0, 0)
     scheduler.last_epoch = start_epoch - 1  # do not move
     scaler = GradScaler(enabled=cuda)
-    compute_loss_ota = ComputeLossOTA(model) if p5_model else ComputeLossAuxOTA(model)  # init loss class
-    compute_loss = ComputeLoss(model)  # init loss class
+
+    hyp['loss_ota'] = 0 if not model.use_anchor else hyp.get('loss_ota', 0)
+
+    compute_loss_ota = (ComputeLossOTA(model) if p5_model else ComputeLossAuxOTA(model)) if model.use_anchor else None
+    compute_loss_ = ComputeLoss(model) if model.use_anchor else ComputeLoss_AnchorFree(model)
+    use_loss_ota = 'loss_ota' not in hyp or hyp['loss_ota'] == 1 or not model.is_p5()
+    compute_loss = compute_loss_ota if use_loss_ota else compute_loss_
     logger.info(f'Image sizes {imgsz} train, {imgsz_test} test\n'
                 f'Using {dataloader.num_workers} dataloader workers\n'
                 f'Logging results to {save_dir}\n'
@@ -372,11 +383,11 @@ def train(hyp, opt, tb_writer=None,
                 if rank != 0:
                     dataset.indices = indices.cpu().numpy()
 
-        mloss = torch.zeros(4, device=device)  # mean losses
+        mloss = torch.zeros(4 if model.use_anchor else 3, device=device)  # mean losses
         if rank != -1:
             dataloader.sampler.set_epoch(epoch)
         pbar = enumerate(dataloader)
-        logger.info(('\n' + '%11s' * 8) % tag_results)
+        logger.info(('\n' + '%11s' * len(tag_results)) % tag_results)
         if rank in [-1, 0]:
             pbar = tqdm(pbar, total=nb, mininterval=1, maxinterval=1, unit='batch',
                         bar_format=TQDM_BAR_FORMAT)  # progress bar
@@ -415,17 +426,12 @@ def train(hyp, opt, tb_writer=None,
                                                   antialias=False)
 
             # Forward
-            with autocast(enabled=True if device.type in ['cpu', 'cuda'] else False,
-                          device_type='cuda' if device.type == 'cuda' else 'cpu'):
+            with autocast(enabled=device.type in ['cuda', 'cpu'],
+                          device_type='cuda' if device.type == 'cuda' else 'cpu',
+                          dtype=torch.float16 if cuda else torch.bfloat16):
 
                 pred = model(imgs)  # forward
-                if 'loss_ota' not in hyp or hyp['loss_ota'] == 1:
-                    loss, loss_items = compute_loss_ota([pre.to(map_device, non_blocking=True) for pre in pred],
-                                                        targets.to(map_device, non_blocking=True),
-                                                        imgs.to(map_device, non_blocking=True))  # loss scaled by batch_size
-                else:
-                    loss, loss_items = compute_loss([pre.to(map_device, non_blocking=True) for pre in pred],
-                                                    targets.to(map_device, non_blocking=True))  # loss scaled by batch_size
+                loss, loss_items = compute_loss(pred, targets)  # loss scaled by batch_size
                 if rank != -1:
                     loss *= opt.world_size  # gradient averaged between devices in DDP mode
                 if opt.quad:
@@ -446,7 +452,8 @@ def train(hyp, opt, tb_writer=None,
             if rank in [-1, 0]:
                 mloss = (mloss * i + loss_items.to(device)) / (i + 1)  # update mean losses
                 mem = '%.3gG' % (torch.cuda.memory_reserved() / 1E9 if torch.cuda.is_available() else 0)  # (GB)
-                s = ('%11s' * 2 + '%11.4g' * 6) % (f'{epoch}/{epochs - 1}', mem, *mloss, targets.shape[0], imgs.shape[-1])
+
+                s = ('%11s' * 2 + '%11.4g' * (2 + len(mloss))) % (f'{epoch}/{epochs - 1}', mem, *mloss, targets.shape[0], imgs.shape[-1])
                 pbar.set_description(s)
 
                 # Plot
@@ -484,9 +491,9 @@ def train(hyp, opt, tb_writer=None,
                                        dataloader=val_dataloader,
                                        save_dir=save_dir,
                                        verbose=False,
-                                       plots=plots and final_epoch and device.type != 'privateuseone',
+                                       plots=plots and final_epoch,
                                        wandb_logger=wandb_logger,
-                                       compute_loss=compute_loss if device.type != 'privateuseone' else None,
+                                       compute_loss=compute_loss,
                                        is_coco=is_coco,
                                        v5_metric=opt.v5_metric)[:2]
 

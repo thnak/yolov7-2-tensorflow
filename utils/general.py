@@ -31,6 +31,7 @@ ROOT = FILE.parents[1]  # YOLOv5 root directory
 TQDM_BAR_FORMAT = '{l_bar}{bar:10}{r_bar}'  # tqdm bar format
 ONNX_OPSET = [11, 12, 13, 14, 15, 16, 17]
 ONNX_OPSET_TARGET = ONNX_OPSET
+CUDA = torch.cuda.is_available()
 
 def set_logging(rank=-1, filename=None, filemode=None):
     logging.basicConfig(
@@ -691,7 +692,6 @@ def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45, classes=Non
     Returns:
          list of detections, on (n,6) tensor per image [xyxy, conf, cls]
     """
-
     nc = prediction.shape[2] - 5  # number of classes
     xc = prediction[..., 4] > conf_thres  # candidates
 

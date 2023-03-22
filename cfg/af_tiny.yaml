@@ -13,8 +13,7 @@ anchors:
 # yolov7-tiny backbone
 backbone:
   # [from, number, module, args] c2, k=1, s=1, p=None, g=1, act=True
-  [[-1, 1, ReOrg, []],
-   [-1, 1, Conv, [32, 3, 2, None, 1, nn.LeakyReLU(0.1)]],  # 0-P1/2
+  [[-1, 1, Conv, [32, 3, 2, None, 1, nn.LeakyReLU(0.1)]],  # 0-P1/2
 
    [-1, 1, Conv, [64, 3, 2, None, 1, nn.LeakyReLU(0.1)]],  # 1-P2/4
 
@@ -110,5 +109,5 @@ head:
    [65, 1, Conv, [256, 3, 1, None, 1, nn.LeakyReLU(0.1)]],
    [73, 1, Conv, [512, 3, 1, None, 1, nn.LeakyReLU(0.1)]],
 
-   [[74,75,76], 1, IDetect, [nc, anchors]],   # Detect(P3, P4, P5)
+   [[74,75,76], 1, IV6Detect, [nc]],   # Detect(P3, P4, P5)
   ]

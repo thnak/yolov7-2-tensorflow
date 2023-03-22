@@ -52,7 +52,7 @@ def test(data,
     training = model is not None
     if training:  # called by train.py
         device = next(model.parameters()).device  # get model device
-
+        map_device = 'cpu' if device.type == 'privateuseone' else device
     else:  # called directly
         set_logging()
         device = device if isinstance(device, str) else str(device)
@@ -107,8 +107,8 @@ def test(data,
     confusion_matrix = ConfusionMatrix(nc=nc)
     names = {k: v for k, v in enumerate(model.names if hasattr(model, 'names') else model.module.names)}
     coco91class = coco80_to_coco91_class()
-    s = ('%22s' + '%11s' * 6) % ('Class', 'Images', 'Labels', 'P', 'R', 'mAP@.5', 'mAP@.5:.95')
-    p, r, f1, mp, mr, map50, map, t0, t1 = 0., 0., 0., 0., 0., 0., 0., 0., 0.
+    s = ('%22s' if model.use_anchor else '%11s' + '%11s' * 6) % ('Class', 'Images', 'Labels', 'P', 'R', 'mAP@.5', 'mAP@.5:.95')
+    p, r, f1, mp, mr, map50, map_, t0, t1 = 0., 0., 0., 0., 0., 0., 0., 0., 0.
     loss = torch.zeros(3, device=device)
     jdict, stats, ap, ap_class, wandb_images = [], [], [], [], []
     pbar = tqdm(dataloader, desc=s, mininterval=0.05, maxinterval=1, unit='batch', bar_format=TQDM_BAR_FORMAT)
@@ -116,22 +116,24 @@ def test(data,
         img = img.to(device, non_blocking=True)
         img = img.half() if half else img.float()  # uint8 to fp16/32
         img /= 255.0  # 0 - 255 to 0.0 - 1.0
-        targets = targets.to(device)
+        targets = targets.to(device, non_blocking=half)
         nb, _, height, width = img.shape  # batch size, channels, height, width
 
-        # Run model
         t = time_synchronized()
-        out, train_out = model(img, augment=augment)  # inference and training outputs
-        t0 += time_synchronized() - t
-        # Compute loss
-        if compute_loss:
-            loss += compute_loss([x.float() for x in train_out], targets)[1][:3]  # box, obj, cls
+        with torch.autocast(enabled=device.type in ['cuda', 'cpu'],
+                            device_type='cuda' if device.type == 'cuda' else 'cpu',
+                            dtype=torch.float16 if half else torch.bfloat16):
+            out, train_out = model(img, augment=augment)
+            t0 += time_synchronized() - t
+            # Compute loss
+            if compute_loss:
+                loss += compute_loss(train_out, targets)[1][:3].to(device, non_blocking=half)  # box, obj, cls
 
-        # Run NMS
+            # Run NMS
         targets[:, 2:] *= torch.Tensor([width, height, width, height]).to(device)  # to pixels
         lb = [targets[targets[:, 0] == i, 1:] for i in range(nb)] if save_hybrid else []  # for autolabelling
         t = time_synchronized()
-        out = non_max_suppression(out.to("cpu"), conf_thres, iou_thres, labels=lb, multi_label=True,
+        out = non_max_suppression(out, conf_thres, iou_thres, labels=lb, multi_label=True,
                                   agnostic=single_cls)
         out = [o.to(device) for o in out]
         t1 += time_synchronized() - t
@@ -196,7 +198,10 @@ def test(data,
                 tbox = xywh2xyxy(labels[:, 1:5])
                 scale_coords(img[si].shape[1:], tbox, shapes[si][0], shapes[si][1])  # native-space labels
                 if plots:
-                    confusion_matrix.process_batch(predn, torch.cat((labels[:, 0:1], tbox), 1))
+                    a = labels.clone().to(map_device, non_blocking=half)
+                    b = tbox.clone().to(map_device, non_blocking=half)
+                    labels_ = torch.cat((a[:, 0:1], b), 1)
+                    confusion_matrix.process_batch(predn.to(map_device, non_blocking=half), labels_)
 
                 # Per target class
                 for cls in torch.unique(tcls_tensor):
@@ -234,14 +239,14 @@ def test(data,
     if len(stats) and stats[0].any():
         p, r, ap, f1, ap_class = ap_per_class(*stats, plot=plots, v5_metric=v5_metric, save_dir=save_dir, names=names)
         ap50, ap = ap[:, 0], ap.mean(1)  # AP@0.5, AP@0.5:0.95
-        mp, mr, map50, map = p.mean(), r.mean(), ap50.mean(), ap.mean()
+        mp, mr, map50, map_ = p.mean(), r.mean(), ap50.mean(), ap.mean()
         nt = np.bincount(stats[3].astype(np.int64), minlength=nc)  # number of targets per class
     else:
         nt = torch.zeros(1)
 
     # Print results
-    pf = '%22s' + '%11i' * 2 + '%11.3g' * 4  # print format
-    print(pf % ('all', seen, nt.sum(), mp, mr, map50, map))
+    pf = '%22s' if model.use_anchor else '%11s' + '%11i' * 2 + '%11.3g' * 4  # print format
+    print(pf % ('all', seen, nt.sum(), mp, mr, map50, map_))
 
     # Print results per class
     if (verbose or (nc < 50 and not training)) and nc > 1 and len(stats):
@@ -277,13 +282,13 @@ def test(data,
 
             anno = COCO(anno_json)  # init annotations api
             pred = anno.loadRes(pred_json)  # init predictions api
-            eval = COCOeval(anno, pred, 'bbox')
+            eval_ = COCOeval(anno, pred, 'bbox')
             if is_coco:
-                eval.params.imgIds = [int(Path(x).stem) for x in dataloader.dataset.img_files]  # image IDs to evaluate
-            eval.evaluate()
-            eval.accumulate()
-            eval.summarize()
-            map, map50 = eval.stats[:2]  # update results (mAP@0.5:0.95, mAP@0.5)
+                eval_.params.imgIds = [int(Path(x).stem) for x in dataloader.dataset.img_files]  # image IDs to evaluate
+            eval_.evaluate()
+            eval_.accumulate()
+            eval_.summarize()
+            map_, map50 = eval_.stats[:2]  # update results (mAP@0.5:0.95, mAP@0.5)
         except Exception as e:
             print(f'pycocotools unable to run: {e}')
 
@@ -292,10 +297,10 @@ def test(data,
     if not training:
         s = f"\n{len(list(save_dir.glob('labels/*.txt')))} labels saved to {save_dir / 'labels'}" if save_txt else ''
         print(f"Results saved to {save_dir}{s}")
-    maps = np.zeros(nc) + map
+    maps = np.zeros(nc) + map_
     for i, c in enumerate(ap_class):
         maps[c] = ap[i]
-    return (mp, mr, map50, map, *(loss.cpu() / len(dataloader)).tolist()), maps, t
+    return (mp, mr, map50, map_, *(loss.cpu() / len(dataloader)).tolist()), maps, t
 
 
 if __name__ == '__main__':
