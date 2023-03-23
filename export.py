@@ -80,10 +80,13 @@ if __name__ == '__main__':
         device, gitstatus = select_device(opt.device)
         map_device = 'cpu' if device.type == 'privateuseone' else device
         with torch.no_grad():
-            model = attempt_load(weight, map_location=map_device).to(map_device).eval()  # load FP32 model
+            ckpt = torch.load(weight, map_location=device)
+            try:
+                model = attempt_load(weight, map_location=map_device).to(map_device).eval()  # load FP32 model
+            except Exception:
+                model = ckpt['model']
             for m in model.parameters():
                 m.requires_grad = False
-            ckpt = torch.load(weight, map_location=map_device)
             ckpt.pop('model', None)
             # prune(model)
             model_ori = deepcopy(model)

@@ -1641,8 +1641,9 @@ class ComputeLossAuxOTA:
 
     def __init__(self, model, autobalance=False):
         super(ComputeLossAuxOTA, self).__init__()
-        device = next(model.parameters()).device if next(
-            model.parameters()).device.type != 'privateuseone' else 'cpu'  # get model device
+        device = next(model.parameters()).device
+        device = device if device.type != 'privateuseone' else 'cpu'
+        self.device = device
         h = model.hyp  # hyperparameters
 
         # Define criteria
@@ -1665,7 +1666,10 @@ class ComputeLossAuxOTA:
             setattr(self, k, getattr(det, k))
 
     def __call__(self, p, targets, imgs):  # predictions, targets, model   
-        device = targets.device
+        device = self.device
+        p = [x.to(device) for x in p]
+        targets = targets.to(device)
+        imgs = imgs.to(device)
         lcls, lbox, lobj = torch.zeros(1, device=device), torch.zeros(1, device=device), torch.zeros(1, device=device)
         bs_aux, as_aux_, gjs_aux, gis_aux, targets_aux, anchors_aux = self.build_targets2(p[:self.nl], targets, imgs)
         bs, as_, gjs, gis, targets, anchors = self.build_targets(p[:self.nl], targets, imgs)

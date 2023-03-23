@@ -60,7 +60,8 @@ class ReOrg(nn.Module):
     def __init__(self):
         super(ReOrg, self).__init__()
 
-    def forward(self, out):  # x(b,c,w,h) -> y(b,4c,w/2,h/2)
+    @staticmethod
+    def forward(out):  # x(b,c,w,h) -> y(b,4c,w/2,h/2)
         out = ReOrg_slice(out)
         return out
 
@@ -94,7 +95,8 @@ class Shortcut(nn.Module):
         super(Shortcut, self).__init__()
         self.d = dimension
 
-    def forward(self, x):
+    @staticmethod
+    def forward(x):
         return x[0] + x[1]
 
 
@@ -121,6 +123,31 @@ class Conv(nn.Module):
 
     def fuseforward(self, x):
         return self.act(self.conv(x))
+
+
+class ReOrgConv(nn.Module):
+    def __init__(self, c1, c2, k=1, s=1, p=None, g=1, act=True):
+        super(ReOrgConv, self).__init__()
+        self.con1 = Conv(c1, c2, k=1, s=1, p=None, g=1, act=True)
+        self.con2 = Conv(c1, c2, k=1, s=1, p=None, g=1, act=True)
+        self.con3 = Conv(c1, c2, k=1, s=1, p=None, g=1, act=True)
+        self.con4 = Conv(c1, c2, k=1, s=1, p=None, g=1, act=True)
+        self.con5 = Conv(c2 * 4, c2, k=1, s=1, p=None, g=1, act=True)
+        print(f'debug: {c1}, {c2}, {k}, {s}, {p}, {g}, {act}')
+
+    def forward(self, inputs):
+        inputs1 = inputs[:, :, ::2, ::2]
+        inputs2 = inputs[:, :, ::2, 1::2]
+        inputs3 = inputs[:, :, 1::2, ::2]
+        inputs4 = inputs[:, :, 1::2, 1::2]
+        inputs1 = self.con1(inputs1)
+        inputs2 = self.con2(inputs2)
+        inputs3 = self.con3(inputs3)
+        inputs4 = self.con4(inputs4)
+        inputs = torch.cat([inputs1, inputs2, inputs3, inputs4], 1)
+        inputs = self.con5(inputs)
+        return inputs
+
 
 
 class DFL(nn.Module):

@@ -132,7 +132,7 @@ def test(data,
             t0 += time_synchronized() - t
             # Compute loss
             if compute_loss:
-                loss += compute_loss(train_out, targets)[1][:3].to(device, non_blocking=half)  # box, obj, cls
+                loss += compute_loss(train_out, targets, img)[1][:3].to(device, non_blocking=half)  # box, obj, cls
 
             # Run NMS
         targets[:, 2:] *= torch.Tensor([width, height, width, height]).to(device)  # to pixels

@@ -356,11 +356,12 @@ def train(hyp, opt, tb_writer=None,
         compute_loss = (ComputeLossOTA(model) if p5_model else ComputeLossAuxOTA(model)) if model.use_anchor else None
     else:
         compute_loss = ComputeLoss(model) if model.use_anchor else ComputeLoss_AnchorFree(model)
+    compute_loss_val = ComputeLoss(model)
     logger.info(f'Image sizes {imgsz} train, {imgsz_test} test\n'
                 f'Using {dataloader.num_workers} dataloader workers\n'
                 f'Logging results to {save_dir}\n'
                 f'Starting training for {epochs} epochs...\n')
-    torch.save(model, wdir / 'init.pt')
+    torch.save({'model': deepcopy(model).to('cpu')}, wdir / 'init.pt')
     # epoch ------------------------------------------------------------------
     for epoch in range(start_epoch, epochs):
         model.to(device).train(mode=True)
@@ -431,7 +432,7 @@ def train(hyp, opt, tb_writer=None,
                           dtype=torch.float16 if cuda else torch.bfloat16):
 
                 pred = model(imgs)  # forward
-                loss, loss_items = compute_loss(pred, targets)  # loss scaled by batch_size
+                loss, loss_items = compute_loss(pred, targets, imgs)  # loss scaled by batch_size
                 if rank != -1:
                     loss *= opt.world_size  # gradient averaged between devices in DDP mode
                 if opt.quad:
@@ -495,7 +496,7 @@ def train(hyp, opt, tb_writer=None,
                                        verbose=False,
                                        plots=plots and final_epoch,
                                        wandb_logger=wandb_logger,
-                                       compute_loss=compute_loss,
+                                       compute_loss=compute_loss_val,
                                        is_coco=is_coco,
                                        v5_metric=opt.v5_metric)[:2]
 
