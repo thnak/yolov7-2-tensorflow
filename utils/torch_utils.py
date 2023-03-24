@@ -349,11 +349,11 @@ def model_info(model, verbose=False, img_size=640):
         fs += f'               Version: {model.model_version if hasattr(model, "model_version") else "?"}\n'
         fs += f'               Best fitness: {model.best_fitness if hasattr(model, "best_fitness") else "unknown"}\n'
         fs += f'               Dataset: {str(model.total_image[-1])+" images" if hasattr(model, "total_image") else "unknown"}\n'
-        fs += f'               Input shape: {model.input_shape if hasattr(model, "input_shape") else [3, 640, 640]}\n'
+        fs += f'               Input shape: {model.input_shape if hasattr(model, "input_shape") else img.shape.tolist()[1:]}\n'
         fs += f'               Image size (in memory): {size_in_mem2} (UInt8)\n'
         fs += f'               Stride: {[int(x) for x in model.stride.tolist()]}\n'
         fs += f'               Number of class: {len(model.names)}\n'
-        fs += f'               Branch: {"P5" if model.yaml.get("p5") else "P6"}'
+        fs += f'               Branch: {"P5" if model.yaml.get("p5", model.is_p5()) else "P6"}'
 
     except Exception as ex:
         fs = '? Gflops'

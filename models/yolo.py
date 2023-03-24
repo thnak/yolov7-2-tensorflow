@@ -539,7 +539,7 @@ class Model(nn.Module):
         self.best_fitness = 0.
         self.model_version = 0
         self.total_image = [0]
-        self.input_shape = [3, 640, 640]
+        self.input_shape = [-1, -1, -1]
         self.reparam = False
         self.inplace = self.yaml.get('inplace', True)
         self.use_anchor = False
@@ -711,7 +711,7 @@ class Model(nn.Module):
     def is_p5(self, nodes=None):
         if not nodes:
             nodes = len(self.yaml['backbone']) + len(self.yaml['head']) - 1
-        if 'p5' in self.yaml:
+        elif 'p5' in self.yaml:
             return eval(self.yaml['p5']) if isinstance(self.yaml['p5'], str) else self.yaml['p5']
         out = nodes in [77, 105, 121]
         return out

@@ -2,6 +2,7 @@ import math
 from copy import copy
 from pathlib import Path
 
+import cv2
 import numpy as np
 import pandas as pd
 import requests
@@ -111,7 +112,7 @@ class Foldcut(nn.Module):
 
 
 class Conv(nn.Module):
-    # Standard convolution
+    """Standard convolution"""
     def __init__(self, c1, c2, k=1, s=1, p=None, g=1, act=True):  # ch_in, ch_out, kernel, stride, padding, groups
         super(Conv, self).__init__()
         self.conv = nn.Conv2d(c1, c2, k, s, autopad(k, p), groups=g, bias=False)
@@ -128,26 +129,28 @@ class Conv(nn.Module):
 class ReOrgConv(nn.Module):
     def __init__(self, c1, c2, k=1, s=1, p=None, g=1, act=True):
         super(ReOrgConv, self).__init__()
-        self.con1 = Conv(c1, c2, k=1, s=1, p=None, g=1, act=True)
-        self.con2 = Conv(c1, c2, k=1, s=1, p=None, g=1, act=True)
-        self.con3 = Conv(c1, c2, k=1, s=1, p=None, g=1, act=True)
-        self.con4 = Conv(c1, c2, k=1, s=1, p=None, g=1, act=True)
-        self.con5 = Conv(c2 * 4, c2, k=1, s=1, p=None, g=1, act=True)
-        print(f'debug: {c1}, {c2}, {k}, {s}, {p}, {g}, {act}')
+        self.con1 = Conv(c1, c1, k=k, s=k, p=p, g=g, act=act)
+        self.con2 = Conv(c1, c1, k=k, s=k, p=p, g=g, act=act)
+        self.con3 = Conv(c1, c1, k=k, s=k, p=p, g=g, act=act)
+        self.con4 = Conv(c1, c1, k=k, s=k, p=p, g=g, act=act)
+        self.con_1 = Conv(c1, c1, k * 4, s, 1, 1, act)
+        self.con_2 = Conv(c1, c1, k * 6, s, 2, 1, act)
+        self.con_3 = Conv(c1, c1, k * 2, s, 0, 1, act)
+        self.con_4 = nn.Conv2d(c1, c1, 2, 2, 1, dilation=3, groups=g, bias=False)
+        self.act = self.con_3.act
+        self.bn = nn.BatchNorm2d(c1)
 
     def forward(self, inputs):
-        inputs1 = inputs[:, :, ::2, ::2]
-        inputs2 = inputs[:, :, ::2, 1::2]
-        inputs3 = inputs[:, :, 1::2, ::2]
-        inputs4 = inputs[:, :, 1::2, 1::2]
-        inputs1 = self.con1(inputs1)
-        inputs2 = self.con2(inputs2)
-        inputs3 = self.con3(inputs3)
-        inputs4 = self.con4(inputs4)
-        inputs = torch.cat([inputs1, inputs2, inputs3, inputs4], 1)
-        inputs = self.con5(inputs)
+        inputs_1 = self.con_1(inputs)
+        inputs1 = self.con1(inputs[:, :, ::2, ::2])
+        inputs2 = self.con2(inputs[:, :, ::2, 1::2])
+        inputs_2 = self.con_3(inputs)
+        inputs_3 = self.act(self.bn(self.con_4(inputs)))
+        inputs3 = self.con3(inputs[:, :, 1::2, ::2])
+        inputs4 = self.con4(inputs[:, :, 1::2, 1::2])
+        inputs_4 = self.con_2(inputs)
+        inputs = torch.cat([inputs_1, inputs1, inputs2, inputs_2, inputs_3, inputs3, inputs4, inputs_4], 1)
         return inputs
-
 
 
 class DFL(nn.Module):

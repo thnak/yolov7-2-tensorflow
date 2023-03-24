@@ -303,14 +303,20 @@ class LoadStreams:
         self.c_frame = [0] * n
         self.sources = [clean_str(x) for x in sources]  # clean source names for later
         for i, s in enumerate(sources):
+            if 'rtsp://' in s:
+                os.environ['OPENCV_FFMPEG_CAPTURE_OPTIONS'] = 'rtsp_transport;udp'
+
             print(f'{i + 1}/{n}: {s}... init ')
             url = eval(s) if s.isnumeric() else s
             if urlparse(s).hostname in YOUTUBE:  # if source is YouTube video
                 check_requirements(('pafy', 'youtube_dl'))
                 import pafy
-                url = pafy.new(url).getbest(preftype="mp4").url
-            if 'rtsp://' in s:
-                os.environ['OPENCV_FFMPEG_CAPTURE_OPTIONS'] = 'rtsp_transport;udp'
+                try:
+                    url = pafy.new(url).getbest(preftype="mp4").url
+                except Exception as ex:
+                    logger.error(f'if the error come from pafy library, please report to https://github.com/thnak/pafy.git')
+                    logger.info('attempting install pafy from git')
+                    os.system('pip install git+https://github.com/thnak/pafy.git')
             cap = cv2.VideoCapture(url, cv2.CAP_ANY)
             assert cap.isOpened(), f'Failed to open {s}'
             w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))

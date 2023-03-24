@@ -47,6 +47,7 @@ if __name__ == '__main__':
     parser.add_argument('--v', action='store_true', help='Verbose log')
     parser.add_argument('--author', type=str, default='Nguyễn Văn Thạnh', help="author's name")
     parser.add_argument('--data', type=str, default='mydataset.yaml', help='data.yaml path')
+    parser.add_argument('--trace', action='store_true', help='use torch.jit.trace')
     opt = parser.parse_args()
     opt.dynamic = opt.dynamic and not opt.end2end
     opt.dynamic = False if opt.dynamic_batch else opt.dynamic
@@ -80,11 +81,11 @@ if __name__ == '__main__':
         device, gitstatus = select_device(opt.device)
         map_device = 'cpu' if device.type == 'privateuseone' else device
         with torch.no_grad():
-            ckpt = torch.load(weight, map_location=device)
+            ckpt = torch.load(weight, map_location=map_device)
             try:
                 model = attempt_load(weight, map_location=map_device).to(map_device).eval()  # load FP32 model
             except Exception:
-                model = ckpt['model']
+                model = ckpt['model'].float().eval()
             for m in model.parameters():
                 m.requires_grad = False
             ckpt.pop('model', None)
@@ -95,10 +96,10 @@ if __name__ == '__main__':
         total_image = model.total_image if hasattr(model, 'total_image') else [0]
         input_shape = model.input_shape if hasattr(model, 'input_shape') else ([3, 640, 640] if model.is_p5() else [3, 1280, 1280])
         model_version = model.model_version if hasattr(model, 'model_version') else 0
-
         model.best_fitness = best_fitness
         model.model_version = model_version
         model.total_image = total_image
+        model.input_shape = input_shape
         labels = model.names
         gs = int(max(model.stride.max(), 32))  # grid size (max stride)
 
@@ -246,7 +247,7 @@ if __name__ == '__main__':
                 logging.info(
                     f'{prefix} onnx opset tested for version {ONNX_OPSET_TARGET}, newer version may have poor performance for ONNXRUNTIME in DmlExecutionProvider')
             torch.onnx.disable_log()
-            if img.dtype != torch.float16:
+            if img.dtype != torch.float16 and opt.trace:
                 model = torch.jit.trace(model, img).eval()
                 model = torch.jit.freeze(model)
             torch.onnx.export(model,
@@ -268,6 +269,7 @@ if __name__ == '__main__':
 
             if opt.simplify:
                 try:
+                    check_requirements('onnxsim')
                     import onnxsim
                     logging.info(f'{prefix} Starting to simplify ONNX...')
                     onnx_model, check = onnxsim.simplify(onnx_model)
@@ -280,7 +282,7 @@ if __name__ == '__main__':
             # onnx_model = onnx.load(f)  # load onnx model
             onnx.checker.check_model(onnx_model)  # check onnx model
             logging.info(f'{prefix} writing metadata for model...')
-            onnx_MetaData = {'model_version': model_version,
+            onnx_MetaData = {'model_infor': model_Gflop,
                              'export_gitstatus': gitstatus,
                              'best_fitness': best_fitness,
                              'stride': gs,
