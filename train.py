@@ -127,6 +127,8 @@ def train(hyp, opt, tb_writer=None,
         model_version = pretrained_model.model_version if hasattr(pretrained_model, 'model_version') else model_version
         best_fitness = pretrained_model.best_fitness if hasattr(pretrained_model, 'best_fitness') else 'unknown'
         best_fitness = best_fitness.tolist()[0] if isinstance(best_fitness, (torch.Tensor, np.ndarray)) else best_fitness
+        best_fitness = 0. if best_fitness in ['unknown', -1, -1.] else best_fitness
+        best_fitness = float(best_fitness) if isinstance(best_fitness, str) else best_fitness
 
         if not opt.resume:
             if model_version >= 1:
@@ -530,6 +532,7 @@ def train(hyp, opt, tb_writer=None,
             # Update best mAP
             # weighted combination of [P, R, mAP@.5, mAP@.5-.95]
             fi = fitness(np.array(results).reshape(1, -1))
+
             if fi > best_fitness:
                 best_fitness = fi.tolist()[0]
                 model.best_fitness = best_fitness
