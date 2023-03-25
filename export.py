@@ -252,7 +252,6 @@ if __name__ == '__main__':
             torch.onnx.disable_log()
             if img.dtype != torch.float16 and opt.trace:
                 model = torch.jit.trace(model, img).eval()
-                model = torch.jit.freeze(model)
             torch.onnx.export(model,
                               img, f, verbose=opt.v,
                               opset_version=opt.onnx_opset,

@@ -513,7 +513,7 @@ class IV6Detect(nn.Module):
 
 class Model(nn.Module):
     # model, input channels, number of classes
-    def __init__(self, cfg='yolor-csp-c.yaml', ch=3, nc=None, anchors=None, compileModel=False):
+    def __init__(self, cfg='yolor-csp-c.yaml', ch=3, nc=None, anchors=None):
         super(Model, self).__init__()
         self.traced = False
         if isinstance(cfg, dict):
@@ -535,12 +535,6 @@ class Model(nn.Module):
                 f'Overriding model.yaml anchors with anchors={anchors}')
             self.yaml['anchors'] = round(anchors)  # override yaml value
         self.model, self.save = parse_model(deepcopy(self.yaml), ch=[ch])  # model, savelist
-        if compileModel:
-            try:
-                logger.info('Compiling model...')
-                self.model = torch.compile(self.model)
-            except Exception as ex:
-                logger.warning('Compile error')
         self.names = [str(i) for i in range(self.yaml['nc'])]  # default names
         self.best_fitness = 0.
         self.model_version = 0
@@ -576,6 +570,7 @@ class Model(nn.Module):
 
         # Init weights, biases
         initialize_weights(self)
+
 
     def forward(self, x, augment=False, profile=False):
         if augment:
