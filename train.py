@@ -121,7 +121,8 @@ def train(hyp, opt, tb_writer=None,
         model = Model(opt.cfg or pretrained_model.yaml,
                       ch=hyp.get('ch', 3),
                       nc=nc,
-                      anchors=hyp.get('anchors')).to(device)  # create
+                      anchors=hyp.get('anchors'),
+                      compileModel=opt.compile).to(device)  # create
 
         total_image = pretrained_model.total_image if hasattr(pretrained_model, 'total_image') else total_image
         model_version = pretrained_model.model_version if hasattr(pretrained_model, 'model_version') else model_version
@@ -157,7 +158,9 @@ def train(hyp, opt, tb_writer=None,
         model = Model(opt.cfg,
                       ch=hyp.get('ch', 3),
                       nc=nc,
-                      anchors=hyp.get('anchors')).to(device)  # create
+                      anchors=hyp.get('anchors'),
+                      compileModel=opt.compile).to(device)  # create
+
     p5_model = model.is_p5()
 
     if not model.use_anchor:
@@ -484,7 +487,7 @@ def train(hyp, opt, tb_writer=None,
         if rank in [-1, 0]:
             # mAP
             ema.update_attr(
-                model, include=['yaml', 'nc', 'hyp', 'gr', 'names', 'stride', 'class_weights', 'best_fitness', 'input_shape', 'model_version', 'total_image'])
+                model, include=['yaml', 'nc', 'hyp', 'gr', 'names', 'stride', 'class_weights', 'best_fitness', 'input_shape', 'model_version', 'total_image', 'use_anchor'])
             final_epoch = epoch + 1 == epochs
             if not opt.notest or final_epoch:  # Calculate mAP
                 wandb_logger.current_epoch = epoch + 1
@@ -544,15 +547,15 @@ def train(hyp, opt, tb_writer=None,
                 if rank in [-1, 0]:
                     ema.update_attr(model,
                                     include=['yaml', 'nc', 'hyp', 'gr', 'names', 'stride', 'class_weights', 'best_fitness',
-                                             'input_shape', 'model_version', 'total_image'])
+                                             'input_shape', 'model_version', 'total_image', 'use_anchor'])
 
                 ckpt = {
                     'epoch': epoch,
                     'training_results': results_file.read_text(),
                     'model': deepcopy(model.module if is_parallel(model) else model).half(),
-                    'ema': deepcopy(ema.ema).half(),
-                    'updates': ema.updates,
-                    'optimizer': optimizer.state_dict(),
+                    'ema': deepcopy(ema.ema).half() if not final_epoch else None,
+                    'updates': ema.updates if not final_epoch else None,
+                    'optimizer': optimizer.state_dict() if not final_epoch else None,
                     'wandb_id': wandb_logger.wandb_run.id if wandb_logger.wandb else None,
                     'hyp': hyp,
                     'train_gitstatus': git_status,
@@ -711,6 +714,8 @@ if __name__ == '__main__':
     parser.add_argument('--v5-metric', action='store_true', help='assume maximum recall as 1.0 in AP calculation')
     parser.add_argument('--seed', type=int, default=0, help='Global training seed')
     parser.add_argument('--tensorboard', action='store_true', help='Start with Tensorboard')
+    parser.add_argument('--compile', action='store_true', help='Use torch.compile() API if available')
+
     opt = parser.parse_args()
 
     # Set DDP variables

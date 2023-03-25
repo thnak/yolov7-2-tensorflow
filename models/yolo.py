@@ -513,7 +513,7 @@ class IV6Detect(nn.Module):
 
 class Model(nn.Module):
     # model, input channels, number of classes
-    def __init__(self, cfg='yolor-csp-c.yaml', ch=3, nc=None, anchors=None):
+    def __init__(self, cfg='yolor-csp-c.yaml', ch=3, nc=None, anchors=None, compileModel=False):
         super(Model, self).__init__()
         self.traced = False
         if isinstance(cfg, dict):
@@ -535,6 +535,12 @@ class Model(nn.Module):
                 f'Overriding model.yaml anchors with anchors={anchors}')
             self.yaml['anchors'] = round(anchors)  # override yaml value
         self.model, self.save = parse_model(deepcopy(self.yaml), ch=[ch])  # model, savelist
+        if compileModel:
+            try:
+                logger.info('Compiling model...')
+                self.model = torch.compile(self.model)
+            except Exception as ex:
+                logger.warning('Compile error')
         self.names = [str(i) for i in range(self.yaml['nc'])]  # default names
         self.best_fitness = 0.
         self.model_version = 0
@@ -545,9 +551,9 @@ class Model(nn.Module):
         self.use_anchor = False
         # Build strides, anchors
         m = self.model[-1]  # Detect()
+        m.inplace = self.inplace
         s = 256
         if isinstance(m, (Detect, IDetect)):
-            m.inplace = self.inplace
             m.stride = torch.tensor([s / x.shape[-2] for x in self.forward(torch.zeros(1, ch, s, s))])  # forward
             check_anchor_order(m)
             m.anchors /= m.stride.view(-1, 1, 1)
@@ -556,7 +562,6 @@ class Model(nn.Module):
             self.use_anchor = True
 
         elif isinstance(m, IAuxDetect):
-            m.inplace = self.inplace
             m.stride = torch.tensor([s / x.shape[-2] for x in self.forward(torch.zeros(1, ch, s, s))[:4]])  # forward
             check_anchor_order(m)
             m.anchors /= m.stride.view(-1, 1, 1)
@@ -565,7 +570,6 @@ class Model(nn.Module):
             self.use_anchor = True
 
         elif isinstance(m, (V6Detect, IV6Detect)):
-            m.inplace = self.inplace
             m.stride = torch.tensor([s / x.shape[-2] for x in self.forward(torch.zeros(1, ch, s, s))[0]])  # forward
             self.stride = m.stride
             m.bias_init()
@@ -1348,7 +1352,7 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
                  RepResX, RepResXCSPA, RepResXCSPB, RepResXCSPC,
                  Ghost, GhostCSPA, GhostCSPB, GhostCSPC,
                  SwinTransformerBlock, STCSPA, STCSPB, STCSPC,
-                 SwinTransformer2Block, ST2CSPA, ST2CSPB, ST2CSPC, C3, C2f, ReOrgConv]:
+                 SwinTransformer2Block, ST2CSPA, ST2CSPB, ST2CSPC, C3, C2f]:
             c1, c2 = ch[f], args[0]
             if c2 != no:  # if not output
                 c2 = make_divisible(c2 * gw, 8)

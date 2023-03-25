@@ -89,6 +89,9 @@ if __name__ == '__main__':
             for m in model.parameters():
                 m.requires_grad = False
             ckpt.pop('model', None)
+            ckpt.pop('ema', None)
+            ckpt.pop('optimizer', None)
+            ckpt.pop('updates', None)
             # prune(model)
             model_ori = deepcopy(model)
 

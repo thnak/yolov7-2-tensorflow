@@ -39,7 +39,6 @@ def test(data,
          plots=True,
          wandb_logger=None,
          compute_loss=None,
-         half_precision=True,
          trace=False,
          is_coco=False,
          v5_metric=False,
@@ -71,7 +70,7 @@ def test(data,
             model = TracedModel(model, device, imgsz, saveTrace=False)
 
     # Half
-    half = device.type in ['cuda'] and half_precision  # half precision only supported on CUDA
+    half = device.type in ['cuda']  # half precision only supported on CUDA
     if half:
         model.half()
     # Configure
