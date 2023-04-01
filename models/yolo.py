@@ -567,10 +567,10 @@ class Model(nn.Module):
             m.stride = torch.tensor([s / x.shape[-2] for x in self.forward(torch.zeros(1, ch, s, s))[0]])  # forward
             self.stride = m.stride
             m.bias_init()
+            self.use_anchor = False
 
         # Init weights, biases
         initialize_weights(self)
-
 
     def forward(self, x, augment=False, profile=False):
         if augment:

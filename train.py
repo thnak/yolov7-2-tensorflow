@@ -121,8 +121,7 @@ def train(hyp, opt, tb_writer=None,
         model = Model(opt.cfg or pretrained_model.yaml,
                       ch=hyp.get('ch', 3),
                       nc=nc,
-                      anchors=hyp.get('anchors'),
-                      compileModel=opt.compile).to(device)  # create
+                      anchors=hyp.get('anchors')).to(device)  # create
 
         total_image = pretrained_model.total_image if hasattr(pretrained_model, 'total_image') else total_image
         model_version = pretrained_model.model_version if hasattr(pretrained_model, 'model_version') else model_version
@@ -158,8 +157,7 @@ def train(hyp, opt, tb_writer=None,
         model = Model(opt.cfg,
                       ch=hyp.get('ch', 3),
                       nc=nc,
-                      anchors=hyp.get('anchors'),
-                      compileModel=opt.compile).to(device)  # create
+                      anchors=hyp.get('anchors')).to(device)  # create
 
     p5_model = model.is_p5()
 

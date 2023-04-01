@@ -20,6 +20,7 @@ from utils.ffmpeg_ import  FFMPEG_recorder
 set_logging()
 logger = logging.getLogger(__name__)
 
+
 def detect(opt=None):
     source, weights, view_img, save_txt, imgsz, trace = opt.source, opt.weights, opt.view_img, opt.save_txt, opt.img_size, not opt.no_trace
     save_img = not opt.nosave and not source.endswith('.txt')  # save inference images
@@ -32,7 +33,7 @@ def detect(opt=None):
     
     # Initialize
     device = select_device(opt.device)[0]
-    half = device.type == 'cuda'  # half precision only supported on CUDA
+    half = device.type in ['cuda', 'privateuseone']  # half precision only supported on CUDA
 
     # Load model
     model = attempt_load(weights, map_location='cpu').to(device)  # load FP32 model
@@ -76,7 +77,7 @@ def detect(opt=None):
         if img.ndimension() == 3:
             img = img.unsqueeze(0)
         # Warmup
-        if device.type == 'cuda' and (old_img_b != img.shape[0] or old_img_h != img.shape[2] or old_img_w != img.shape[3]):
+        if device.type in ['cuda', 'privateuseone'] and (old_img_b != img.shape[0] or old_img_h != img.shape[2] or old_img_w != img.shape[3]):
             twrm = time_synchronized()
             old_img_b = img.shape[0]
             old_img_h = img.shape[2]
