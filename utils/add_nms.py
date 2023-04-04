@@ -1,6 +1,7 @@
 import numpy as np
 import onnx
 from onnx import shape_inference
+import onnxmltools
 from utils.general import check_requirements
 try:
     check_requirements('onnx_graphsurgeon')
@@ -10,23 +11,19 @@ except Exception as e:
 
 import logging
 
-LOGGER = logging.getLogger(__name__)
-
 
 class RegisterNMS(object):
-    def __init__(
-        self,
-        onnx_model_path: str,
-        precision: str = "fp32",
-    ):
+    def __init__(self, logger, onnx_model_path: str, precision: str = "fp32", prefix=''):
 
         self.graph = gs.import_onnx(onnx.load(onnx_model_path))
-        assert self.graph
-        LOGGER.info("ONNX graph created successfully")
+        assert self.graph, 'grap must not empty'
         # Fold constants via ONNX-GS that PyTorch2ONNX may have missed
         self.graph.fold_constants()
         self.precision = precision
         self.batch_size = 1
+        self.logger = logger
+        self.prefix = prefix
+        self.logger.info(f"{prefix} graph created successfully")
 
     def infer(self):
         """
@@ -46,15 +43,13 @@ class RegisterNMS(object):
                 model = shape_inference.infer_shapes(model)
                 self.graph = gs.import_onnx(model)
             except Exception as e:
-                LOGGER.info(f"Shape inference could not be performed at this time:\n{e}")
+                self.logger.info(f"{self.prefix} Shape inference could not be performed at this time:\n{e}")
             try:
                 self.graph.fold_constants(fold_shapes=True)
-            except TypeError as e:
-                LOGGER.error(
-                    "This version of ONNX GraphSurgeon does not support folding shapes, "
-                    f"please upgrade your onnx_graphsurgeon module. Error:\n{e}"
-                )
-                raise
+            except TypeError as ex:
+                a = f"{self.prefix} This version of ONNX GraphSurgeon does not support folding shapes, " \
+                      f"please upgrade your onnx_graphsurgeon module. Error:\n{ex}"
+                self.logger.info(a)
 
             count_after = len(self.graph.nodes)
             if count_before == count_after:
@@ -71,14 +66,9 @@ class RegisterNMS(object):
         self.graph.cleanup().toposort()
         model = gs.export_onnx(self.graph)
         onnx.save(model, output_path)
-        LOGGER.info(f"Saved ONNX model to {output_path}")
+        self.logger.info(f"{self.prefix} saved ONNX model to {output_path}")
 
-    def register_nms(
-        self,
-        *,
-        score_thresh: float = 0.25,
-        nms_thresh: float = 0.45,
-        detections_per_img: int = 100,):
+    def register_nms(self, *, score_thresh: float = 0.25, nms_thresh: float = 0.45, detections_per_img: int = 100,):
         """
         Register the ``EfficientNMS_TRT`` plugin node.
         NMS expects these shapes for its input tensors:
@@ -122,13 +112,12 @@ class RegisterNMS(object):
         # Create the NMS Plugin node with the selected inputs. The outputs of the node will also
         # become the final outputs of the graph.
         self.graph.layer(op=op, name="batched_nms", inputs=op_inputs, outputs=op_outputs, attrs=attrs)
-        LOGGER.info(f"Created NMS plugin '{op}' with attributes: {attrs}")
+        self.logger.info(f"{self.prefix} created NMS plugin '{op}' with attributes: \n{attrs}")
 
         self.graph.outputs = op_outputs
-
         self.infer()
 
-    def save(self, output_path):
+    def save(self, output_path, onnx_MetaData=None):
         """
         Save the ONNX model to the given location.
         Args:
@@ -137,5 +126,12 @@ class RegisterNMS(object):
         """
         self.graph.cleanup().toposort()
         model = gs.export_onnx(self.graph)
-        onnx.save(model, output_path)
-        LOGGER.info(f"Saved ONNX model to {output_path}")
+        if onnx_MetaData:
+            for index, key in enumerate(onnx_MetaData):
+                metadata = model.metadata_props.add()
+                metadata.key = key
+                metadata.value = str(onnx_MetaData[key])
+            onnxmltools.utils.save_model(model, output_path)
+        else:
+            onnx.save(model, output_path)
+        self.logger.info(f"{self.prefix} saved ONNX model to {output_path}")

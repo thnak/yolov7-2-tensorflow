@@ -543,28 +543,28 @@ class Model(nn.Module):
         self.reparam = False
         self.inplace = self.yaml.get('inplace', True)
         self.use_anchor = False
+        self.use_anchor = True
         # Build strides, anchors
         m = self.model[-1]  # Detect()
         m.inplace = self.inplace
-        s = 256
+        s = 1024  # scale it up for large shape
+        inputSampleShape = [1024]*2
         if isinstance(m, (Detect, IDetect)):
-            m.stride = torch.tensor([s / x.shape[-2] for x in self.forward(torch.zeros(1, ch, s, s))])  # forward
+            m.stride = torch.tensor([s / x.shape[-2] for x in self.forward(torch.zeros(1, ch, *inputSampleShape))])  # forward
             check_anchor_order(m)
             m.anchors /= m.stride.view(-1, 1, 1)
             self.stride = m.stride
             self._initialize_biases()  # only run once
-            self.use_anchor = True
 
         elif isinstance(m, IAuxDetect):
-            m.stride = torch.tensor([s / x.shape[-2] for x in self.forward(torch.zeros(1, ch, s, s))[:4]])  # forward
+            m.stride = torch.tensor([s / x.shape[-2] for x in self.forward(torch.zeros(1, ch, *inputSampleShape))[:4]])  # forward
             check_anchor_order(m)
             m.anchors /= m.stride.view(-1, 1, 1)
             self.stride = m.stride
             self._initialize_aux_biases()  # only run once
-            self.use_anchor = True
 
         elif isinstance(m, (V6Detect, IV6Detect)):
-            m.stride = torch.tensor([s / x.shape[-2] for x in self.forward(torch.zeros(1, ch, s, s))[0]])  # forward
+            m.stride = torch.tensor([s / x.shape[-2] for x in self.forward(torch.zeros(1, ch, *inputSampleShape))[0]])  # forward
             self.stride = m.stride
             m.bias_init()
             self.use_anchor = False

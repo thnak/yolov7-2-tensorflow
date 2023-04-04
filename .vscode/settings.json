@@ -1,3 +1,0 @@
-{
-    "cmake.sourceDirectory": "${workspaceFolder}/TensorRT-For-YOLO-Series-main/cpp/end2end"
-}

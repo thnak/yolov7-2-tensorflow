@@ -133,7 +133,7 @@ if __name__ == '__main__':
 
         if opt.include_nms:
             model.model[-1].include_nms = True
-            del y
+            y = None
         filenames = []
         # TorchScript export
         if torchScript:
@@ -225,7 +225,7 @@ if __name__ == '__main__':
                 x = 'TensorRT' if not opt.max_hw else 'ONNXRUNTIME'
                 logging.info(f'{prefix} Starting export end2end model for {colorstr(x)}')
                 model = End2End(model, opt.topk_all, opt.iou_thres,
-                                opt.conf_thres, max(input_shape[1:]), map_device, len(labels))
+                                opt.conf_thres, max(input_shape[1:]) if opt.max_hw else None, map_device, len(labels))
                 if opt.end2end and not opt.max_hw:
                     output_names = ['num_dets', 'det_boxes',
                                     'det_scores', 'det_classes']
@@ -284,6 +284,7 @@ if __name__ == '__main__':
             # onnx_model = onnx.load(f)  # load onnx model
             onnx.checker.check_model(onnx_model)  # check onnx model
             logging.info(f'{prefix} writing metadata for model...')
+
             onnx_MetaData = {'model_infor': model_Gflop,
                              'export_gitstatus': gitstatus,
                              'best_fitness': best_fitness,
@@ -311,15 +312,16 @@ if __name__ == '__main__':
             onnxmltools.utils.save_model(onnx_model, f)
             logging.info(f'{prefix} export success✅, saved as {f}')
 
-            if opt.include_nms:
+            if opt.include_nms and not opt.end2end:
                 logging.info(
-                    f'{prefix} Registering NMS plugin for ONNX...')
+                    f'{prefix} Registering NMS plugin for ONNX TRT...')
                 from utils.add_nms import RegisterNMS
-                mo = RegisterNMS(f)
-                mo.register_nms()
-                mo.save(f)
-                logging.info(
-                    f'{prefix} registering NMS plugin for ONNX success✅ {f}')
+                mo = RegisterNMS(logger=logging,
+                                 onnx_model_path=f,
+                                 precision='fp16' if img.dtype == torch.float16 else 'fp32', prefix=prefix)
+                mo.register_nms(score_thresh=opt.conf_thres, nms_thresh=opt.iou_thres, detections_per_img=opt.topk_all)
+                mo.save(f, onnx_MetaData=onnx_MetaData)
+                logging.info(f'{prefix} registering NMS plugin for ONNX success✅ {f}')
             filenames.append(f)
 
         if openVINO:
