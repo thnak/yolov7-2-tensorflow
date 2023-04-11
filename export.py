@@ -372,7 +372,6 @@ if __name__ == '__main__':
         if tensorFlowjs:
             prefix = colorstr('TensorFlow.js:')
             try:
-                check_requirements('tensorflowjs')
                 from tools.auxexport import export_tfjs
 
                 outputpath = export_tfjs(file_=weight,

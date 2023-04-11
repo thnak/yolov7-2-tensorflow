@@ -26,12 +26,15 @@ np.set_printoptions(linewidth=320, formatter={'float_kind': '{:11.5g}'.format}) 
 pd.options.display.max_columns = 10
 # cv2.setNumThreads(0)  # prevent OpenCV from multithreading (incompatible with PyTorch DataLoader)
 # os.environ['NUMEXPR_MAX_THREADS'] = str(os.cpu_count())  # NumExpr max threads
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+
 FILE = Path(__file__).resolve()
 ROOT = FILE.parents[1]  # YOLOv5 root directory
 TQDM_BAR_FORMAT = '{l_bar}{bar:10}{r_bar}'  # tqdm bar format
 ONNX_OPSET = [11, 12, 13, 14, 15, 16, 17]
 ONNX_OPSET_TARGET = ONNX_OPSET
 CUDA = torch.cuda.is_available()
+
 
 def set_logging(rank=-1, filename=None, filemode=None):
     logging.basicConfig(

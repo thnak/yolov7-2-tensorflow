@@ -46,7 +46,7 @@ psutil~=5.9.4
 
 Pillow==9.4.0
 onnx~=1.13.1
-torchvision==0.15.1
+# torchvision==0.15.1
 thop~=0.1.1.post2209072238
-tensorflow==2.12.0
-keras==2.12.0
+# tensorflow
+# keras
