@@ -95,18 +95,17 @@ class TRT_NMS(torch.autograd.Function):
     """TensorRT NMS operation"""
 
     @staticmethod
-    def forward(
-            ctx,
-            boxes,
-            scores,
-            background_class=-1,
-            box_coding=1,
-            iou_threshold=0.45,
-            max_output_boxes=100,
-            plugin_version="1",
-            score_activation=0,
-            score_threshold=0.25,
-    ):
+    def forward(ctx,
+                boxes,
+                scores,
+                background_class=-1,
+                box_coding=1,
+                iou_threshold=0.45,
+                max_output_boxes=100,
+                plugin_version="1",
+                score_activation=0,
+                score_threshold=0.25,
+                ):
         batch_size, num_boxes, num_classes = scores.shape
         num_det = torch.randint(0, max_output_boxes, (batch_size, 1), dtype=torch.int32)
         det_boxes = torch.randn(batch_size, max_output_boxes, 4)
@@ -179,7 +178,7 @@ class ONNX_ORT(nn.Module):
 
 
 class ONNX_TRT(nn.Module):
-    '''onnx module with TensorRT NMS operation.'''
+    """onnx module with TensorRT NMS operation."""
 
     def __init__(self, max_obj=100, iou_thres=0.45, score_thres=0.25, max_wh=None, device=None, n_classes=80):
         super().__init__()
@@ -254,7 +253,8 @@ def attempt_load(weights, map_location=None):
     # Compatibility updates
     for m in model.modules():
         if type(m) in [nn.Hardswish, nn.LeakyReLU, nn.ReLU, nn.ReLU6, nn.SiLU, nn.PReLU, nn.Hardsigmoid,
-                       nn.Hardswish, nn.Hardtanh, nn.Hardshrink, nn.ELU, nn.GELU, nn.Softmax, nn.Softsign, nn.Softplus, model]:
+                       nn.Hardswish, nn.Hardtanh, nn.Hardshrink, nn.ELU, nn.GELU, nn.Softmax, nn.Softsign, nn.Softplus,
+                       model]:
             m.inplace = True  # pytorch 1.7.0 compatibility
         elif type(m) is nn.Upsample:
             m.recompute_scale_factor = None  # torch 1.11.0 compatibility

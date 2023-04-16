@@ -161,7 +161,7 @@ def train(hyp, opt, tb_writer=None,
 
     p5_model = model.is_p5()
 
-    if not model.use_anchor:
+    if model.anchorFree:
         tag_results = list(tag_results)
         tag_results.remove('labels')
         tag_results = tuple(tag_results)
@@ -275,18 +275,22 @@ def train(hyp, opt, tb_writer=None,
     # Process 0
     if rank in [-1, 0]:
         if data_loader['val_dataloader'] is None:
-            val_dataloader = create_dataloader(val_path,
-                                               imgsz_test,
-                                               batch_size * 2, gs, opt,
-                                               hyp=hyp,
-                                               cache=opt.cache_images[1] if (
-                                                       opt.cache_images[1] and not opt.notest) else 'no',
-                                               rect=opt.rect,
-                                               shuffle=False if opt.rect else True,
-                                               rank=-1,
-                                               world_size=opt.world_size,
-                                               workers=opt.workers,
-                                               pad=0.5, prefix=colorstr('val: '))[0]
+            if train_path == val_path:
+                val_dataloader = dataloader
+                logger.info(colorstr('val: ')+"inherit from train")
+            else:
+                val_dataloader = create_dataloader(val_path,
+                                                   imgsz_test,
+                                                   batch_size * 2, gs, opt,
+                                                   hyp=hyp,
+                                                   cache=opt.cache_images[1] if (
+                                                           opt.cache_images[1] and not opt.notest) else 'no',
+                                                   rect=opt.rect,
+                                                   shuffle=False if opt.rect else True,
+                                                   rank=-1,
+                                                   world_size=opt.world_size,
+                                                   workers=opt.workers,
+                                                   pad=0.5, prefix=colorstr('val: '))[0]
             data_loader['val_dataloader'] = val_dataloader
         else:
             val_dataloader = data_loader['val_dataloader']
@@ -308,7 +312,7 @@ def train(hyp, opt, tb_writer=None,
             else:
                 test_dataloader = data_loader['test_dataloader']
         else:
-            logger.info(colorstr('val and test is the same things or test path does not exists!'))
+            logger.info(colorstr("val: ")+'val and test is the same things or test path does not exists!')
 
         if not opt.resume:
             labels = np.concatenate(dataset.labels, 0)
@@ -320,7 +324,7 @@ def train(hyp, opt, tb_writer=None,
 
             # Anchors
             if not opt.noautoanchor:
-                if model.use_anchor:
+                if not model.anchorFree:
                     check_anchors(dataset, model=model,
                                   thr=hyp['anchor_t'], imgsz=imgsz, device='cpu')
             model.half().float() if device.type == 'xla' else model.to(device).half().float()
@@ -353,12 +357,12 @@ def train(hyp, opt, tb_writer=None,
     scheduler.last_epoch = start_epoch - 1  # do not move
     scaler = GradScaler()
 
-    hyp['loss_ota'] = 0 if not model.use_anchor else hyp.get('loss_ota', 0)
+    hyp['loss_ota'] = 0 if model.anchorFree else hyp.get('loss_ota', 0)
     use_loss_ota = 'loss_ota' not in hyp or hyp['loss_ota'] >= 1 or not model.is_p5()
     if use_loss_ota:
-        compute_loss = (ComputeLossOTA(model) if p5_model else ComputeLossAuxOTA(model)) if model.use_anchor else None
+        compute_loss = (ComputeLossOTA(model) if p5_model else ComputeLossAuxOTA(model)) if not model.anchorFree else None
     else:
-        compute_loss = ComputeLoss(model) if model.use_anchor else ComputeLoss_AnchorFree(model)
+        compute_loss = ComputeLoss(model) if not model.anchorFree else ComputeLoss_AnchorFree(model)
     compute_loss_val = ComputeLoss(model)
     logger.info(f'Image sizes {imgsz} train, {imgsz_test} test\n'
                 f'Using {dataloader.num_workers} dataloader workers\n'
@@ -387,7 +391,7 @@ def train(hyp, opt, tb_writer=None,
                 if rank != 0:
                     dataset.indices = indices.cpu().numpy()
 
-        mloss = torch.zeros(4 if model.use_anchor else 3, device=device)  # mean losses
+        mloss = torch.zeros(4 if not model.anchorFree else 3, device=device)  # mean losses
         if rank != -1:
             dataloader.sampler.set_epoch(epoch)
         pbar = enumerate(dataloader)
@@ -485,7 +489,7 @@ def train(hyp, opt, tb_writer=None,
         if rank in [-1, 0]:
             # mAP
             ema.update_attr(
-                model, include=['yaml', 'nc', 'hyp', 'gr', 'names', 'stride', 'class_weights', 'best_fitness', 'input_shape', 'model_version', 'total_image', 'use_anchor'])
+                model, include=['yaml', 'nc', 'hyp', 'gr', 'names', 'stride', 'class_weights', 'best_fitness', 'input_shape', 'model_version', 'total_image', 'anchorFree'])
             final_epoch = epoch + 1 == epochs
             if not opt.notest or final_epoch:  # Calculate mAP
                 wandb_logger.current_epoch = epoch + 1
@@ -545,7 +549,7 @@ def train(hyp, opt, tb_writer=None,
                 if rank in [-1, 0]:
                     ema.update_attr(model,
                                     include=['yaml', 'nc', 'hyp', 'gr', 'names', 'stride', 'class_weights', 'best_fitness',
-                                             'input_shape', 'model_version', 'total_image', 'use_anchor'])
+                                             'input_shape', 'model_version', 'total_image', 'anchorFree'])
 
                 ckpt = {
                     'epoch': epoch,

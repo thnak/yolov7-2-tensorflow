@@ -542,8 +542,7 @@ class Model(nn.Module):
         self.input_shape = [-1, -1, -1]
         self.reparam = False
         self.inplace = self.yaml.get('inplace', True)
-        self.use_anchor = False
-        self.use_anchor = True
+        self.anchorFree = False
         # Build strides, anchors
         m = self.model[-1]  # Detect()
         m.inplace = self.inplace
@@ -567,7 +566,7 @@ class Model(nn.Module):
             m.stride = torch.tensor([s / x.shape[-2] for x in self.forward(torch.zeros(1, ch, *inputSampleShape))[0]])  # forward
             self.stride = m.stride
             m.bias_init()
-            self.use_anchor = False
+            self.anchorFree = True
 
         # Init weights, biases
         initialize_weights(self)
@@ -708,15 +707,33 @@ class Model(nn.Module):
         return model_info(self, verbose, img_size)
 
     def is_p5(self, nodes=None):
+        if 'p5' in self.yaml:
+            return eval(self.yaml['p5']) if isinstance(self.yaml['p5'], str) else self.yaml['p5']
         if not nodes:
             nodes = len(self.yaml['backbone']) + len(self.yaml['head']) - 1
-        elif 'p5' in self.yaml:
-            return eval(self.yaml['p5']) if isinstance(self.yaml['p5'], str) else self.yaml['p5']
         out = nodes in [77, 105, 121]
         return out
 
     def num_nodes(self):
         return len(self.yaml['backbone']) + len(self.yaml['head']) - 1
+
+
+class iOSModel(torch.nn.Module):
+    def __init__(self, model, im):
+        super().__init__()
+        b, c, h, w = im.shape  # batch, channel, height, width
+        self.model = model
+        self.nc = model.nc  # number of classes
+        if w == h:
+            self.normalize = 1. / w
+        else:
+            self.normalize = torch.tensor([1. / w, 1. / h, 1. / w, 1. / h])  # broadcast (slower, smaller)
+            # np = model(im)[0].shape[1]  # number of points
+            # self.normalize = torch.tensor([1. / w, 1. / h, 1. / w, 1. / h]).expand(np, 4)  # explicit (faster, larger)
+
+    def forward(self, x):
+        xywh, conf, cls = self.model(x)[0].squeeze().split((4, 1, self.nc), 1)
+        return cls * conf, xywh * self.normalize  # confidence (3780, 80), coordinates (3780, 4)
 
 
 class ONNX_Engine(object):
@@ -839,14 +856,16 @@ class ONNX_Engine(object):
         print(f'{self.prefix}\n{vars(self)}')
 
     def preproc_for_infer(self, im):
-        im = torch.from_numpy(im).to(self.device)
-        im = im.half() if self.half else im.float()  # uint8 to fp16/32
+        # im = torch.from_numpy(im).to(self.device)
+        im = im.astype(np.float16) if self.half else im.astype(np.float32)
+        # im = im.half() if self.half else im.float()  # uint8 to fp16/32
         im /= 255.0  # 0 - 255 to 0.0 - 1.0
-        if im.ndimension() == 3:
-            im = im.unsqueeze(0)
+        if im.ndim == 3:
+            # im = im.expand_dims(0)
+            im = np.expand_dims(im, 0)
         if len(im.shape) == 3:
             im = im[None]  # expand for batch dim
-        im = im.cpu().numpy()
+        # im = im.cpu().numpy()
         return im
 
     @staticmethod
@@ -892,13 +911,13 @@ class ONNX_Engine(object):
         else:
             dwdhs = [dwdh]
             ratios = [ratio]
-
         for index, (batch_id, x0, y0, x1, y1, cls_id, score) in enumerate(outputs):
-            if image[int(batch_id)] is None:
-                image[int(batch_id)] = ori_images[int(batch_id)]
+            batch_id = int(batch_id)
+            if image[batch_id] is None:
+                image[batch_id] = ori_images[batch_id]
             box = np.array([x0, y0, x1, y1])
-            box -= np.array(dwdhs[int(batch_id)] * 2)
-            box /= ratios[int(batch_id)][0]
+            box -= np.array(dwdhs[batch_id] * 2)
+            box /= ratios[batch_id][0]
             box = box.round().astype(np.int32).tolist()
             cls_id = int(cls_id)
             score = round(float(score), 2)
@@ -906,9 +925,9 @@ class ONNX_Engine(object):
                 continue
             name = self.names[cls_id]
             name += ' ' + str(score)
-            bbox[int(batch_id)] = self.xyxy2xywh(box, image[int(batch_id)].shape[:2])
+            bbox[batch_id] = self.xyxy2xywh(box, image[batch_id].shape[:2])
             txtcolor, bboxcolor = bfc.getval(index=cls_id)
-            image[int(batch_id)] = plot_one_box(box, image[int(batch_id)],
+            image[batch_id] = plot_one_box(box, image[batch_id],
                                                 txtColor=txtcolor,
                                                 bboxColor=bboxcolor, label=name, frameinfo=[])
 

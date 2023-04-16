@@ -15,7 +15,7 @@ import os
 import threading
 import logging
 
-from utils.ffmpeg_ import  FFMPEG_recorder
+from utils.ffmpeg_ import FFMPEG_recorder
 
 set_logging()
 logger = logging.getLogger(__name__)
@@ -83,7 +83,7 @@ def detect(opt=None):
             old_img_h = img.shape[2]
             old_img_w = img.shape[3]
             for i in range(3):
-                model(img, augment=opt.augment)[0]
+                var = model(img, augment=opt.augment)[0]
             print(f'{time_synchronized() - twrm:0.3f} warm up finished')
         # Inference
         t1 = time_synchronized()

@@ -28,8 +28,8 @@ if __name__ == '__main__':
     parser.add_argument('--batch-size', type=int, default=1, help='batch size')
     parser.add_argument('--dynamic', action='store_true', help='dynamic ONNX axes')
     parser.add_argument('--dynamic-batch', action='store_true', help='dynamic batch onnx for tensorrt and onnx-runtime')
-    parser.add_argument('--include', nargs='+', type=str, default='', help='export format')
-    parser.add_argument('--end2end', action='store_true', help='export end2end onnx (/end2end/EfficientNMS_TRT)')
+    parser.add_argument('--include', nargs='+', type=str, default='onnx', help='export format')
+    parser.add_argument('--end2end', action='store_true', help='export end2end onnx for ORT or TRT)')
     parser.add_argument('--max-hw', '--ort', action='store_true', default=None,
                         help='end2end onnxruntime')
     parser.add_argument('--topk-all', type=int, default=100, help='topk objects for every images')
@@ -117,12 +117,12 @@ if __name__ == '__main__':
 
         model_Gflop = model.info(verbose=False, img_size=input_shape)
         logging.info(model_Gflop)
-        model.model[-1].export = coreML  # set Detect() layer grid export, for coreml export set to True
+        model.model[-1].export = True if coreML and not opt.end2end else False  # set Detect() layer grid export, for coreml export set to True
         y = model(img)  # dry run
 
         if device.type in ['cuda'] and opt.fp16:
-            img = img.half()
-            model = model.half()
+            img = img.to(device).half()
+            model = model.to(device).half()
         else:
             if opt.fp16:
                 logging.warning(f'Export with fp16 only support for CUDA device, yours {device.type}')
@@ -153,12 +153,14 @@ if __name__ == '__main__':
             try:
                 prefix = colorstr('CoreML:')
                 check_requirements('coremltools')
+                from models.yolo import iOSModel
                 import coremltools as ct
 
-                logging.info(
-                    f'\n{prefix} Starting CoreML export with coremltools {ct.__version__}')
-                ct_model = ct.convert(ts, inputs=[ct.ImageType(
-                    'image', shape=img.shape, scale=1 / 255.0, bias=[0, 0, 0])])
+                logging.info(f'\n{prefix} Starting CoreML export with coremltools {ct.__version__}')
+                if opt.end2end:
+                    ts = iOSModel(model, img)
+                    ts = torch.jit.trace(ts, img, strict=False)
+                ct_model = ct.convert(ts, inputs=[ct.ImageType('image', shape=img.shape, scale=1 / 255.0, bias=[0, 0, 0])])
                 bits, mode = (8, 'kmeans_lut') if opt.int8 else (
                     16, 'linear') if opt.fp16 else (32, None)
                 if bits < 32:
@@ -274,6 +276,7 @@ if __name__ == '__main__':
                     check_requirements('onnxsim')
                     import onnxsim
                     logging.info(f'{prefix} Starting to simplify ONNX...')
+                    logging.info(f'{prefix} Warning simplify will export with graph shape, its good for visualize the network, but can be worst wit ORT')
                     onnx_model, check = onnxsim.simplify(onnx_model)
                     assert check, 'assert check failed'
                 except Exception as e:

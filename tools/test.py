@@ -106,7 +106,7 @@ def test(data,
     confusion_matrix = ConfusionMatrix(nc=nc)
     names = {k: v for k, v in enumerate(model.names if hasattr(model, 'names') else model.module.names)}
     coco91class = coco80_to_coco91_class()
-    if model.use_anchor:
+    if not model.anchorFree:
         s = ('%22s' + '%11s' * 6) % ('Class', 'Images', 'Labels', 'P', 'R', 'mAP@.5', 'mAP@.5:.95')
         pf = '%22s' + '%11i' * 2 + '%11.3g' * 4  # print format
     else:
