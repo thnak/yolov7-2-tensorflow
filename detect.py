@@ -30,7 +30,7 @@ def detect(opt=None):
     save_dir = Path(increment_path(Path(opt.project) / opt.name,
                     exist_ok=opt.exist_ok))  # increment run
     (save_dir / 'labels' if save_txt else save_dir).mkdir(parents=True, exist_ok=True)  # make dir
-    
+    os.makedirs(str(save_dir / 'labels'), exist_ok=True)
     # Initialize
     device = select_device(opt.device)[0]
     half = device.type in ['cuda', 'privateuseone']  # half precision only supported on CUDA
@@ -46,7 +46,6 @@ def detect(opt=None):
 
     if half:
         model.half()  # to FP16
-
 
     vid_path = None
     if source_type == 'stream':
@@ -101,14 +100,12 @@ def detect(opt=None):
                 p, s,  im0, frame = path[i], '%g: ' % i, im0s[i].copy(), dataset.count
             else:
                 p, im0, frame = path, im0s, getattr(dataset, 'frame', 0)
-            s += '%gx%g ' % img.shape[2:] 
+            s = s.get('string', '')
+            s += f'{list(img.shape[2:])} '
             imOrigin = im0.copy()
             p = Path(p)  # to Path
-            save_path = str(save_dir / p.name) 
-
-            os.makedirs(str(save_dir / 'labels'), exist_ok=True)
+            save_path = str(save_dir / p.name)
             txt_path = os.path.join(save_dir, 'labels', p.stem) if dataset.mode == 'image' else os.path.join(save_dir, 'labels', p.stem+f'_{frame}')
-
             # normalization gain whwh
             gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]
             if len(det):

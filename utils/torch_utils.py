@@ -520,7 +520,7 @@ class TracedModel(nn.Module):
         self.stride = model.stride
         self.names = model.names
         self.model = model
-        self.anchorFree = model.anchorFree
+        self.anchorFree = model.anchorFree if hasattr(model, "anchorFree") else False
 
         self.model = revert_sync_batchnorm(self.model)
         self.model.to('cpu')
