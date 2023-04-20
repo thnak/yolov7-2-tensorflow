@@ -67,30 +67,6 @@ class ReOrg(nn.Module):
         return out
 
 
-class mmy(nn.Module):
-    def __init__(self, stride=2):
-        super().__init__()
-        self.__stride__ = 2**stride
-
-    def forward(self, inputs):
-        b, c, h, w = inputs.shape
-        grid_w = w // self.__stride__
-        grid_h = h // self.__stride__
-        imgs = []
-        for x in range(self.__stride__):
-            for y in range(self.__stride__):
-                start_h = x * grid_h
-                start_w = y * grid_w
-                end_h = (x + 1) * grid_h
-                end_w = (y + 1) * grid_w
-                end_h = end_h if end_h <= h else h
-                end_w = end_w if end_w <= w else w
-
-                img_ = inputs[ :, :, start_h:end_h, start_w:end_w]
-                imgs.append(img_)
-        return torch.cat(imgs, 1)
-
-
 class Concat(nn.Module):
     def __init__(self, dimension=1):
         super(Concat, self).__init__()

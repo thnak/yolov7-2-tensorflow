@@ -346,7 +346,7 @@ def model_info(model, verbose=False, img_size=640):
         size_in_mem2 = gb2mb(numpy_img.nbytes)
         fs = f'{flops} Gflops\n'  # 640x640 GFLOPS
         fs += f'               Model size (in memory): {size_in_mem} (FP32)\n'
-        fs += f'               Anchor Free: {model.anchorFree}\n'
+        fs += f'               Anchor Free: {model.anchorFree if hasattr(model, "anchorFree") else False}\n'
         fs += f'               Version: {model.model_version if hasattr(model, "model_version") else "?"}\n'
         fs += f'               Best fitness: {model.best_fitness if hasattr(model, "best_fitness") else "unknown"}\n'
         fs += f'               Dataset: {str(model.total_image[-1])+" images" if hasattr(model, "total_image") else "unknown"}\n'

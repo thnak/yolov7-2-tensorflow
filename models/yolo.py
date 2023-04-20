@@ -1392,8 +1392,7 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
             c2 = ch[f] * args[0] ** 2
         elif m is Expand:
             c2 = ch[f] // args[0] ** 2
-        elif m is mmy:
-            c2 = ch[f] * 2 ** args[0]
+
         else:
             c2 = ch[f]
         # assert c2 < 1024, f'torch 1.13.1 max channel size is 1024, yours {torch.__version__}'
