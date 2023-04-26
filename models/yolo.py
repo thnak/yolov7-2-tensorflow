@@ -796,7 +796,6 @@ class ONNX_Engine(object):
         #         'enable_cuda_graph': True}),
         #     'CPUExecutionProvider'] if torch.cuda.is_available() else self.runTime.get_available_providers()
         self.providers = self.runTime.get_available_providers()
-
         session_opt = self.runTime.SessionOptions()
         session_opt.enable_profiling = False
         session_opt.log_severity_level = 3
@@ -851,8 +850,8 @@ class ONNX_Engine(object):
         if im.ndim == 3:
             # im = im.expand_dims(0)
             im = np.expand_dims(im, 0)
-        if len(im.shape) == 3:
-            im = im[None]  # expand for batch dim
+        # if len(im.shape) == 3:
+        #     im = im[None]  # expand for batch dim
         # im = im.cpu().numpy()
         return im
 
@@ -867,7 +866,7 @@ class ONNX_Engine(object):
     def infer(self, im):
         y = self.session.run(self.output_names, {self.input_names[0]: im})
         if self.is_end2end:
-            return y
+            return y[0]
         else:
             if isinstance(y, (list, tuple)):
                 self.prediction = self.from_numpy(y[0]) if len(
@@ -889,16 +888,25 @@ class ONNX_Engine(object):
         y[3] = (x[3] - x[1]) / dim[0]  # height
         return y
 
-    def end2end(self, outputs, ori_images, dwdh, ratio, fps, bfc, frames=0):
+    def end2end(self, outputs, ori_images, dwdh, ratio):
+        """
+
+        @param outputs: outputs of prediction
+        @param ori_images:
+        @param dwdh:
+        @param ratio:
+        @return:
+            list: [{"batch_id": batch_id, "bbox": bbox, "box": box, "id": cls_id, "name": name, "score": score},...]
+        """
         image = [None] * len(ori_images)
         bbox = [None] * len(ori_images)
-        txtcolor2, bboxcolor2 = bfc.getval(index=0)
         if isinstance(dwdh, list):
             dwdhs = dwdh
             ratios = ratio
         else:
             dwdhs = [dwdh]
             ratios = [ratio]
+        output = []
         for index, (batch_id, x0, y0, x1, y1, cls_id, score) in enumerate(outputs):
             batch_id = int(batch_id)
             if image[batch_id] is None:
@@ -914,28 +922,12 @@ class ONNX_Engine(object):
             name = self.names[cls_id]
             name += ' ' + str(score)
             bbox[batch_id] = self.xyxy2xywh(box, image[batch_id].shape[:2])
-            txtcolor, bboxcolor = bfc.getval(index=cls_id)
-            image[batch_id] = plot_one_box(box, image[batch_id],
-                                                txtColor=txtcolor,
-                                                bboxColor=bboxcolor, label=name, frameinfo=[])
+            output.append({"batch_id": batch_id, "bbox": bbox, "box": box, "id": cls_id, "name": name, "score": score})
+        return output
 
-        for index in range(len(image)):
-            if image[index] is None:
-                image[index] = plot_one_box(None, ori_images[index],
-                                            txtColor=txtcolor2,
-                                            bboxColor=bboxcolor2, label=None,
-                                            frameinfo=[f'FPS: {fps}',
-                                                       f'Total object: {int(len(outputs) / len(ori_images))}', frames])
-            else:
-                image[index] = plot_one_box(None, image[index],
-                                            txtColor=txtcolor2,
-                                            bboxColor=bboxcolor2, label=None,
-                                            frameinfo=[f'FPS: {fps}',
-                                                       f'Total object: {int(len(outputs) / len(ori_images))}', frames])
-        return image, bbox
 
     def warmup(self, num=10):
-        imgsz = (self.batch_size, self.session.get_inputs()[0].shape[1], self.imgsz[0], self.imgsz[1])
+        imgsz = (self.batch_size, *self.session.get_inputs()[0].shape[1:])
         im = np.ones(imgsz, dtype=np.float16 if self.half else np.float32)
         if self.session.get_providers()[0] in ['CUDAExecutionProvider', 'TensorrtExecutionProvider',
                                                'DmlExecutionProvider']:

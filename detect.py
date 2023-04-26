@@ -4,17 +4,20 @@ from pathlib import Path
 import cv2
 import torch
 import torch.backends.cudnn as cudnn
+
+import models.yolo
 from models.experimental import attempt_load
 from models.yolo import TensorRT_Engine
 from utils.datasets import LoadStreams, LoadImages, LoadScreenshots, check_data_source
 from utils.general import check_img_size, check_requirements, non_max_suppression, \
-    scale_coords, xyxy2xywh, strip_optimizer, set_logging, increment_path, check_git_status, BackgroundForegroundColors, colorstr
+    scale_coords, xyxy2xywh, strip_optimizer, set_logging, increment_path, check_git_status, BackgroundForegroundColors, \
+    colorstr
 from utils.plots import plot_one_box
 from utils.torch_utils import select_device, time_synchronized, TracedModel
 import os
 import threading
 import logging
-
+from queue import Queue
 from utils.ffmpeg_ import FFMPEG_recorder
 
 set_logging()
@@ -28,7 +31,7 @@ def detect(opt=None):
 
     # Directories
     save_dir = Path(increment_path(Path(opt.project) / opt.name,
-                    exist_ok=opt.exist_ok))  # increment run
+                                   exist_ok=opt.exist_ok))  # increment run
     (save_dir / 'labels' if save_txt else save_dir).mkdir(parents=True, exist_ok=True)  # make dir
     os.makedirs(str(save_dir / 'labels'), exist_ok=True)
     # Initialize
@@ -52,7 +55,7 @@ def detect(opt=None):
         cudnn.benchmark = True  # set True to speed up constant image size inference
         dataset = LoadStreams(source, img_size=imgsz, stride=stride, auto=True)
     elif source_type == 'screen':
-        dataset = LoadScreenshots(source=source, img_size=imgsz, stride=model.stride, auto= True)
+        dataset = LoadScreenshots(source=source, img_size=imgsz, stride=model.stride, auto=True)
     else:
         dataset = LoadImages(source, img_size=imgsz, stride=stride, auto=True)
 
@@ -76,7 +79,8 @@ def detect(opt=None):
         if img.ndimension() == 3:
             img = img.unsqueeze(0)
         # Warmup
-        if device.type in ['cuda', 'privateuseone'] and (old_img_b != img.shape[0] or old_img_h != img.shape[2] or old_img_w != img.shape[3]):
+        if device.type in ['cuda', 'privateuseone'] and (
+                old_img_b != img.shape[0] or old_img_h != img.shape[2] or old_img_w != img.shape[3]):
             twrm = time_synchronized()
             old_img_b = img.shape[0]
             old_img_h = img.shape[2]
@@ -86,7 +90,7 @@ def detect(opt=None):
             print(f'{time_synchronized() - twrm:0.3f} warm up finished')
         # Inference
         t1 = time_synchronized()
-        
+
         pred = model(img, augment=opt.augment)[0]
         t2 = time_synchronized()
 
@@ -97,7 +101,7 @@ def detect(opt=None):
         t4 = time_synchronized()
         for i, det in enumerate(pred):
             if source_type == 'stream':
-                p, s,  im0, frame = path[i], '%g: ' % i, im0s[i].copy(), dataset.count
+                p, s, im0, frame = path[i], '%g: ' % i, im0s[i].copy(), dataset.count
             else:
                 p, im0, frame = path, im0s, getattr(dataset, 'frame', 0)
             s = s.get('string', '')
@@ -105,7 +109,9 @@ def detect(opt=None):
             imOrigin = im0.copy()
             p = Path(p)  # to Path
             save_path = str(save_dir / p.name)
-            txt_path = os.path.join(save_dir, 'labels', p.stem) if dataset.mode == 'image' else os.path.join(save_dir, 'labels', p.stem+f'_{frame}')
+            txt_path = os.path.join(save_dir, 'labels', p.stem) if dataset.mode == 'image' else os.path.join(save_dir,
+                                                                                                             'labels',
+                                                                                                             p.stem + f'_{frame}')
             # normalization gain whwh
             gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]
             if len(det):
@@ -119,7 +125,7 @@ def detect(opt=None):
                     if save_txt:  # Write to file
                         xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
                         line = (cls, *xywh, conf) if opt.save_conf else (cls, *xywh)
-                        with open(os.path.join(txt_path+'.txt'), 'a') as f:
+                        with open(os.path.join(txt_path + '.txt'), 'a') as f:
                             f.write(('%g ' * len(line)).rstrip() % line + '\n')
                     if save_img or view_img > -1:
                         label = f'{names[int(cls)]} {conf:.2f}'
@@ -143,21 +149,21 @@ def detect(opt=None):
                 if dataset.mode == 'image':
                     cv2.imwrite(save_path, im0)
                     print(f"The image with the result is saved in: {save_path}")
-                else: 
+                else:
                     if vid_path != save_path:
                         vid_path = save_path
-                        
-                        if vid_cap: 
+
+                        if vid_cap:
                             fps = vid_cap.get(cv2.CAP_PROP_FPS)
                             w = int(vid_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
                             h = int(vid_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
                         else:
                             fps, w, h = 30, im0.shape[1], im0.shape[0]
-                            save_path += '.mp4'                        
-                        ffmpeg = FFMPEG_recorder(savePath=save_path,videoDimensions=(w,h),fps=fps)
+                            save_path += '.mp4'
+                        ffmpeg = FFMPEG_recorder(savePath=save_path, videoDimensions=(w, h), fps=fps)
                     ffmpeg.writeFrame(im0)
-                    ffmpeg.writeSubtitle(title=s,fps=fps)
-        print(f'{s}pre-proc {(time_synchronized() - t4):0.3f}s, infer: {round(tmInf,3)}, nms: {round(tmNms,3)}')
+                    ffmpeg.writeSubtitle(title=s, fps=fps)
+        print(f'{s}pre-proc {(time_synchronized() - t4):0.3f}s, infer: {round(tmInf, 3)}, nms: {round(tmNms, 3)}')
     if save_txt or save_img:
         s = f"\n{len(list(save_dir.glob('labels/*.txt')))} labels saved to {save_dir / 'labels'}" if save_txt else ''
         print(f"Results saved to {save_dir}{s}")
@@ -165,28 +171,29 @@ def detect(opt=None):
     if (save_img or opt.datacollection) and dataset.mode != 'image':
         ffmpeg.stopRecorder()
         ffmpeg.addSubtitle()
-        
-    print(f'Done. ({time_synchronized() - t0:.3f}s), avgInference {round(sum(avgTime[0])/len(avgTime[0]),3)}ms, avgNMS {round(sum(avgTime[1])/len(avgTime[1]),3)}ms')
 
-def detectTensorRT(tensorrtEngine,opt=None,save=''):
+    print(
+        f'Done. ({time_synchronized() - t0:.3f}s), avgInference {round(sum(avgTime[0]) / len(avgTime[0]), 3)}ms, avgNMS {round(sum(avgTime[1]) / len(avgTime[1]), 3)}ms')
+
+
+def detectTensorRT(tensorrtEngine, opt=None, save=''):
     source, weights, view_img, save_txt, imgsz, trace = opt.source, opt.weights, opt.view_img, opt.save_txt, opt.img_size, not opt.no_trace
-    save_img = not opt.nosave and not source.endswith('.txt') 
+    save_img = not opt.nosave and not source.endswith('.txt')
     webcam = check_data_source(source=source)
-    
-    
+
     pred = TensorRT_Engine(TensorRT_EnginePath=tensorrtEngine, confThres=opt.conf_thres, iouThres=opt.iou_thres)
     imgsz = pred.imgsz
     stride = 32
     names = pred.names
     nc = pred.nc
-    
+
     if webcam:
-        dataset = LoadStreams(source, img_size=imgsz, stride=stride, auto= False)
+        dataset = LoadStreams(source, img_size=imgsz, stride=stride, auto=False)
     else:
-        dataset = LoadImages(source, img_size=imgsz, stride=stride, auto= False)
-    
+        dataset = LoadImages(source, img_size=imgsz, stride=stride, auto=False)
+
     count = 0
-    
+
     for path, img, im0s, vid_cap, s in dataset:
         t1 = time_synchronized()
         img = pred.inference(im0s, end2end=True)
@@ -196,224 +203,180 @@ def detectTensorRT(tensorrtEngine,opt=None,save=''):
         if save_img:
             if dataset.mode == 'image':
                 pa = f'{str(save)}/image{count}.jpg'
-                count +=1
-                ret = cv2.imwrite(pa,img)
+                count += 1
+                ret = cv2.imwrite(pa, img)
                 print(f'saved as {pa}, ret: {ret}, exit: {os.path.exists(pa)}')
             else:
                 pass
     del pred, dataset
     if view_img > -1:
         cv2.destroyAllWindows()
-        
-        
-stopThread = False
 
-def inferWithDynamicBatch(enginePath,opt, save=''):
+
+def Thread1(dataset, que: Queue, preProcessing, isStream: bool):
+    for path, img, im0s, vid_cap, s, ratio, dwdh in dataset:
+        data = {}
+        if isStream:
+            for index in range(len(im0s)):
+                data["path"] = path[index]
+                data["img"] = preProcessing(img[index]).copy()
+                data["img0s"] = im0s[index]
+                data["vid_cap"] = vid_cap[index] if vid_cap else None
+                data["s"] = s
+                data["ratio"] = ratio[index]
+                data["dwdh"] = dwdh[index]
+                que.put(data)
+        else:
+            data["path"] = path
+            data["img"] = preProcessing(img).copy()
+            data["img0s"] = im0s
+            data["vid_cap"] = vid_cap if vid_cap else None
+            data["s"] = s
+            data["ratio"] = ratio
+            data["dwdh"] = dwdh
+            que.put(data)
+
+    que.put(None)
+
+
+def Thread2(que1: Queue, que2: Queue, concat, size: int):
+    datas = []
+    while True:
+        data = que1.get()
+        if data is None:
+            if len(datas):
+                img = [x['img'] for x in datas]
+                img = concat(img)
+                for x in datas:
+                    x["img"] = None
+                datas[0]["img"] = img
+                que2.put(datas)
+                datas = []
+            que2.put(None)
+            break
+
+        datas.append(data)
+        if len(datas) >= size:
+            img = [x['img'] for x in datas]
+            img = concat(img)
+            for x in datas:
+                x["img"] = None
+            datas[0]["img"] = img
+            que2.put(datas)
+            datas = []
+    que2.put(None)
+
+    print(f'thread 2 finished, time:')
+
+
+def Thread3(que2: Queue, que3: Queue, model: models.yolo.ONNX_Engine):
+    while True:
+        data = que2.get()
+        if data is None:
+            break
+        t1 = time_synchronized()
+        pred = model.infer(data[0]["img"])
+        t0 = time_synchronized()
+        data[0]["img"] = pred
+        que3.put(data)
+    que3.put(None)
+
+
+def Thread4(que3: Queue, model: models.yolo.ONNX_Engine):
+    t0 =time_synchronized()
+    while True:
+        data = que3.get()
+        if data is None:
+            break
+        pred = data[0]["img"]
+        ori = [x["img0s"] for x in data]
+        dwdhs = [x['dwdh'] for x in data]
+        ratios = [x['ratio'] for x in data]
+        pred = model.end2end(outputs=pred, ori_images=ori, dwdh=dwdhs, ratio=ratios)
+        # tt = time_synchronized()
+        for x in pred:
+            ori[x['batch_id']] = plot_one_box(x['box'], img=ori[x['batch_id']], label=f"{x['name']} {round(x['score'], 2)}")
+        # print(f'drawing time: {time_synchronized() - tt}')
+        for img in ori:
+            cv2.namedWindow("aa", cv2.WINDOW_NORMAL)
+            cv2.imshow("aa", img)
+            if cv2.waitKey(1) == "q":
+                break
+        t1 = time_synchronized()
+        fps = 1/((t1-t0)/len(ori))
+        print(f'thread 4 fps: {fps}FPS, ')
+        t0 = t1
+
+
+def inferWithDynamicBatch(enginePath, opt, save=''):
     source, weights, view_img, save_txt, imgsz, trace = opt.source, opt.weights, opt.view_img, opt.save_txt, opt.img_size, not opt.no_trace
-    save_img = not opt.nosave and not source.endswith('.txt') 
+    save_img = not opt.nosave and not source.endswith('.txt')
     source_type = check_data_source(source)
     prefix = colorstr('ONNX: ')
     from models.yolo import ONNX_Engine
-    
+
     model = ONNX_Engine(ONNX_EnginePath=enginePath, prefix=prefix, confThres=opt.conf_thres)
     imgsz = model.imgsz
     if source_type == 'stream':
-        # dataset = LoadStreams(source, img_size=imgsz, stride=model.stride, auto= model.rectangle)
-        dataset = LoadStreams(source, img_size=imgsz, stride=model.stride, auto= model.rectangle)
+        dataset = LoadStreams(source, img_size=imgsz, stride=model.stride, auto=model.rectangle)
     elif source_type == 'screen':
-        dataset = LoadScreenshots(source=source, img_size=imgsz, stride=model.stride, auto= model.rectangle)
+        dataset = LoadScreenshots(source=source, img_size=imgsz, stride=model.stride, auto=model.rectangle)
     else:
-        dataset = LoadImages(source, img_size=imgsz, stride=model.stride, auto= model.rectangle)
-        
-    BFC = BackgroundForegroundColors(names= model.names)
-    model.batch_size = opt.batch_size if model.batch_size == 0 else model.batch_size
-    t1_2_t2 = threading.Event()
-    t2_2_t1 = threading.Event()
-    t2_2_t3 = threading.Event()
-    t3_2_t2 = threading.Event()
-    avgFps = model.warmup(10)
-    avgFps = int(1/avgFps) if avgFps is not None else 30
-    print(f'speed: {avgFps}FPS')
-    
-    Data_t1_2_t2 = [[], [], [], [], [], [], []]
-    Data_t2_2_t3 = [None, None, None, None, None, None, None, 0, None]
-    Data_vis = [None, None, None, None, None, None, None, 0, None]
-    
-    def Thread1():
-        global stopThread
-        for path, img, im0s, vid_cap, s, ratio, dwdh in dataset:
-            if stopThread == True:
-                break
-            if len(Data_t1_2_t2[1]) < model.batch_size:
-                if source_type == 'stream':
-                    for i in range(len(im0s)):
-                        if len(Data_t1_2_t2[1]) < model.batch_size:
-                            Data_t1_2_t2[0].append(path[i])
-                            Data_t1_2_t2[1].append(model.preproc_for_infer(img[i]).copy())
-                            Data_t1_2_t2[2].append(im0s[i])
-                            Data_t1_2_t2[3].append(vid_cap[i] if vid_cap else None)
-                            Data_t1_2_t2[4].append(s)
-                            Data_t1_2_t2[5].append(ratio[i])
-                            Data_t1_2_t2[6].append(dwdh[i])
-                        else:
-                            break
-                else:
-                    Data_t1_2_t2[0].append(path)
-                    Data_t1_2_t2[1].append(model.preproc_for_infer(img).copy())
-                    Data_t1_2_t2[2].append(im0s)
-                    Data_t1_2_t2[3].append(vid_cap)
-                    Data_t1_2_t2[4].append(s)
-                    Data_t1_2_t2[5].append(ratio)
-                    Data_t1_2_t2[6].append(dwdh)
-                    
-            if len(Data_t1_2_t2[1]) >= model.batch_size:
-                Data_t1_2_t2[1] = model.concat(Data_t1_2_t2[1])
-                t1_2_t2.set()
-                t2_2_t1.wait(2)
-                t2_2_t1.clear()
-                a = Data_t1_2_t2[4][0]['c_frame'][0]
-                b = Data_t1_2_t2[4][0]['frames'][0]
-                print(f'{colorstr(source_type)} {Data_t1_2_t2[0][0]} ({a}/{b}), FPS: {Data_t2_2_t3[7]}')
-                Data_t1_2_t2[0] = []
-                Data_t1_2_t2[1] = []
-                Data_t1_2_t2[2] = []
-                Data_t1_2_t2[3] = []
-                Data_t1_2_t2[4] = []
-                Data_t1_2_t2[5] = []
-                Data_t1_2_t2[6] = []
-        Data_t1_2_t2[0] = []
-        Data_t1_2_t2[1] = []
-        Data_t1_2_t2[3] = []
-        Data_t1_2_t2[4] = []
-        Data_t1_2_t2[5] = []
-        Data_t1_2_t2[6] = []
-        t1_2_t2.set()
-        t2_2_t1.wait(1)
-        t2_2_t1.clear()
-        print(f'end: Thread-1')
-    
-    
-    def Thread2():
-        global stopThread
-        seenn = 0
-        avgTimeRate = []
-        com = max(1, (64/model.batch_size))
-        Data_t2_2_t3[7] = avgFps
-        while True and stopThread == False:
-            t1_2_t2.wait(1)
-            Data_t2_2_t3[0] = Data_t1_2_t2[0]
-            Data_t2_2_t3[1] = Data_t1_2_t2[1]
-            Data_t2_2_t3[2] = Data_t1_2_t2[2]
-            Data_t2_2_t3[3] = Data_t1_2_t2[3]
-            Data_t2_2_t3[4] = Data_t1_2_t2[4]
-            Data_t2_2_t3[5] = Data_t1_2_t2[5]
-            Data_t2_2_t3[6] = Data_t1_2_t2[6]
-            t1_2_t2.clear()
-            t2_2_t1.set()
-            
-            if len(Data_t2_2_t3[1]) and stopThread == False:
-                t1 = time_synchronized()
-                Data_t2_2_t3[8] = model.infer(Data_t2_2_t3[1])[0]
-                t2 = time_synchronized() - t1
-                avgTimeRate.append(t2)
-                if seenn > com:
-                    seenn = 0
-                    Data_t2_2_t3[7] = int(1/((sum(avgTimeRate) / len(avgTimeRate))/model.batch_size))
-                    avgTimeRate = []
-                seenn += 1
-            else:
-                stopThread = True
-                break
-            t2_2_t3.set()
-            t3_2_t2.wait(0.1)
-            t3_2_t2.clear()
-        print(f'end: Thread-2')
-    
-    
-    def Thread3():
-        global stopThread
-        seen = 0
-        demensions = None
-        while True and stopThread == False:
-            t2_2_t3.wait()
-            Data_vis[0] = Data_t2_2_t3[0]
-            Data_vis[1] = Data_t2_2_t3[1]
-            Data_vis[2] = Data_t2_2_t3[2]
-            Data_vis[3] = Data_t2_2_t3[3]
-            Data_vis[4] = Data_t2_2_t3[4]
-            Data_vis[5] = Data_t2_2_t3[5]
-            Data_vis[6] = Data_t2_2_t3[6]
-            Data_vis[7] = Data_t2_2_t3[7]
-            Data_vis[8] = Data_t2_2_t3[8]
-            t2_2_t3.clear()
-            t3_2_t2.set()
-            img, bbox = model.end2end(Data_vis[8], Data_vis[2], Data_vis[6], Data_vis[5], Data_vis[7], BFC,Data_vis[4][0]['c_frame'][0] / Data_vis[4][0]['frames'][0])
-            if demensions is None and not opt.nosave:
-                demensions = Data_vis[2][0].shape[:2]
-                if dataset.fps != None:
-                    ffmpeg = FFMPEG_recorder(f'{save_dir}/detect.mp4', videoDimensions=(demensions[1], demensions[0]), fps=dataset.fps)
-            if opt.view_img > -1:
-                for index, (im) in enumerate(img):
-                    cv2.namedWindow(f'{Data_vis[0][index]}', cv2.WINDOW_NORMAL)
-                    cv2.imshow(f'{Data_vis[0][index]}', im)
-                    avgFps = Data_vis[7]
-                    avgFps = max(avgFps, 1)
-                    time.sleep((1/avgFps)-0.001)
-                    seen += 1
-                    if not opt.nosave:
-                        ffmpeg.writeFrame(im)
-                    if cv2.waitKey(opt.view_img) == 27 and opt.view_img > -1:
-                        stopThread = True
-                        print('[----------------------------------------------B-R-E-A-K----------------------------------------------]')
-                        break
-            if stopThread:
-                break
-            else:
-                for i in range(len(Data_vis)):
-                    Data_vis[i] = None
-        print(f'end: Thread-3 {seen}')
+        dataset = LoadImages(source, img_size=imgsz, stride=model.stride, auto=model.rectangle)
 
-    thread1 = threading.Thread(target= Thread1, name='Thread-1')
-    thread2 = threading.Thread(target= Thread2, name='Thread-2')
-    thread3 = threading.Thread(target= Thread3, name='Thread-3')
+    BFC = BackgroundForegroundColors(names=model.names)
+    model.batch_size = opt.batch_size if model.batch_size == 0 else model.batch_size
+    avgFps = model.warmup(10)
+    avgFps = int(1 / avgFps) if avgFps is not None else 30
+    print(f'speed: {avgFps}FPS')
+
+    que1 = Queue(maxsize=25)
+    que2 = Queue(maxsize=5)
+    que3 = Queue(maxsize=4)
+    thread1 = threading.Thread(target=Thread1, name='Thread-1', args=(dataset, que1, model.preproc_for_infer, source_type == 'stream'))
+    thread2 = threading.Thread(target=Thread2, name='Thread-2', args=(que1, que2, model.concat, model.batch_size))
+    thread3 = threading.Thread(target=Thread3, name='Thread-3', args=(que2, que3, model))
+    thread4 = threading.Thread(target=Thread4, name='Thread-4', args=(que3, model))
     print(f'Starting...\n')
     thread1.start()
     thread2.start()
     thread3.start()
+    thread4.start()
     thread1.join()
     thread2.join()
     thread3.join()
-            
-        
+    thread4.join()
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--weights', nargs='+', type=str,default=['./models/yolov7.pt'], help='model.pt path(s)')
-    parser.add_argument('--source', type=str,default='inference/images/', help='source file/folder, 0 for webcam')
-    parser.add_argument('--img-size', type=int, default=640,help='inference size (pixels)')
-    parser.add_argument('--batch-size', type=int, default=1,help='inference batch (images)')
-    parser.add_argument('--conf-thres', type=float,default=0.25, help='object confidence threshold')
-    parser.add_argument('--iou-thres', type=float,default=0.45, help='IOU threshold for NMS')
-    parser.add_argument('--device', default='cpu',help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
-    parser.add_argument('--view-img',type=int, default=-1,help='display results')
-    parser.add_argument('--save-txt', action='store_true',help='save results to *.txt')
-    parser.add_argument('--save-conf', action='store_true',help='save confidences in --save-txt labels')
-    parser.add_argument('--nosave', action='store_true',help='do not save images/videos')
-    parser.add_argument('--datacollection',action='store_true', help='save image and labels')
-    parser.add_argument('--classes', nargs='+', type=int,help='filter by class: --class 0, or --class 0 2 3')
-    parser.add_argument('--agnostic-nms', action='store_true',help='class-agnostic NMS')
+    parser.add_argument('--weights', nargs='+', type=str, default=['./models/yolov7.pt'], help='model.pt path(s)')
+    parser.add_argument('--source', type=str, default='inference/images/', help='source file/folder, 0 for webcam')
+    parser.add_argument('--img-size', type=int, default=640, help='inference size (pixels)')
+    parser.add_argument('--batch-size', type=int, default=1, help='inference batch (images)')
+    parser.add_argument('--conf-thres', type=float, default=0.25, help='object confidence threshold')
+    parser.add_argument('--iou-thres', type=float, default=0.45, help='IOU threshold for NMS')
+    parser.add_argument('--device', default='cpu', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
+    parser.add_argument('--view-img', type=int, default=-1, help='display results')
+    parser.add_argument('--save-txt', action='store_true', help='save results to *.txt')
+    parser.add_argument('--save-conf', action='store_true', help='save confidences in --save-txt labels')
+    parser.add_argument('--nosave', action='store_true', help='do not save images/videos')
+    parser.add_argument('--datacollection', action='store_true', help='save image and labels')
+    parser.add_argument('--classes', nargs='+', type=int, help='filter by class: --class 0, or --class 0 2 3')
+    parser.add_argument('--agnostic-nms', action='store_true', help='class-agnostic NMS')
     parser.add_argument('--augment', action='store_true', help='augmented inference')
-    parser.add_argument('--update', action='store_true',help='update all models')
+    parser.add_argument('--update', action='store_true', help='update all models')
     parser.add_argument('--project', default='runs/detect', help='save results to project/name')
     parser.add_argument('--name', default='exp', help='save results to project/name')
     parser.add_argument('--exist-ok', action='store_true', help='existing project/name ok, do not increment')
     parser.add_argument('--no-trace', action='store_true', help='don`t trace model')
     parser.add_argument('--no-check', action='store_true', help='don`t check requirements')
-    
+
     opt = parser.parse_args()
 
     save_dir = Path(increment_path(Path(opt.project) / opt.name, exist_ok=opt.exist_ok))  # increment run
     (save_dir / 'labels' if opt.save_txt else save_dir).mkdir(parents=True, exist_ok=True)  # make dir
-    
+
     opt.weights = opt.weights if isinstance(opt.weights, list) else [opt.weights]
     frame_count_, fps_rate = 0, 0
     for _ in opt.weights:
@@ -422,10 +385,10 @@ if __name__ == '__main__':
             with torch.no_grad():
                 if opt.update:
                     detect(opt=opt)
-                    strip_optimizer(f=_,halfModel=True)
+                    strip_optimizer(f=_, halfModel=True)
                 else:
                     detect(opt)
-                    
+
         elif file_extention in ['.onnx']:
             inferWithDynamicBatch(_, opt, save_dir)
             # from models.yolo import ONNX_Engine
@@ -440,9 +403,9 @@ if __name__ == '__main__':
             #     dataset = LoadStreams(opt.source, img_size=max(imgsz), auto= False if model.rectangle else True)
             # else:
             #     dataset = LoadImages(opt.source, img_size=max(imgsz), auto= False if model.rectangle else True)
-                
+
             # names, vid_path = model.names, None
-            
+
             # print(f'{prefix}: {vars(model)}\n')
             # BFC = BackgroundForegroundColors(names= names)
             # txtColorD, bboxColorD = BFC.getval(index=0)
@@ -456,7 +419,7 @@ if __name__ == '__main__':
             #     pred, img = model.infer(img, end2end=end2end)                    
             #     t2 = time_synchronized() - t1
             #     img_h, img_w = img.shape[2:]
-                
+
             #     if not end2end:
             #         for i, det in enumerate(pred):
             #             seen += 1
@@ -481,7 +444,7 @@ if __name__ == '__main__':
             #             s += f'{img_h}x{img_w} '
             #             s += f'speed: {round(t2*1000,3)}ms '
             #             gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh
-                        
+
             #             if len(det):
             #                 det[:, :4] = scale_coords((img_h, img_w), det[:, :4], im0.shape).round()
 
@@ -527,7 +490,7 @@ if __name__ == '__main__':
             #                             fps = 30
             #                             h, w = im0.shape[:2]
             #                         ffmpeg = FFMPEG_recorder(savePath=vid_path, videoDimensions=(int(w),int(h)), fps=fps)
-                                    
+
             #                     ffmpeg.writeFrame(image=im0)
             #                     ffmpeg.writeSubtitle(title=s,fps=fps)
             #     else:
@@ -535,7 +498,7 @@ if __name__ == '__main__':
             #         if len(imgs) < model.batch_size:
             #             imgs.append(im0.copy())
             #             img0s.append(im0s.copy())
-                    
+
             #         imgs = model.end2end(pred[0], img0s, dwdh, ratio, int(1/t2), BFC)
             #         if opt.view_imgs > -1:
             #             for im in imgs:
@@ -550,8 +513,8 @@ if __name__ == '__main__':
             #     del ffmpeg
             # del model, dataset
             # cv2.destroyAllWindows()
-                
+
         elif file_extention in ['.trt', '.engine']:
-            detectTensorRT(_,opt, save=save_dir)
+            detectTensorRT(_, opt, save=save_dir)
         elif file_extention in ['.tflite']:
             pass
