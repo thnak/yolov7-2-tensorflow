@@ -35,7 +35,7 @@ if __name__ == '__main__':
     parser.add_argument('--topk-all', type=int, default=100, help='topk objects for every images')
     parser.add_argument('--iou-thres', '-iou', type=float, default=0.45, help='iou threshold for NMS')
     parser.add_argument('--conf-thres', '-conf', type=float, default=0.25, help='conf threshold for NMS')
-    parser.add_argument('--onnx-opset', type=int, default=17, help='onnx opset version, 11 for DmlExecutionProvider')
+    parser.add_argument('--onnx-opset', type=int, default=12, help='onnx opset version, 11 for DmlExecutionProvider')
     parser.add_argument('--device', default='cpu', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     parser.add_argument('--simplify', action='store_true', help='simplify onnx model')
     parser.add_argument('--include-nms', action='store_true',
@@ -97,7 +97,7 @@ if __name__ == '__main__':
 
         best_fitness = model.best_fitness if hasattr(model, 'best_fitness') else 0.
         total_image = model.total_image if hasattr(model, 'total_image') else [0]
-        input_shape = model.input_shape if hasattr(model, 'input_shape') else ([3, 640, 640] if model.is_p5() else [3, 1280, 1280])
+        input_shape = model.input_shape if hasattr(model, 'input_shape') else ([3, 384, 640] if model.is_p5() else [3, 768, 1280])
         model_version = model.model_version if hasattr(model, 'model_version') else 0
         model.best_fitness = best_fitness
         model.model_version = model_version

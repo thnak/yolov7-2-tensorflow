@@ -368,7 +368,8 @@ def train(hyp, opt, tb_writer=None,
                 f'Using {dataloader.num_workers} dataloader workers\n'
                 f'Logging results to {save_dir}\n'
                 f'Starting training for {epochs} epochs...\n')
-    torch.save({'model': deepcopy(model).to('cpu')}, wdir / 'init.pt')
+    torch.save({'model': model}, wdir / 'init.pt')
+    logger.info(f'saved init model at: {wdir / "init.pt"}')
     # epoch ------------------------------------------------------------------
     for epoch in range(start_epoch, epochs):
         model.to(device).train(mode=True)

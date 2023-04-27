@@ -1,4 +1,5 @@
 import argparse
+import numpy as np
 import time
 from pathlib import Path
 import cv2
@@ -213,9 +214,11 @@ def detectTensorRT(tensorrtEngine, opt=None, save=''):
         cv2.destroyAllWindows()
 
 
-def Thread1(dataset, que: Queue, preProcessing, isStream: bool):
+def Thread1(dataset, que: Queue, preProcessing, isStream: bool, breakQue: bool):
     for path, img, im0s, vid_cap, s, ratio, dwdh in dataset:
         data = {}
+        if breakQue:
+            break
         if isStream:
             for index in range(len(im0s)):
                 data["path"] = path[index]
@@ -282,28 +285,31 @@ def Thread3(que2: Queue, que3: Queue, model: models.yolo.ONNX_Engine):
     que3.put(None)
 
 
-def Thread4(que3: Queue, model: models.yolo.ONNX_Engine):
-    t0 =time_synchronized()
+def Thread4(que3: Queue, model: models.yolo.ONNX_Engine, breakQue: bool):
+    t0 = time_synchronized()
+    from torchvision.utils import draw_bounding_boxes
     while True:
         data = que3.get()
-        if data is None:
+        if data is None or breakQue == True:
             break
         pred = data[0]["img"]
         ori = [x["img0s"] for x in data]
         dwdhs = [x['dwdh'] for x in data]
         ratios = [x['ratio'] for x in data]
         pred = model.end2end(outputs=pred, ori_images=ori, dwdh=dwdhs, ratio=ratios)
-        # tt = time_synchronized()
+        tt = time_synchronized()
         for x in pred:
-            ori[x['batch_id']] = plot_one_box(x['box'], img=ori[x['batch_id']], label=f"{x['name']} {round(x['score'], 2)}")
-        # print(f'drawing time: {time_synchronized() - tt}')
+            ori[x['batch_id']] = plot_one_box(x['box'], img=ori[x['batch_id']],
+                                              label=f"{x['name']} {round(x['score'], 2)}")
+        print(f'drawing time: {time_synchronized() - tt}')
         for img in ori:
             cv2.namedWindow("aa", cv2.WINDOW_NORMAL)
             cv2.imshow("aa", img)
-            if cv2.waitKey(1) == "q":
+            if cv2.waitKey(1) == 27:
+                breakQue = True
                 break
         t1 = time_synchronized()
-        fps = 1/((t1-t0)/len(ori))
+        fps = 1 / ((t1 - t0) / len(ori))
         print(f'thread 4 fps: {fps}FPS, ')
         t0 = t1
 
@@ -332,11 +338,13 @@ def inferWithDynamicBatch(enginePath, opt, save=''):
 
     que1 = Queue(maxsize=25)
     que2 = Queue(maxsize=5)
-    que3 = Queue(maxsize=4)
-    thread1 = threading.Thread(target=Thread1, name='Thread-1', args=(dataset, que1, model.preproc_for_infer, source_type == 'stream'))
+    que3 = Queue(maxsize=6)
+    breakingque = False
+    thread1 = threading.Thread(target=Thread1, name='Thread-1',
+                               args=(dataset, que1, model.preproc_for_infer, source_type == 'stream', breakingque))
     thread2 = threading.Thread(target=Thread2, name='Thread-2', args=(que1, que2, model.concat, model.batch_size))
     thread3 = threading.Thread(target=Thread3, name='Thread-3', args=(que2, que3, model))
-    thread4 = threading.Thread(target=Thread4, name='Thread-4', args=(que3, model))
+    thread4 = threading.Thread(target=Thread4, name='Thread-4', args=(que3, model, breakingque))
     print(f'Starting...\n')
     thread1.start()
     thread2.start()

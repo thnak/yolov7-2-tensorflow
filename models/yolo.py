@@ -847,9 +847,9 @@ class ONNX_Engine(object):
         im = im.astype(np.float16) if self.half else im.astype(np.float32)
         # im = im.half() if self.half else im.float()  # uint8 to fp16/32
         im /= 255.0  # 0 - 255 to 0.0 - 1.0
-        if im.ndim == 3:
+        assert im.ndim == 3, "only accept 3 dimention image"
             # im = im.expand_dims(0)
-            im = np.expand_dims(im, 0)
+        im = np.expand_dims(im, 0)
         # if len(im.shape) == 3:
         #     im = im[None]  # expand for batch dim
         # im = im.cpu().numpy()
