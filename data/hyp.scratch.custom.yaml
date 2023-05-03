@@ -38,12 +38,12 @@ ISONoise: 0.09
 ImageCompression: 0.09
 ImageCompression_quality_lower: 75
 RandomRotate90: 0.09
-HueSaturationValue: 0.25
+HueSaturationValue: 0.1
 HueSaturationValue_hue_shift_limit: 1
-HueSaturationValue_sat_shift_limit: 70
-HueSaturationValue_val_shift_limit: 30
+HueSaturationValue_sat_shift_limit: 35
+HueSaturationValue_val_shift_limit: 15
 HorizontalFlip: 0.5
 VerticalFlip: 0.5
-ChannelDropout: 0.1
-cutout: 0.5
+ChannelDropout: 0.01
+cutout: 0.05
 PixelDropout: 0.1

@@ -551,10 +551,8 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             if self.cache_images:
                 gb = 0  # Gigabytes of cached images
                 self.img_hw0, self.img_hw = [None] * n, [None] * n
-                with closing(Pool(maxtasksperchild=4)) as poolp:
-                    results = poolp.map(self.load_image, range(n), chunksize=n//os.cpu_count())
-                pbar = tqdm(enumerate(results), total=n, mininterval=0.1, maxinterval=1, unit='image',
-                            bar_format=TQDM_BAR_FORMAT)
+                results = ThreadPool().imap(self.load_image, range(n))
+                pbar = tqdm(enumerate(results), total=n, unit='image',bar_format=TQDM_BAR_FORMAT)
                 checkimgSizeStatus = False
                 for i, x in pbar:
                     if self.cache_images == 'disk':
@@ -572,7 +570,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                         gb += self.imgs[i].nbytes
                     pbar.desc = f'{prefix}Caching images {gb2mb(gb)} {self.cache_images.upper()}'
                 pbar.close()
-                results.clear()
+
 
     def check_cache_ram(self, prefix='', safety_margin=1.5):
         tem = int(self.stride * ((self.img_size / self.stride) - 1))
