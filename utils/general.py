@@ -1115,14 +1115,8 @@ def yaml_save(file='data.yaml', data=None):
         yaml.safe_dump({k: str(v) if isinstance(v, Path) else v for k, v in data.items()}, f, sort_keys=False)
 
 
-# def check_version(current='0.0.0', minimum='0.0.0', name='version ', pinned=False, hard=False, verbose=False):
-#     """Check version vs. required version"""
-#     import pkg_resources as pkg
-#     current, minimum = (pkg.parse_version(x) for x in (current, minimum))
-#     result = (current == minimum) if pinned else (current >= minimum)  # bool
-#     s = f'WARNING ⚠️ {name}{minimum} is required by YOLOv5, but {name}{current} is currently installed'  # string
-#     if hard:
-#         assert result, emojis(s)  # assert min requirements met
-#     if verbose and not result:
-#         print(s)
-#     return result
+def sliding_windows(image, stepSize, windowsSize):
+    for x in range(0, image.shape[0], stepSize):
+        for y in range(0, image.shape[1], stepSize):
+            x_x = [x, x+windowsSize[0]]
+            yield x, y, image[x:x + windowsSize[0], y:y + windowsSize[1]]

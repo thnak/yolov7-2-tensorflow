@@ -848,7 +848,6 @@ class ONNX_Engine(object):
         # im = im.half() if self.half else im.float()  # uint8 to fp16/32
         im /= 255.0  # 0 - 255 to 0.0 - 1.0
         assert im.ndim == 3, "only accept 3 dimention image"
-            # im = im.expand_dims(0)
         im = np.expand_dims(im, 0)
         # if len(im.shape) == 3:
         #     im = im[None]  # expand for batch dim
@@ -856,7 +855,7 @@ class ONNX_Engine(object):
         return im
 
     @staticmethod
-    def concat(im):
+    def concat(im: list):
         if len(im) > 1:
             im = np.concatenate(im)
         else:

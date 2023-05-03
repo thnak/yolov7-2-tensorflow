@@ -285,7 +285,7 @@ def Thread3(que2: Queue, que3: Queue, model: models.yolo.ONNX_Engine):
     que3.put(None)
 
 
-def Thread4(que3: Queue, model: models.yolo.ONNX_Engine, breakQue: bool):
+def Thread4(que3: Queue, model: models.yolo.ONNX_Engine, breakQue: bool, view: int):
     t0 = time_synchronized()
     from torchvision.utils import draw_bounding_boxes
     while True:
@@ -298,16 +298,17 @@ def Thread4(que3: Queue, model: models.yolo.ONNX_Engine, breakQue: bool):
         ratios = [x['ratio'] for x in data]
         pred = model.end2end(outputs=pred, ori_images=ori, dwdh=dwdhs, ratio=ratios)
         tt = time_synchronized()
-        for x in pred:
-            ori[x['batch_id']] = plot_one_box(x['box'], img=ori[x['batch_id']],
-                                              label=f"{x['name']} {round(x['score'], 2)}")
-        print(f'drawing time: {time_synchronized() - tt}')
-        for img in ori:
-            cv2.namedWindow("aa", cv2.WINDOW_NORMAL)
-            cv2.imshow("aa", img)
-            if cv2.waitKey(1) == 27:
-                breakQue = True
-                break
+        if view >= 1:
+            for x in pred:
+                ori[x['batch_id']] = plot_one_box(x['box'], img=ori[x['batch_id']],
+                                                  label=f"{x['name']} {round(x['score'], 2)}")
+            print(f'drawing time: {time_synchronized() - tt}')
+            for img in ori:
+                cv2.namedWindow("aa", cv2.WINDOW_NORMAL)
+                cv2.imshow("aa", img)
+                if cv2.waitKey(view) == 27:
+                    breakQue = True
+                    break
         t1 = time_synchronized()
         fps = 1 / ((t1 - t0) / len(ori))
         print(f'thread 4 fps: {fps}FPS, ')
@@ -338,14 +339,15 @@ def inferWithDynamicBatch(enginePath, opt, save=''):
 
     que1 = Queue(maxsize=25)
     que2 = Queue(maxsize=5)
-    que3 = Queue(maxsize=6)
+    que3 = Queue(maxsize=2)
     breakingque = False
     thread1 = threading.Thread(target=Thread1, name='Thread-1',
                                args=(dataset, que1, model.preproc_for_infer, source_type == 'stream', breakingque))
     thread2 = threading.Thread(target=Thread2, name='Thread-2', args=(que1, que2, model.concat, model.batch_size))
     thread3 = threading.Thread(target=Thread3, name='Thread-3', args=(que2, que3, model))
-    thread4 = threading.Thread(target=Thread4, name='Thread-4', args=(que3, model, breakingque))
+    thread4 = threading.Thread(target=Thread4, name='Thread-4', args=(que3, model, breakingque, opt.view_img))
     print(f'Starting...\n')
+    t0 = time_synchronized()
     thread1.start()
     thread2.start()
     thread3.start()
@@ -354,7 +356,7 @@ def inferWithDynamicBatch(enginePath, opt, save=''):
     thread2.join()
     thread3.join()
     thread4.join()
-
+    print(f'finish all: {time_synchronized() - t0}')
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
