@@ -141,6 +141,7 @@ class DFL(nn.Module):
         return self.conv(x.view(b, 4, self.c1, a).transpose(2, 1).softmax(1)).view(b, 4, a)
         # return self.conv(x.view(b, self.c1, 4, a).softmax(1)).view(b, 4, a)
 
+
 class RobustConv(nn.Module):
     """Robust convolution (use high kernel size 7-11 for: downsampling and other layers). Train for 300 - 450 epochs."""
 

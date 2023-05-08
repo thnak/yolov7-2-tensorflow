@@ -31,4 +31,5 @@ wandb/
 TrainRes/
 coco128/
 coco/
+venv/
 .idea

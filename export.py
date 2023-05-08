@@ -1,10 +1,7 @@
 import datetime
 from utils.torch_utils import select_device, prune
 from utils.general import set_logging, check_img_size, check_requirements, colorstr, ONNX_OPSET, ONNX_OPSET_TARGET, \
-    gb2mb
-from utils.general import set_logging, check_img_size, check_requirements, colorstr
-from utils.general import set_logging, check_img_size, check_requirements, colorstr, ONNX_OPSET, ONNX_OPSET_TARGET
-from utils.general import set_logging, check_img_size, check_requirements, colorstr, ONNX_OPSET, ONNX_OPSET_TARGET
+    gb2mb, MAX_DET
 from utils.activations import Hardswish, SiLU
 from models.experimental import attempt_load, End2End
 import models
@@ -32,9 +29,9 @@ if __name__ == '__main__':
     parser.add_argument('--end2end', action='store_true', help='export end2end onnx for ORT or TRT)')
     parser.add_argument('--max-hw', '--ort', action='store_true', default=None,
                         help='end2end onnxruntime')
-    parser.add_argument('--topk-all', type=int, default=100, help='topk objects for every images')
+    parser.add_argument('--topk-all', type=int, default=MAX_DET, help='topk objects for every images')
     parser.add_argument('--iou-thres', '-iou', type=float, default=0.45, help='iou threshold for NMS')
-    parser.add_argument('--conf-thres', '-conf', type=float, default=0.25, help='conf threshold for NMS')
+    parser.add_argument('--conf-thres', '-conf', type=float, default=0.2, help='conf threshold for NMS')
     parser.add_argument('--onnx-opset', type=int, default=12, help='onnx opset version, 11 for DmlExecutionProvider')
     parser.add_argument('--device', default='cpu', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     parser.add_argument('--simplify', action='store_true', help='simplify onnx model')
@@ -98,6 +95,7 @@ if __name__ == '__main__':
         best_fitness = model.best_fitness if hasattr(model, 'best_fitness') else 0.
         total_image = model.total_image if hasattr(model, 'total_image') else [0]
         input_shape = model.input_shape if hasattr(model, 'input_shape') else ([3, 384, 640] if model.is_p5() else [3, 768, 1280])
+        input_shape = [3, max(input_shape), max(input_shape)] if tensorFlowjs else input_shape
         model_version = model.model_version if hasattr(model, 'model_version') else 0
         model.best_fitness = best_fitness
         model.model_version = model_version
@@ -114,6 +112,7 @@ if __name__ == '__main__':
             if isinstance(m, models.common.Conv):  # assign export-friendly activations
                 if isinstance(m, (models.yolo.Detect, models.yolo.IDetect, models.yolo.IAuxDetect)):
                     m.dynamic = opt.dynamic
+                # m.act = torch.nn.Sigmoid()
 
         model_Gflop = model.info(verbose=False, img_size=input_shape)
         logging.info(model_Gflop)

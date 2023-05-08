@@ -467,7 +467,7 @@ class TFDetect(Layer):
             anchor_grid = tf.repeat(self.anchor_grid[i], repeats=tf.cast(ny * nx, tf.int32), axis=0)
 
             xy = (y[..., 0:2] * 2. - 0.5 + grid) * self.stride[i]  # xy
-            wh = (y[..., 2:4] * 2) ** 2 * anchor_grid  # wh
+            wh = ((y[..., 2:4] * 2) ** 2) * anchor_grid  # wh
             # Normalize xywh to 0-1 to reduce calibration error
             xy /= tf.constant([[self.imgsz[1], self.imgsz[0]]], dtype=tf.float32)
             wh /= tf.constant([[self.imgsz[1], self.imgsz[0]]], dtype=tf.float32)

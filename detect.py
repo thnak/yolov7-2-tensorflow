@@ -17,6 +17,8 @@ from utils.plots import plot_one_box
 from utils.torch_utils import select_device, time_synchronized, TracedModel
 import os
 import threading
+from multiprocessing import Process
+from multiprocessing import Queue as quee
 import logging
 from queue import Queue
 from utils.ffmpeg_ import FFMPEG_recorder
@@ -138,8 +140,8 @@ def detect(opt=None):
             avgTime[1].append(tmNms)
 
             if view_img > -1:
-                cv2.namedWindow(f'{dataset.mode} {path}', cv2.WINDOW_NORMAL)
-                cv2.imshow(f'{dataset.mode} {path}', im0)
+                cv2.namedWindow(f'{dataset.mode}', cv2.WINDOW_NORMAL)
+                cv2.imshow(f'{dataset.mode}', im0)
                 if cv2.waitKey(view_img) == 27:
                     print(colorstr(f'User keyboard interupt, exiting...'))
                     exit()
@@ -285,9 +287,8 @@ def Thread3(que2: Queue, que3: Queue, model: models.yolo.ONNX_Engine):
     que3.put(None)
 
 
-def Thread4(que3: Queue, model: models.yolo.ONNX_Engine, breakQue: bool, view: int):
+def Thread4(que3: Queue, end2end: models.yolo.ONNX_Engine.end2end, breakQue: bool, view: int, names, xyxy2xywh, BFC):
     t0 = time_synchronized()
-    from torchvision.utils import draw_bounding_boxes
     while True:
         data = que3.get()
         if data is None or breakQue == True:
@@ -296,11 +297,12 @@ def Thread4(que3: Queue, model: models.yolo.ONNX_Engine, breakQue: bool, view: i
         ori = [x["img0s"] for x in data]
         dwdhs = [x['dwdh'] for x in data]
         ratios = [x['ratio'] for x in data]
-        pred = model.end2end(outputs=pred, ori_images=ori, dwdh=dwdhs, ratio=ratios)
+        pred = end2end(outputs=pred, ori_images=ori, dwdh=dwdhs, ratio=ratios, names=names, xyxy2xywh=xyxy2xywh)
         tt = time_synchronized()
         if view >= 1:
             for x in pred:
-                ori[x['batch_id']] = plot_one_box(x['box'], img=ori[x['batch_id']],
+                textColor, bboxColor = BFC.getval(index=x['id'])
+                ori[x['batch_id']] = plot_one_box(x['box'], img=ori[x['batch_id']], txtColor=textColor, bboxColor=bboxColor,
                                                   label=f"{x['name']} {round(x['score'], 2)}")
             print(f'drawing time: {time_synchronized() - tt}')
             for img in ori:
@@ -322,7 +324,7 @@ def inferWithDynamicBatch(enginePath, opt, save=''):
     prefix = colorstr('ONNX: ')
     from models.yolo import ONNX_Engine
 
-    model = ONNX_Engine(ONNX_EnginePath=enginePath, prefix=prefix, confThres=opt.conf_thres)
+    model = ONNX_Engine(ONNX_EnginePath=enginePath, prefix=prefix)
     imgsz = model.imgsz
     if source_type == 'stream':
         dataset = LoadStreams(source, img_size=imgsz, stride=model.stride, auto=model.rectangle)
@@ -338,14 +340,15 @@ def inferWithDynamicBatch(enginePath, opt, save=''):
     print(f'speed: {avgFps}FPS')
 
     que1 = Queue(maxsize=25)
-    que2 = Queue(maxsize=5)
+    que2 = Queue(maxsize=2)
     que3 = Queue(maxsize=2)
     breakingque = False
+
     thread1 = threading.Thread(target=Thread1, name='Thread-1',
-                               args=(dataset, que1, model.preproc_for_infer, source_type == 'stream', breakingque))
+                               args=(dataset, que1, model.preProcessFeed, source_type == 'stream', breakingque))
     thread2 = threading.Thread(target=Thread2, name='Thread-2', args=(que1, que2, model.concat, model.batch_size))
     thread3 = threading.Thread(target=Thread3, name='Thread-3', args=(que2, que3, model))
-    thread4 = threading.Thread(target=Thread4, name='Thread-4', args=(que3, model, breakingque, opt.view_img))
+    thread4 = threading.Thread(target=Thread4, name='Thread-4', args=(que3, model.end2end, breakingque, opt.view_img, model.names, model.xyxy2xywh, BFC))
     print(f'Starting...\n')
     t0 = time_synchronized()
     thread1.start()
@@ -406,7 +409,7 @@ if __name__ == '__main__':
             # webcam = check_data_source(opt.source)
             # prefix = colorstr('ONNX_Engine')
             # model = ONNX_Engine(ONNX_EnginePath=_
-            #                     ,confThres=opt.conf_thres, 
+            #                     ,confThres=opt.conf_thres,
             #                     iouThres=opt.iou_thres,device=device,prefix= prefix)
             # imgsz = model.imgsz
             # if webcam:
@@ -426,7 +429,7 @@ if __name__ == '__main__':
             # for path, img, im0s, vid_cap, s, ratio, dwdh in dataset:
             #     model.warmup()
             #     t1 = time_synchronized()
-            #     pred, img = model.infer(img, end2end=end2end)                    
+            #     pred, img = model.infer(img, end2end=end2end)
             #     t2 = time_synchronized() - t1
             #     img_h, img_w = img.shape[2:]
 
@@ -475,10 +478,10 @@ if __name__ == '__main__':
             #                         txtColor, bboxColor = BFC.getval(index=int(cls))
             #                         im0 = plot_one_box(xyxy, im0, label=label, txtColor=txtColor,
             #                                                     bboxColor=bboxColor, line_thickness=3,
-            #                                                     frameinfo=[f'avgFPS: {fps_rate}',f'Total objects: {n}'])                                              
+            #                                                     frameinfo=[f'avgFPS: {fps_rate}',f'Total objects: {n}'])
             #             else:
             #                 im0 = plot_one_box(None, im0, label=None, txtColor=txtColorD, bboxColor=bboxColorD,
-            #                                             line_thickness=3, frameinfo=[f'avgFPS: {fps_rate}', f'Total objects: {0}'])                                
+            #                                             line_thickness=3, frameinfo=[f'avgFPS: {fps_rate}', f'Total objects: {0}'])
             #             print(f'{s}')
             #             if opt.view_img > -1:
             #                 cv2.namedWindow(f'{dataset.mode} {path}', cv2.WINDOW_NORMAL)
@@ -517,7 +520,7 @@ if __name__ == '__main__':
             #                 if cv2.waitKey(opt.view_img) == 27:
             #                     print(colorstr(f'User keyboard interupt, exiting...'))
             #                     exit()
-            # if not opt.nosave and dataset.mode != 'image':          
+            # if not opt.nosave and dataset.mode != 'image':
             #     ffmpeg.stopRecorder()
             #     ffmpeg.addSubtitle()
             #     del ffmpeg

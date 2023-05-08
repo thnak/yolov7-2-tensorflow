@@ -78,10 +78,10 @@ class ORT_NMS(torch.autograd.Function):
                 score_threshold=torch.tensor([0.25])):
         device = boxes.device
         batch = scores.shape[0]
-        num_det = random.randint(0, 100)
-        batches = torch.randint(0, batch, (num_det,)).sort()[0].to(device)
-        idxs = torch.arange(100, 100 + num_det).to(device)
-        zeros = torch.zeros((num_det,), dtype=torch.int64).to(device)
+        num_det = random.randint(0, 1)
+        batches = torch.randint(0, batch, (num_det,), device=device).sort()[0]
+        idxs = torch.arange(100, 100 + num_det, device=device)
+        zeros = torch.zeros((num_det,), dtype=torch.int64, device=device)
         selected_indices = torch.cat([batches[None], zeros[None], idxs[None]], 0).T.contiguous()
         selected_indices = selected_indices.to(torch.int64)
         return selected_indices

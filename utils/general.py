@@ -34,6 +34,7 @@ TQDM_BAR_FORMAT = '{l_bar}{bar:10}{r_bar}'  # tqdm bar format
 ONNX_OPSET = [11, 12, 13, 14, 15, 16, 17]
 ONNX_OPSET_TARGET = ONNX_OPSET
 CUDA = torch.cuda.is_available()
+MAX_DET = 300  # topk objects for every images
 
 
 def set_logging(rank=-1, filename=None, filemode=None):
@@ -688,7 +689,8 @@ def box_diou(box1, box2, eps: float = 1e-7):
     return iou - (centers_distance_squared / diagonal_distance_squared)
 
 
-def non_max_suppression(prediction: torch.Tensor, conf_thres=0.25, iou_thres=0.45, classes=None, agnostic=False, multi_label=False,
+def non_max_suppression(prediction: torch.Tensor, conf_thres=0.25, iou_thres=0.45, classes=None, agnostic=False,
+                        multi_label=False,
                         labels=()):
     """Runs Non-Maximum Suppression (NMS) on inference results
 
@@ -697,7 +699,6 @@ def non_max_suppression(prediction: torch.Tensor, conf_thres=0.25, iou_thres=0.4
     """
     # if prediction.device.type in ('privateuseone', "mps"):
     #     prediction = prediction.to('cpu')
-
     nc = prediction.shape[2] - 5  # number of classes
     xc = prediction[..., 4] > conf_thres  # candidates
 
@@ -1118,5 +1119,5 @@ def yaml_save(file='data.yaml', data=None):
 def sliding_windows(image, stepSize, windowsSize):
     for x in range(0, image.shape[0], stepSize):
         for y in range(0, image.shape[1], stepSize):
-            x_x = [x, x+windowsSize[0]]
+            x_x = [x, x + windowsSize[0]]
             yield x, y, image[x:x + windowsSize[0], y:y + windowsSize[1]]

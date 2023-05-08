@@ -728,17 +728,9 @@ class ONNX_Engine(object):
     """ONNX Engine class for inference with onnxruntime"""
 
     def __init__(self, ONNX_EnginePath='',
-                 confThres=0.25, iouThres=0.45,
-                 classes_nms=None, agnostic_nms=False, multi_label_nms=False,
-                 max_det_nms=300, maxWorkSpace=2, prefix='', ):
+                 maxWorkSpace=2, prefix='', ):
 
         self.prefix = prefix or colorstr('ONNX engine:')
-        self.confThres = confThres
-        self.iouThres = iouThres
-        self.classes_nms = classes_nms
-        self.agnostic_nms = agnostic_nms
-        self.multi_label_nms = multi_label_nms
-        self.max_det_nms = max_det_nms
 
         import platform
         import torch
@@ -764,7 +756,6 @@ class ONNX_Engine(object):
                 check_requirements(['onnxruntime'])
 
         import onnxruntime as onnxrt
-        self.runTime = onnxrt
         self.GB = maxWorkSpace * 1024 * 1024 * 1024
 
         try:
@@ -776,36 +767,18 @@ class ONNX_Engine(object):
             logger.error(f"{prefix} The model is invalid: {e}")
             exit()
 
-        # self.providers = [
-        #     ('TensorrtExecutionProvider',
-        #      {
-        #         'device_id': 0,
-        #         'trt_max_workspace_size': self.GB,
-        #         'trt_fp16_enable': True,
-        #         'trt_dla_enable': True
-        #         }),
-        #     ('CUDAExecutionProvider',
-        #      {
-        #         'device_id': 0,
-        #         'arena_extend_strategy': 'kNextPowerOfTwo',
-        #         'cudnn_conv1d_pad_to_nc1d': True,
-        # 'cudnn_conv_use_max_workspace': '2',
-        #         'gpu_mem_limit': self.GB,
-        #         'cudnn_conv_algo_search': 'EXHAUSTIVE',
-        #         'do_copy_in_default_stream': True,
-        #         'enable_cuda_graph': True}),
-        #     'CPUExecutionProvider'] if torch.cuda.is_available() else self.runTime.get_available_providers()
-        self.providers = self.runTime.get_available_providers()
-        session_opt = self.runTime.SessionOptions()
+        self.providers = onnxrt.get_available_providers()
+        session_opt = onnxrt.SessionOptions()
         session_opt.enable_profiling = False
         session_opt.log_severity_level = 3
+        session_opt.optimized_model_filepath = 'optim.onnx'
         session_opt.use_deterministic_compute = True
         session_opt.enable_mem_pattern = False if 'DmlExecutionProvider' in self.providers else True
-        session_opt.graph_optimization_level = self.runTime.GraphOptimizationLevel.ORT_ENABLE_ALL
-        session_opt.execution_mode = self.runTime.ExecutionMode.ORT_PARALLEL if cpu_device else self.runTime.ExecutionMode.ORT_SEQUENTIAL
+        session_opt.graph_optimization_level = onnxrt.GraphOptimizationLevel.ORT_ENABLE_ALL
+        session_opt.execution_mode = onnxrt.ExecutionMode.ORT_PARALLEL if cpu_device else onnxrt.ExecutionMode.ORT_SEQUENTIAL
 
-        self.session = self.runTime.InferenceSession(ONNX_EnginePath, sess_options=session_opt,
-                                                     providers=self.providers)
+        self.session = onnxrt.InferenceSession(ONNX_EnginePath, sess_options=session_opt,
+                                               providers=self.providers)
         self.session.enable_fallback()
 
         self.imgsz = self.session.get_inputs()[0].shape[2:]
@@ -842,7 +815,7 @@ class ONNX_Engine(object):
     def get_infor(self):
         print(f'{self.prefix}\n{vars(self)}')
 
-    def preproc_for_infer(self, im):
+    def preProcessFeed(self, im):
         # im = torch.from_numpy(im).to(self.device)
         im = im.astype(np.float16) if self.half else im.astype(np.float32)
         # im = im.half() if self.half else im.float()  # uint8 to fp16/32
@@ -868,12 +841,10 @@ class ONNX_Engine(object):
             return y[0]
         else:
             if isinstance(y, (list, tuple)):
-                self.prediction = self.from_numpy(y[0]) if len(
-                    y) == 1 else [self.from_numpy(x) for x in y]
-                return self.non_max_suppression()
+                prediction = self.from_numpy(y[0]) if len(y) == 1 else [self.from_numpy(x) for x in y]
             else:
-                self.prediction = self.from_numpy(y)
-                return self.non_max_suppression()
+                prediction = self.from_numpy(y)
+        return non_max_suppression(prediction=prediction)
 
     def from_numpy(self, x):
         return torch.from_numpy(x).to(self.device) if isinstance(x, np.ndarray) else x
@@ -887,9 +858,11 @@ class ONNX_Engine(object):
         y[3] = (x[3] - x[1]) / dim[0]  # height
         return y
 
-    def end2end(self, outputs, ori_images, dwdh, ratio):
-        """
 
+    @staticmethod
+    def end2end(outputs, ori_images, dwdh, ratio, names, xyxy2xywh, confThres=0.2,):
+        """
+        @param confThres: minimum score allowed
         @param outputs: outputs of prediction
         @param ori_images:
         @param dwdh:
@@ -916,14 +889,13 @@ class ONNX_Engine(object):
             box = box.round().astype(np.int32).tolist()
             cls_id = int(cls_id)
             score = round(float(score), 2)
-            if score < self.confThres:
+            if score < confThres:
                 continue
-            name = self.names[cls_id]
+            name = names[cls_id]
             name += ' ' + str(score)
-            bbox[batch_id] = self.xyxy2xywh(box, image[batch_id].shape[:2])
+            bbox[batch_id] = xyxy2xywh(box, image[batch_id].shape[:2])
             output.append({"batch_id": batch_id, "bbox": bbox, "box": box, "id": cls_id, "name": name, "score": score})
         return output
-
 
     def warmup(self, num=10):
         imgsz = (self.batch_size, *self.session.get_inputs()[0].shape[1:])
@@ -935,100 +907,6 @@ class ONNX_Engine(object):
             for _ in range(num):
                 self.infer(im)
             return ((time_synchronized() - t0) / num) / self.batch_size
-
-    def non_max_suppression(self):
-        # prediction = self.prediction
-        # conf_thres = self.confThres
-        # classes = self.classes_nms
-        # agnostic = self.agnostic_nms
-        # multi_label = self.multi_label_nms
-        # max_det = self.max_det_nms
-
-        # Checks
-        assert 0 <= self.confThres <= 1, f'{self.prefix} Invalid Confidence threshold {self.confThres}, valid values are between 0.0 and 1.0'
-        assert 0 <= self.iouThres <= 1, f'{self.prefix} Invalid IoU {self.iouThres}, valid values are between 0.0 and 1.0'
-        if isinstance(self.prediction, (list, tuple)):
-            # select only inference output
-            self.prediction = self.prediction[0]
-
-        device = self.prediction.device
-        mps = 'mps' in device.type  # Apple MPS
-        if mps:  # MPS not fully supported yet, convert tensors to CPU before NMS
-            self.prediction = self.prediction.cpu()
-        bs = self.prediction.shape[0]  # batch size
-        nc = self.prediction.shape[2] - 5  # number of self.classes_nms
-        xc = self.prediction[..., 4] > self.confThres  # candidates
-
-        # Settings
-        max_wh = 7680  # (pixels) maximum box width and height
-        max_nms = 30000  # maximum number of boxes into torchvision.ops.nms()
-        time_limit = 0.5 + 0.05 * bs  # seconds to quit after
-        redundant = True  # require redundant detections
-        # multiple labels per box (adds 0.5ms/img)
-        self.multi_label_nms &= nc > 1
-        merge = False  # use merge-NMS
-
-        t = time_synchronized()
-        mi = 5 + nc  # mask start index
-        output = [torch.zeros((0, 6), device=self.prediction.device)] * bs
-        for xi, x in enumerate(self.prediction):  # image index, image inference
-            x = x[xc[xi]]  # confidence
-            # If none remain process next image
-            if not x.shape[0]:
-                continue
-
-            # Compute conf
-            x[:, 5:] *= x[:, 4:5]  # conf = obj_conf * cls_conf
-
-            # Box/Mask
-            # center_x, center_y, width, height) to (x1, y1, x2, y2)
-            box = xywh2xyxy(x[:, :4])
-            mask = x[:, mi:]  # zero columns if no masks
-
-            # Detections matrix nx6 (xyxy, conf, cls)
-            if self.multi_label_nms:
-                i, j = (x[:, 5:mi] > self.confThres).nonzero(as_tuple=False).T
-                x = torch.cat((box[i], x[i, 5 + j, None],
-                               j[:, None].float(), mask[i]), 1)
-            else:  # best class only
-                conf, j = x[:, 5:mi].max(1, keepdim=True)
-                x = torch.cat((box, conf, j.float(), mask), 1)[
-                    conf.view(-1) > self.confThres]
-
-            # Filter by class
-            if self.classes_nms is not None:
-                x = x[(x[:, 5:6] == torch.tensor(
-                    self.classes_nms, device=x.device)).any(1)]
-            # Check shape
-            n = x.shape[0]  # number of boxes
-            if not n:  # no boxes
-                continue
-            # sort by confidence and remove excess boxes
-            x = x[x[:, 4].argsort(descending=True)[:max_nms]]
-
-            # Batched NMS
-            c = x[:, 5:6] * (0 if self.agnostic_nms else max_wh)  # classes
-            # boxes (offset by class), scores
-            boxes, scores = x[:, :4] + c, x[:, 4]
-            i = torchvision.ops.nms(boxes, scores, self.iouThres)  # NMS
-            i = i[:self.max_det_nms]  # limit detections
-            if merge and (1 < n < 3E3):  # Merge NMS (boxes merged using weighted mean)
-                # update boxes as boxes(i,4) = weights(i,n) * boxes(n,4)
-                iou = box_iou(boxes[i], boxes) > self.iouThres  # iou matrix
-                weights = iou * scores[None]  # box weights
-                x[i, :4] = torch.mm(weights, x[:, :4]).float(
-                ) / weights.sum(1, keepdim=True)  # merged boxes
-                if redundant:
-                    i = i[iou.sum(1) > 1]  # require redundancy
-
-            output[xi] = x[i]
-            if mps:
-                output[xi] = output[xi].to(device)
-            if (time_synchronized() - t) > time_limit:
-                logger.warning(
-                    f'{self.prefix} WARNING ⚠️ NMS time limit {time_limit:.3f}s exceeded')
-                break  # time limit exceeded
-        return output
 
 
 class TensorRT_Engine(object):
