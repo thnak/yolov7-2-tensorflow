@@ -33,3 +33,5 @@ coco128/
 coco/
 venv/
 .idea
+detect_or_track.py
+sort.py

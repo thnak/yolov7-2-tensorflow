@@ -554,7 +554,7 @@ def train(hyp, opt, tb_writer=None,
 
                 ckpt = {
                     'epoch': epoch,
-                    'training_results': results_file.read_text(),
+                    'training_results': results_file.read_text() if results_file.exists() else None,
                     'model': deepcopy(model.module if is_parallel(model) else model).half(),
                     'ema': deepcopy(ema.ema).half() if not final_epoch else None,
                     'updates': ema.updates if not final_epoch else None,

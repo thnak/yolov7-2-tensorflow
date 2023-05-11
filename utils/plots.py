@@ -17,9 +17,11 @@ from scipy.signal import butter, filtfilt
 
 from utils.general import xywh2xyxy, xyxy2xywh
 from utils.metrics import fitness
+
 # Settings
 matplotlib.rc('font', **{'size': 11})
 matplotlib.use('Agg')  # for writing to files only
+
 
 def color_list():
     # Return first 10 plt colors as (r,g,b) https://stackoverflow.com/questions/51350872/python-from-color-name-to-rgb
@@ -47,31 +49,41 @@ def butter_lowpass_filtfilt(data, cutoff=1500, fs=50000, order=5):
 
     b, a = butter_lowpass(cutoff, fs, order=order)
     return filtfilt(b, a, data)  # forward-backward filter
-        
-def plot_one_box(x, img, txtColor=None, bboxColor=None, label=None, frameinfo = []):
+
+
+def plot_one_box(x, img, txtColor=None, bboxColor=None, label=None, frameinfo=[]):
     img0 = img.copy()
     h, w = img0.shape[:2]
     line_thickness = min(h, w)
-    line_thickness = line_thickness/480
+    line_thickness = line_thickness / 480
     line_thickness = max(line_thickness, 1)
     tl = int(line_thickness) or round(0.002 * (img.shape[0] + img.shape[1]) / 2) + 1  # line/font thickness
     tf = max(tl - 1, 1)  # font thickness
     if len(frameinfo):
-        t_sizeMaxWidth = max(max(cv2.getTextSize(frameinfo[1], 0, fontScale=tl / 3, thickness=tf)[0]), max(cv2.getTextSize(frameinfo[0], 0, fontScale=tl / 3, thickness=tf)[0]))
-        t_sizeMaxHeight = max(min(cv2.getTextSize(frameinfo[1], 0, fontScale=tl / 3, thickness=tf)[0]), min(cv2.getTextSize(frameinfo[0], 0, fontScale=tl / 3, thickness=tf)[0]))
-        img0 = cv2.rectangle(img0, (0, 0), (t_sizeMaxWidth + (t_sizeMaxHeight*2), t_sizeMaxHeight*4), bboxColor, -1,  cv2.LINE_AA)
-        img0 = cv2.putText(img0,frameinfo[0],org= (t_sizeMaxHeight, int(t_sizeMaxHeight*2)), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale= tl/3, color= txtColor, thickness=1, lineType=cv2.LINE_AA)
-        img0 = cv2.putText(img0,frameinfo[1],org= (t_sizeMaxHeight, int(t_sizeMaxHeight*3)), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale= tl/3, color= txtColor, thickness=1, lineType=cv2.LINE_AA)
-        img0 = cv2.line(img0, (0, h-3), (int(frameinfo[2]*w), h-3), (255,0,0), 5)
-        
+        t_sizeMaxWidth = max(max(cv2.getTextSize(frameinfo[1], 0, fontScale=tl / 3, thickness=tf)[0]),
+                             max(cv2.getTextSize(frameinfo[0], 0, fontScale=tl / 3, thickness=tf)[0]))
+        t_sizeMaxHeight = max(min(cv2.getTextSize(frameinfo[1], 0, fontScale=tl / 3, thickness=tf)[0]),
+                              min(cv2.getTextSize(frameinfo[0], 0, fontScale=tl / 3, thickness=tf)[0]))
+        img0 = cv2.rectangle(img0, (0, 0), (t_sizeMaxWidth + (t_sizeMaxHeight * 2), t_sizeMaxHeight * 4), bboxColor, -1,
+                             cv2.LINE_AA)
+        img0 = cv2.putText(img0, frameinfo[0], org=(t_sizeMaxHeight, int(t_sizeMaxHeight * 2)),
+                           fontFace=cv2.FONT_HERSHEY_DUPLEX, fontScale=tl / 3, color=txtColor, thickness=1,
+                           lineType=cv2.LINE_AA)
+        img0 = cv2.putText(img0, frameinfo[1], org=(t_sizeMaxHeight, int(t_sizeMaxHeight * 3)),
+                           fontFace=cv2.FONT_HERSHEY_DUPLEX, fontScale=tl / 3, color=txtColor, thickness=1,
+                           lineType=cv2.LINE_AA)
+        img0 = cv2.line(img0, (0, h - 3), (int(frameinfo[2] * w), h - 3), (255, 0, 0), 5)
+
     if label != None and x is not None:
         c1, c2 = (int(x[0]), int(x[1])), (int(x[2]), int(x[3]))
         img0 = cv2.rectangle(img0, c1, c2, bboxColor, thickness=tl, lineType=cv2.LINE_AA)
         t_size = cv2.getTextSize(label, 0, fontScale=tl / 3, thickness=tf)[0]
         c2 = c1[0] + t_size[0], c1[1] - t_size[1] - 3
         img0 = cv2.rectangle(img0, c1, c2, bboxColor, -1, cv2.LINE_AA)  # filled
-        img0 = cv2.drawContours(img0, [np.array([(c1[0] + t_size[0], c1[1] - t_size[1] - 3), (c1[0] + t_size[0], c1[1] ), (c1[0] + t_size[0] + t_size[1] + 3, c1[1])])], 0, bboxColor, -1, 16)        
-        img0 = cv2.putText(img0, label, org= (c1[0], c1[1] - 2), fontFace= cv2.FONT_HERSHEY_DUPLEX, fontScale= tl / 3,color= txtColor, thickness=tf, lineType=cv2.LINE_AA)
+        img0 = cv2.drawContours(img0, [np.array([(c1[0] + t_size[0], c1[1] - t_size[1] - 3), (c1[0] + t_size[0], c1[1]),
+                                                 (c1[0] + t_size[0] + t_size[1] + 3, c1[1])])], 0, bboxColor, -1, 16)
+        img0 = cv2.putText(img0, label, org=(c1[0], c1[1] - 2), fontFace=cv2.FONT_HERSHEY_DUPLEX, fontScale=tl / 3,
+                           color=txtColor, thickness=tf, lineType=cv2.LINE_AA)
     return img0
 
 
@@ -177,14 +189,15 @@ def plot_images(images, targets, paths=None, fname='images.jpg', names=None, max
                 cls = names[cls] if names else cls
                 if labels or conf[j] > 0.25:  # 0.25 conf thresh
                     label = '%s' % cls if labels else '%s %.1f' % (cls, conf[j])
-                    mosaic = plot_one_box(box, mosaic, label=label, bboxColor=color, txtColor=(0,0,0))
+                    mosaic = plot_one_box(box, mosaic, label=label, bboxColor=color, txtColor=(0, 0, 0))
 
         # Draw image filename labels
         if paths:
             label = Path(paths[i]).name[:40]  # trim to 40 char
             t_size = cv2.getTextSize(label, 0, fontScale=tl / 3, thickness=tf)[0]
-            mosaic =  cv2.putText(mosaic, label, (block_x + 5, block_y + t_size[1] + 5), 0, tl / 3, [220, 220, 220], thickness=tf,
-                        lineType=cv2.LINE_AA)
+            mosaic = cv2.putText(mosaic, label, (block_x + 5, block_y + t_size[1] + 5), 0, tl / 3, [220, 220, 220],
+                                 thickness=tf,
+                                 lineType=cv2.LINE_AA)
 
         # Image border
         mosaic = cv2.rectangle(mosaic, (block_x, block_y), (block_x + w, block_y + h), (255, 255, 255), thickness=3)
@@ -334,17 +347,17 @@ def plot_evolution(yaml_file='data/hyp.finetune.yaml'):  # from utils.plots impo
     plt.figure(figsize=(10, 12), tight_layout=True)
     matplotlib.rc('font', **{'size': 8})
     for i, (k, v) in enumerate(hyp.items()):
-      if i <= 29:
-          y = x[:, i + 7]
-          # mu = (y * weights).sum() / weights.sum()  # best weighted result
-          mu = y[f.argmax()]  # best single result
-          plt.subplot(6, 5, i + 1)
-          plt.scatter(y, f, c=hist2d(y, f, 20), cmap='viridis', alpha=.8, edgecolors='none')
-          plt.plot(mu, f.max(), 'k+', markersize=15)
-          plt.title('%s = %.3g' % (k, mu), fontdict={'size': 9})  # limit to 40 characters
-          if i % 5 != 0:
-              plt.yticks([])
-          print('%15s: %.3g' % (k, mu))
+        if i <= 29:
+            y = x[:, i + 7]
+            # mu = (y * weights).sum() / weights.sum()  # best weighted result
+            mu = y[f.argmax()]  # best single result
+            plt.subplot(6, 5, i + 1)
+            plt.scatter(y, f, c=hist2d(y, f, 20), cmap='viridis', alpha=.8, edgecolors='none')
+            plt.plot(mu, f.max(), 'k+', markersize=15)
+            plt.title('%s = %.3g' % (k, mu), fontdict={'size': 9})  # limit to 40 characters
+            if i % 5 != 0:
+                plt.yticks([])
+            print('%15s: %.3g' % (k, mu))
     plt.savefig('evolve.png', dpi=300)
     print('\nPlot saved as evolve.png')
 
@@ -438,16 +451,17 @@ def plot_results(start=0, stop=0, bucket='', id=(), labels=(), save_dir=''):
 
     ax[1].legend()
     fig.savefig(Path(save_dir) / 'results.png', dpi=300)
-    
-    
+
+
 def output_to_keypoint(output):
     """Convert model output to target format [batch_id, class_id, x, y, w, h, conf]"""
     targets = []
     for i, o in enumerate(output):
-        kpts = o[:,6:]
-        o = o[:,:6]
+        kpts = o[:, 6:]
+        o = o[:, :6]
         for index, (*box, conf, cls) in enumerate(o.detach().cpu().numpy()):
-            targets.append([i, cls, *list(*xyxy2xywh(np.array(box)[None])), conf, *list(kpts.detach().cpu().numpy()[index])])
+            targets.append(
+                [i, cls, *list(*xyxy2xywh(np.array(box)[None])), conf, *list(kpts.detach().cpu().numpy()[index])])
     return np.array(targets)
 
 
@@ -482,15 +496,15 @@ def plot_skeleton_kpts(im, kpts, steps, orig_shape=None):
 
     for sk_id, sk in enumerate(skeleton):
         r, g, b = pose_limb_color[sk_id]
-        pos1 = (int(kpts[(sk[0]-1)*steps]), int(kpts[(sk[0]-1)*steps+1]))
-        pos2 = (int(kpts[(sk[1]-1)*steps]), int(kpts[(sk[1]-1)*steps+1]))
+        pos1 = (int(kpts[(sk[0] - 1) * steps]), int(kpts[(sk[0] - 1) * steps + 1]))
+        pos2 = (int(kpts[(sk[1] - 1) * steps]), int(kpts[(sk[1] - 1) * steps + 1]))
         if steps == 3:
-            conf1 = kpts[(sk[0]-1)*steps+2]
-            conf2 = kpts[(sk[1]-1)*steps+2]
-            if conf1<0.5 or conf2<0.5:
+            conf1 = kpts[(sk[0] - 1) * steps + 2]
+            conf2 = kpts[(sk[1] - 1) * steps + 2]
+            if conf1 < 0.5 or conf2 < 0.5:
                 continue
-        if pos1[0]%640 == 0 or pos1[1]%640==0 or pos1[0]<0 or pos1[1]<0:
+        if pos1[0] % 640 == 0 or pos1[1] % 640 == 0 or pos1[0] < 0 or pos1[1] < 0:
             continue
-        if pos2[0] % 640 == 0 or pos2[1] % 640 == 0 or pos2[0]<0 or pos2[1]<0:
+        if pos2[0] % 640 == 0 or pos2[1] % 640 == 0 or pos2[0] < 0 or pos2[1] < 0:
             continue
         cv2.line(im, pos1, pos2, (int(r), int(g), int(b)), thickness=2)
