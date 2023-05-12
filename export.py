@@ -253,6 +253,7 @@ if __name__ == '__main__':
             torch.onnx.disable_log()
             if img.dtype != torch.float16 and opt.trace:
                 model = torch.jit.trace(model, img).eval()
+                logging.info(f'{prefix} Traced model!')
             torch.onnx.export(model,
                               img, f, verbose=opt.v,
                               opset_version=opt.onnx_opset,
@@ -275,7 +276,6 @@ if __name__ == '__main__':
                     check_requirements('onnxsim')
                     import onnxsim
                     logging.info(f'{prefix} Starting to simplify ONNX...')
-                    logging.info(f'{prefix} Warning simplify will export with graph shape, its good for visualize the network, but can be worst wit ORT')
                     onnx_model, check = onnxsim.simplify(onnx_model)
                     assert check, 'assert check failed'
                 except Exception as e:

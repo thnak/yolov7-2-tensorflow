@@ -670,11 +670,11 @@ class Model(nn.Module):
                 m.forward = m.fuseforward
         return self
 
-    def nms(self, mode=True):  # add or remove NMS module
+    def nms(self, mode=True, conf=0.25, iou=0.45, classes=None):  # add or remove NMS module
         present = type(self.model[-1]) is NMS  # last layer is NMS
         if mode and not present:
-            print('Adding NMS... ')
-            m = NMS()  # module
+            print(f'Adding NMS... conf: {conf}, iou: {iou}, classes: {classes}')
+            m = NMS(conf=conf, iou=iou, classes=classes)  # module
             m.f = -1  # from
             m.i = self.model[-1].i + 1  # index
             self.model.add_module(name='%s' % m.i, module=m)  # add
@@ -682,7 +682,6 @@ class Model(nn.Module):
         elif not mode and present:
             print('Removing NMS... ')
             self.model = self.model[:-1]  # remove
-        return self
 
     def autoshape(self):  # add autoShape module
         print('Adding autoShape... ')

@@ -118,10 +118,10 @@ class Conv(nn.Module):
         self.conv = nn.Conv2d(c1, c2, k, s, autopad(k, p), groups=g, bias=False)
         self.bn = nn.BatchNorm2d(c2)
         self.act = nn.SiLU() if act is True else (act if isinstance(act, nn.Module) else nn.Identity())
-        self.drop = nn.Dropout2d(0.2)
+        # self.drop = nn.Dropout2d(0.2)
 
     def forward(self, x):
-        return self.drop(self.act(self.bn(self.conv(x))))
+        return self.act(self.bn(self.conv(x)))
 
     def fuseforward(self, x):
         return self.act(self.conv(x))
@@ -1105,12 +1105,15 @@ class Expand(nn.Module):
 
 class NMS(nn.Module):
     """Non-Maximum Suppression (NMS) module"""
-    conf = 0.25  # confidence threshold
-    iou = 0.45  # IoU threshold
-    classes = None  # (optional list) filter by class
+    # conf = 0.25  # confidence threshold
+    # iou = 0.45  # IoU threshold
+    # classes = None  # (optional list) filter by class
 
-    def __init__(self):
+    def __init__(self, conf=.25, iou=.45, classes=None):
         super(NMS, self).__init__()
+        self.conf = conf
+        self.iou = iou
+        self.classes = classes
 
     def forward(self, x):
         return non_max_suppression(x[0], conf_thres=self.conf, iou_thres=self.iou, classes=self.classes)
