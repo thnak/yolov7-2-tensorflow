@@ -784,7 +784,7 @@ if __name__ == '__main__':
         train(hyp, opt, tb_writer=tb_writer)
     # Evolve hyperparameters (optional)
     else:
-        # Hyperparameter evolution metadata (mutation scale 0-1, lower_limit, upper_limit)
+        # Hyperparameter evolution metadata (mutation scale 0-1 [0 to ignore], lower_limit, upper_limit)
         meta = {'lr0': (1, 1e-5, 1e-1),  # initial learning rate (SGD=1E-2, Adam=1E-3)
                 # final OneCycleLR learning rate (lr0 * lrf)
                 'lrf': (1, 0.01, 1.0),
@@ -800,9 +800,9 @@ if __name__ == '__main__':
                 'obj_pw': (1, 0.5, 2.0),  # obj BCELoss positive_weight
                 'iou_t': (1, 0.1, 0.7),  # IoU training threshold
                 'anchor_t': (1, 2.0, 8.0),  # anchor-multiple threshold
-                # anchors per output grid (0 to ignore)
-                'anchors': (0, 3.0, 10.0),
-                'fl_gamma': (1, 0.0, 2.0)}  # focal loss gamma (efficientDet default gamma=1.5)
+                'anchors': (0, 3.0, 10.0),  # anchors != 3 make error with reparamater
+                'fl_gamma': (1, 0.0, 2.0),
+                'lost_ota': (1, 0, 1)}  # focal loss gamma (efficientDet default gamma=1.5)
 
         with open(opt.hyp, errors='ignore') as f:
             hyp = yaml.safe_load(f)  # load hyps dict
@@ -812,8 +812,7 @@ if __name__ == '__main__':
         assert opt.local_rank == -1, 'DDP mode not implemented for --evolve'
         opt.notest, opt.nosave = True, True  # only test/save final epoch
         # ei = [isinstance(x, (int, float)) for x in hyp.values()]  # evolvable indices
-        yaml_file = Path(opt.save_dir) / \
-                    'hyp_evolved.yaml'  # save best result here
+        yaml_file = Path(opt.save_dir) / 'hyp_evolved.yaml'  # save best result here
         if opt.bucket:
             os.system('gsutil cp gs://%s/evolve.txt .' %
                       opt.bucket)  # download evolve.txt if exists
