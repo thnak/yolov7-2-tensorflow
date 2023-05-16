@@ -575,6 +575,7 @@ class TFModel:
             self.yaml['nc'] = nc  # override yaml value
         self.model, self.savelist = parse_model(deepcopy(self.yaml), ch=[ch], model=model, imgsz=imgsz)
 
+
     def __call__(self,
                  inputs,
                  tf_nms=False,

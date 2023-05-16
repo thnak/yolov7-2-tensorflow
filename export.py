@@ -95,7 +95,10 @@ if __name__ == '__main__':
         best_fitness = model.best_fitness if hasattr(model, 'best_fitness') else 0.
         total_image = model.total_image if hasattr(model, 'total_image') else [0]
         input_shape = model.input_shape if hasattr(model, 'input_shape') else ([3, 384, 640] if model.is_p5() else [3, 768, 1280])
-        input_shape = [3, max(input_shape), max(input_shape)] if tensorFlowjs else input_shape
+        input_shape = [3, max(input_shape), max(input_shape)] if any([tensorFlowjs,
+                                                                      tensorFlowLite,
+                                                                      saved_Model,
+                                                                      graphDef]) else input_shape
         model_version = model.model_version if hasattr(model, 'model_version') else 0
         model.best_fitness = best_fitness
         model.model_version = model_version

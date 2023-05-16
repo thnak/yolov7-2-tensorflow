@@ -104,7 +104,7 @@ def export_saved_model(model,
     tf_model = TFModel(cfg=model.yaml, model=model.cpu(), nc=len(model.names), imgsz=imgsz)
     im = tf.zeros((batch_size, *imgsz, ch))  # BHWC order for TensorFlow
     _ = tf_model(im, tf_nms, agnostic_nms, topk_per_class, topk_all, iou_thres, conf_thres)
-    inputs = tf.keras.Input(shape=(*imgsz, ch), batch_size=None if dynamic else batch_size)
+    inputs = tf.keras.Input(shape=(*imgsz, ch), name=f"image", batch_size=None if dynamic else batch_size)
     outputs = tf_model(inputs, tf_nms, agnostic_nms, topk_per_class, topk_all, iou_thres, conf_thres)
     keras_model = tf.keras.Model(inputs=inputs, outputs=outputs)
     keras_model.trainable = False
