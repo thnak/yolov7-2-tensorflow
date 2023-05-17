@@ -879,6 +879,9 @@ class ONNX_Engine(object):
             ratios = [ratio]
         output = []
         for index, (batch_id, x0, y0, x1, y1, cls_id, score) in enumerate(outputs):
+            score = float(score)
+            if score < confThres:
+                continue
             batch_id = int(batch_id)
             if image[batch_id] is None:
                 image[batch_id] = ori_images[batch_id]
@@ -887,11 +890,7 @@ class ONNX_Engine(object):
             box /= ratios[batch_id][0]
             box = box.round().astype(np.int32).tolist()
             cls_id = int(cls_id)
-            score = round(float(score), 2)
-            if score < confThres:
-                continue
             name = names[cls_id]
-            name += ' ' + str(score)
             bbox[batch_id] = xyxy2xywh(box, image[batch_id].shape[:2])
             output.append({"batch_id": batch_id, "bbox": bbox, "box": box, "id": cls_id, "name": name, "score": score})
         return output

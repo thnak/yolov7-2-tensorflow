@@ -347,9 +347,9 @@ def model_info(model, verbose=False, img_size=640):
         fs = f'{flops} Gflops\n'  # 640x640 GFLOPS
         fs += f'               Model size (in memory): {size_in_mem} (FP32)\n'
         fs += f'               Anchor Free: {model.anchorFree if hasattr(model, "anchorFree") else False}\n'
-        fs += f'               Version: {model.model_version if hasattr(model, "model_version") else "?"}\n'
-        fs += f'               Best fitness: {model.best_fitness if hasattr(model, "best_fitness") else "unknown"}\n'
-        fs += f'               Dataset: {str(model.total_image[-1])+" images" if hasattr(model, "total_image") else "unknown"}\n'
+        fs += f'               Version: {model.model_version if hasattr(model, "model_version") else "0"}\n'
+        fs += f'               Best fitness: {model.best_fitness if hasattr(model, "best_fitness") else "-1.0"}\n'
+        fs += f'               Dataset: {str(model.total_image[-1])+" images" if hasattr(model, "total_image") else "[]"}\n'
         fs += f'               Input shape: {model.input_shape if hasattr(model, "input_shape") else img.shape.tolist()[1:]}\n'
         fs += f'               Image size (in memory): {size_in_mem2} (UInt8)\n'
         fs += f'               Stride: {[int(x) for x in model.stride.tolist()]}\n'
