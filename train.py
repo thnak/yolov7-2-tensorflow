@@ -368,8 +368,10 @@ def train(hyp, opt, tb_writer=None,
                 f'Using {dataloader.num_workers} dataloader workers\n'
                 f'Logging results to {save_dir}\n'
                 f'Starting training for {epochs} epochs...\n')
-    torch.save({'model': model}, wdir / 'init.pt')
-    logger.info(f'saved init model at: {wdir / "init.pt"}')
+    model.to(device=torch.device('cpu'))
+    save_dir_ = wdir / 'init.pt'
+    torch.save({'model': model}, save_dir_)
+    logger.info(f'saved init model at: {save_dir_}')
     # epoch ------------------------------------------------------------------
     for epoch in range(start_epoch, epochs):
         model.to(device).train(mode=True)
@@ -407,7 +409,7 @@ def train(hyp, opt, tb_writer=None,
             del _
             # number integrated batches (since train start)
             ni = i + nb * epoch
-            imgs = imgs.to(device, non_blocking=True).float() / 255.0  # uint8 to float32, 0-255 to 0.0-1.0
+            imgs = imgs.to(device=device, non_blocking=True, dtype=torch.float32) / 255.0  # uint8 to float32, 0-255 to 0.0-1.0
 
             # Warmup
             if ni <= nw:
@@ -677,9 +679,9 @@ def train(hyp, opt, tb_writer=None,
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--weights', type=str, default='', help='initial weights path')
-    parser.add_argument('--cfg', type=str, default='cfg/training/yolov7.yaml', help='model.yaml path')
-    parser.add_argument('--data', type=str, default='mydataset.yaml', help='data.yaml path')
+    parser.add_argument('--weights', type=str, default='', help='pretained model path')
+    parser.add_argument('--cfg', type=str, default='', help='model config path. if this rule is empty and --weights got an exists path -->train same model with more epochs')
+    parser.add_argument('--data', type=str, default='', help='data.yaml path')
     parser.add_argument('--hyp', type=str, default='data/hyp.scratch.custom.yaml', help='hyperparameters path')
     parser.add_argument('--epochs', type=int, default=300)
     parser.add_argument('--augment', action='store_true', help='using augment for training')

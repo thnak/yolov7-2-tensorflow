@@ -113,15 +113,21 @@ class Foldcut(nn.Module):
 
 class Conv(nn.Module):
     """Standard convolution"""
-    def __init__(self, c1, c2, k=1, s=1, p=None, g=1, act=True):  # ch_in, ch_out, kernel, stride, padding, groups
+    def __init__(self, c1, c2, k=1, s=1, p=None, g=1, act=True, dropout=0):  # ch_in, ch_out, kernel, stride, padding, groups
         super(Conv, self).__init__()
         self.conv = nn.Conv2d(c1, c2, k, s, autopad(k, p), groups=g, bias=False)
         self.bn = nn.BatchNorm2d(c2)
+        if dropout > 0:
+            self.drop = nn.Dropout(p=dropout)
+            self.forward = self.__forward__
         self.act = nn.SiLU() if act is True else (act if isinstance(act, nn.Module) else nn.Identity())
         # self.drop = nn.Dropout2d(0.2)
 
     def forward(self, x):
         return self.act(self.bn(self.conv(x)))
+
+    def __forward__(self, x):
+        return self.act(self.bn(self.drop(self.conv(x))))
 
     def fuseforward(self, x):
         return self.act(self.conv(x))
@@ -941,13 +947,12 @@ class C3(nn.Module):
         c_ = int(c2 * e)  # hidden channels
         act = nn.SiLU() if act is True else (act if isinstance(act, nn.Module) else nn.Identity())
         self.cv1 = Conv(c1, c_, 1, 1, act=act)
-        self.cv2 = None
+        self.cv2 = Conv(c1, c_, 1, 1, act=act)
         self.cv3 = Conv(2 * c_, c2, 1, act=act)  # optional act=FReLU(c2)
         self.m = nn.Sequential(*(Bottleneck(c_, c_, shortcut, g, e=1.0) for _ in range(n)))
 
     def forward(self, x):
-        x0 = self.cv1(x)
-        return self.cv3(torch.cat((self.m(x0), x0), 1))
+        return self.cv3(torch.cat((self.m(self.cv1(x)), self.cv2(x)), 1))
 
 
 class C3x(C3):

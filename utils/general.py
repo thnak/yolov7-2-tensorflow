@@ -691,7 +691,9 @@ def box_diou(box1, box2, eps: float = 1e-7):
 
 def non_max_suppression(prediction: torch.Tensor, conf_thres=0.25, iou_thres=0.45, classes=None, agnostic=False,
                         multi_label=False,
-                        labels=()):
+                        labels=(), max_det=300, min_wh=2,
+                        max_wh=4096, max_nms=30000,
+                        time_limit=10.0, redunant=True, merge=False):
     """Runs Non-Maximum Suppression (NMS) on inference results
 
     Returns:
@@ -703,13 +705,13 @@ def non_max_suppression(prediction: torch.Tensor, conf_thres=0.25, iou_thres=0.4
     xc = prediction[..., 4] > conf_thres  # candidates
 
     # Settings
-    min_wh, max_wh = 2, 4096  # (pixels) minimum and maximum box width and height
-    max_det = 300  # maximum number of detections per image
-    max_nms = 30000  # maximum number of boxes into torchvision.ops.nms()
-    time_limit = 10.0  # seconds to quit after
-    redundant = True  # require redundant detections
+    # min_wh, max_wh = 2, 4096  # (pixels) minimum and maximum box width and height
+    # max_det = 300  # maximum number of detections per image
+    # max_nms = 30000  # maximum number of boxes into torchvision.ops.nms()
+    # time_limit = 10.0  # seconds to quit after
+    # redundant = True  # require redundant detections
     multi_label &= nc > 1  # multiple labels per box (adds 0.5ms/img)
-    merge = False  # use merge-NMS
+    # merge = False  # use merge-NMS
 
     t = time.time()
     output = [torch.zeros((0, 6), device=prediction.device)] * prediction.shape[0]

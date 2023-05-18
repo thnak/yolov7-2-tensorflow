@@ -46,7 +46,9 @@ def test(data,
          name=None,
          task=None,
          exist_ok=None,
-         device=None):
+         device=None,
+         max_nms=30000,
+         max_det=300):
     # Initialize/load model and set device
     training = model is not None
     if training:  # called by train.py
@@ -138,7 +140,8 @@ def test(data,
         lb = [targets[targets[:, 0] == i, 1:] for i in range(nb)] if save_hybrid else []  # for autolabelling
         t = time_synchronized()
         out = non_max_suppression(out, conf_thres, iou_thres, labels=lb, multi_label=True,
-                                  agnostic=single_cls)
+                                  agnostic=single_cls,
+                                  max_det=max_det, max_nms=max_nms)
         out = [o.to(device) for o in out]
         t1 += time_synchronized() - t
 
