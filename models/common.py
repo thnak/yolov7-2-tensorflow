@@ -121,13 +121,12 @@ class Conv(nn.Module):
             self.drop = nn.Dropout(p=dropout)
             self.forward = self.__forward__
         self.act = nn.SiLU() if act is True else (act if isinstance(act, nn.Module) else nn.Identity())
-        # self.drop = nn.Dropout2d(0.2)
 
     def forward(self, x):
         return self.act(self.bn(self.conv(x)))
 
     def __forward__(self, x):
-        return self.act(self.bn(self.drop(self.conv(x))))
+        return self.drop(self.act(self.bn(self.conv(x))))
 
     def fuseforward(self, x):
         return self.act(self.conv(x))

@@ -23,6 +23,10 @@ models/best_saved_model/
 *.tflite
 *.mp3
 *.mp4
+*.zip
+*.rar
+*.tar
+
 TrainRes/train
 TrainRes/val
 tre.py
