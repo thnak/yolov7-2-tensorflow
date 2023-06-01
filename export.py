@@ -65,6 +65,7 @@ if __name__ == '__main__':
                       for x in opt.include)
     graphDef = any(x in ['saved_model', 'grapdef', 'tfjs']
                    for x in opt.include)
+    RKNN = any(x in ['rknn'] for x in opt.include)
 
     t = time.time()
     opt.weights = [os.path.realpath(x) for x in opt.weights] if isinstance(
@@ -110,12 +111,26 @@ if __name__ == '__main__':
         img = torch.zeros(opt.batch_size, *input_shape, device=map_device)
 
         # Update model
+        endpoints_2_break = []
+        startpoints_2_break = 0
         for k, m in model.named_modules():
+            endpoints_2_break.append(k)
+
             m._non_persistent_buffers_set = set()  # pytorch 1.6.0 compatibility
-            if isinstance(m, models.common.Conv):  # assign export-friendly activations
-                if isinstance(m, (models.yolo.Detect, models.yolo.IDetect, models.yolo.IAuxDetect)):
-                    m.dynamic = opt.dynamic
-                # m.act = torch.nn.Sigmoid()
+            if isinstance(m, models.common.ReOrg):
+                startpoints_2_break = []
+            if isinstance(m, models.common.Conv) and isinstance(startpoints_2_break, list):
+                if not len(startpoints_2_break):
+                    startpoints_2_break.append(f'/model.0/Concat_output_0')
+
+            if isinstance(m, (models.yolo.Detect, models.yolo.IDetect, models.yolo.IAuxDetect)):
+                m.dynamic = opt.dynamic
+
+        endpoints_2_break = endpoints_2_break[-len(model.yaml['anchors']):]
+
+        for i,x in enumerate(endpoints_2_break):
+            from_modul, modul_idx, attr, idx = x.split('.')
+            endpoints_2_break[i] = f'/{from_modul}.{modul_idx}/{attr}.{idx}/Conv_output_0'
 
         model_Gflop = model.info(verbose=False, img_size=input_shape)
         logging.info(model_Gflop)
@@ -137,6 +152,12 @@ if __name__ == '__main__':
             model.model[-1].include_nms = True
             y = None
         filenames = []
+        if RKNN:
+            prefix = colorstr('RKNN:')
+            if isinstance(startpoints_2_break, int):
+                startpoints_2_break = ['images']
+            logging.info(f'{prefix} breaking from {startpoints_2_break} to {endpoints_2_break}')
+            ONNX = True
         # TorchScript export
         if torchScript:
             try:
@@ -265,6 +286,8 @@ if __name__ == '__main__':
                               training=torch.onnx.TrainingMode.EVAL,
                               dynamic_axes=dynamic_axes,
                               keep_initializers_as_inputs=True)
+            if RKNN:
+                onnx.utils.extract_model(input_path=f, output_path=f, input_names=startpoints_2_break, output_names=endpoints_2_break)
             # Checks
             onnx_model = onnx.load(f)  # load onnx model
             onnx.checker.check_model(onnx_model)  # check onnx model
@@ -299,6 +322,7 @@ if __name__ == '__main__':
                              'total_image': total_image,
                              'export_date': datetime.datetime.now().isoformat('#'),
                              'exporting_opt': vars(opt),
+                             "anchors": model.yaml['anchors']
                              }
             key_prefix = colorstr('yellow', 'key:')
             for index, key in enumerate(ckpt):
