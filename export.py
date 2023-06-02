@@ -318,6 +318,7 @@ if __name__ == '__main__':
                              'best_fitness': best_fitness,
                              'stride': gs,
                              'nc': len(labels),
+                             'stride': model.stride.cpu().tolist(),
                              'names': labels,
                              'total_image': total_image,
                              'export_date': datetime.datetime.now().isoformat('#'),
