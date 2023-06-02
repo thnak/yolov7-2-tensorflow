@@ -316,7 +316,6 @@ if __name__ == '__main__':
             onnx_MetaData = {'model_infor': model_Gflop,
                              'export_gitstatus': gitstatus,
                              'best_fitness': best_fitness,
-                             'stride': gs,
                              'nc': len(labels),
                              'stride': model.stride.cpu().tolist(),
                              'names': labels,
