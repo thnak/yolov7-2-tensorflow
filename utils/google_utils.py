@@ -19,8 +19,8 @@ def gsutil_getsize(url=''):
 def attempt_download(file, repo='WongKinYiu/yolov7'):
     """Attempt file download if does not exist"""
     file = Path(str(file).strip().replace("'", '').lower())
-
-    if not os.path.exists(file):
+    print(f'debug {file.as_posix()}')
+    if not file.exists():
         try:
             from utils.general import colorstr
             prefix = colorstr(f'Attemp_download():')
@@ -38,13 +38,13 @@ def attempt_download(file, repo='WongKinYiu/yolov7'):
 
         name = file.name
         if name in assets:
-            msg = f'{file} missing, try downloading from https://github.com/{repo}/releases/'
-            redundant = False  # second download option
+            msg = f're-try download manual from https://github.com/{repo}/releases/'
+            redundant = True  # second download option
             try:  # GitHub
                 url = f'https://github.com/{repo}/releases/download/{tag}/{name}'
-                print(f'Downloading {url} to {file}...')
-                torch.hub.download_url_to_file(url, file)
-                assert file.exists() and file.stat().st_size > 1E6  # check
+                print(f'Downloading {url} to {file.as_posix()}...')
+                torch.hub.download_url_to_file(url, file.as_posix())
+                assert file.exists()  # check
             except Exception as e:  # GCP
                 print(f'Download error: {e}')
                 assert redundant, 'No secondary mirror'

@@ -2,7 +2,7 @@ import datetime
 from utils.torch_utils import select_device, prune
 from utils.general import set_logging, check_img_size, check_requirements, colorstr, ONNX_OPSET, ONNX_OPSET_TARGET, \
     gb2mb, MAX_DET
-from utils.activations import Hardswish, SiLU
+from utils.activations import SiLU
 from models.experimental import attempt_load, End2End
 import models
 from torch.utils.mobile_optimizer import optimize_for_mobile
@@ -68,7 +68,7 @@ if __name__ == '__main__':
     RKNN = any(x in ['rknn'] for x in opt.include)
 
     t = time.time()
-    opt.weights = [os.path.realpath(x) for x in opt.weights] if isinstance(
+    opt.weights = [x for x in opt.weights] if isinstance(
         opt.weights, (tuple, list)) else [os.path.realpath(opt.weights)]
     warnings.filterwarnings('ignore', category=torch.jit.TracerWarning)
     warnings.filterwarnings(action='ignore', category=UserWarning)
@@ -79,11 +79,9 @@ if __name__ == '__main__':
         device, gitstatus = select_device(opt.device)
         map_device = 'cpu' if device.type == 'privateuseone' else device
         with torch.no_grad():
+            model = attempt_load(weight, map_location=map_device).to(map_device).eval()  # load FP32 model
             ckpt = torch.load(weight, map_location=map_device)
-            try:
-                model = attempt_load(weight, map_location=map_device).to(map_device).eval()  # load FP32 model
-            except Exception:
-                model = ckpt['model'].float().eval()
+
             for m in model.parameters():
                 m.requires_grad = False
             ckpt.pop('model', None)
@@ -111,26 +109,32 @@ if __name__ == '__main__':
         img = torch.zeros(opt.batch_size, *input_shape, device=map_device)
 
         # Update model
-        endpoints_2_break = []
-        startpoints_2_break = 0
+        end_points_2_break = []
+        start_points_2_break = 0
         for k, m in model.named_modules():
-            endpoints_2_break.append(k)
+            end_points_2_break.append(k)
 
             m._non_persistent_buffers_set = set()  # pytorch 1.6.0 compatibility
             if isinstance(m, models.common.ReOrg):
-                startpoints_2_break = []
-            if isinstance(m, models.common.Conv) and isinstance(startpoints_2_break, list):
-                if not len(startpoints_2_break):
-                    startpoints_2_break.append(f'/model.0/Concat_output_0')
+                start_points_2_break = []
+            if isinstance(m, models.common.Conv):
+                if isinstance(start_points_2_break, list):
+                    if not len(start_points_2_break):
+                        start_points_2_break.append(f'/model.0/Concat_output_0')
+                if isinstance(m.act, SiLU):
+                    m.act = nn.SiLU()
+                if RKNN:
+                    if isinstance(m.act, (nn.SiLU, SiLU, nn.ReLU6)) :
+                        m.act = nn.ReLU()
 
             if isinstance(m, (models.yolo.Detect, models.yolo.IDetect, models.yolo.IAuxDetect)):
                 m.dynamic = opt.dynamic
 
-        endpoints_2_break = endpoints_2_break[-len(model.yaml['anchors']):]
+        end_points_2_break = end_points_2_break[-len(model.yaml['anchors']):]
 
-        for i,x in enumerate(endpoints_2_break):
+        for i,x in enumerate(end_points_2_break):
             from_modul, modul_idx, attr, idx = x.split('.')
-            endpoints_2_break[i] = f'/{from_modul}.{modul_idx}/{attr}.{idx}/Conv_output_0'
+            end_points_2_break[i] = f'/{from_modul}.{modul_idx}/{attr}.{idx}/Conv_output_0'
 
         model_Gflop = model.info(verbose=False, img_size=input_shape)
         logging.info(model_Gflop)
@@ -154,9 +158,9 @@ if __name__ == '__main__':
         filenames = []
         if RKNN:
             prefix = colorstr('RKNN:')
-            if isinstance(startpoints_2_break, int):
-                startpoints_2_break = ['images']
-            logging.info(f'{prefix} breaking from {startpoints_2_break} to {endpoints_2_break}')
+            if isinstance(start_points_2_break, int):
+                start_points_2_break = ['images']
+            logging.info(f'{prefix} breaking from {start_points_2_break} to {end_points_2_break}')
             ONNX = True
         # TorchScript export
         if torchScript:
@@ -287,7 +291,7 @@ if __name__ == '__main__':
                               dynamic_axes=dynamic_axes,
                               keep_initializers_as_inputs=True)
             if RKNN:
-                onnx.utils.extract_model(input_path=f, output_path=f, input_names=startpoints_2_break, output_names=endpoints_2_break)
+                onnx.utils.extract_model(input_path=f, output_path=f, input_names=start_points_2_break, output_names=end_points_2_break)
             # Checks
             onnx_model = onnx.load(f)  # load onnx model
             onnx.checker.check_model(onnx_model)  # check onnx model
