@@ -326,7 +326,8 @@ if __name__ == '__main__':
                              'total_image': total_image,
                              'export_date': datetime.datetime.now().isoformat('#'),
                              'exporting_opt': vars(opt),
-                             "anchors": model.yaml['anchors']
+                             "anchor_grid": model.model[-1].anchor_grid.detach().cpu().numpy().tolist(),
+                             "anchors": model.model[-1].anchors.detach().cpu().numpy().tolist(),
                              }
             key_prefix = colorstr('yellow', 'key:')
             for index, key in enumerate(ckpt):
