@@ -30,6 +30,7 @@ if __name__ == '__main__':
     parser.add_argument('--max-hw', '--ort', action='store_true', default=None,
                         help='end2end onnxruntime')
     parser.add_argument('--topk-all', type=int, default=MAX_DET, help='topk objects for every images')
+    parser.add_argument('--rect', action="store_true", help="export with rectangle input shape")
     parser.add_argument('--iou-thres', '-iou', type=float, default=0.45, help='iou threshold for NMS')
     parser.add_argument('--conf-thres', '-conf', type=float, default=0.2, help='conf threshold for NMS')
     parser.add_argument('--onnx-opset', type=int, default=12, help='onnx opset version, 11 for DmlExecutionProvider')
@@ -93,11 +94,16 @@ if __name__ == '__main__':
 
         best_fitness = model.best_fitness if hasattr(model, 'best_fitness') else 0.
         total_image = model.total_image if hasattr(model, 'total_image') else [0]
-        input_shape = model.input_shape if hasattr(model, 'input_shape') else ([3, 384, 640] if model.is_p5() else [3, 768, 1280])
-        input_shape = [3, max(input_shape), max(input_shape)] if any([tensorFlowjs,
-                                                                      tensorFlowLite,
-                                                                      saved_Model,
-                                                                      graphDef]) else input_shape
+        if hasattr(model, "input_shape"):
+            input_shape = model.input_shape
+        else:
+            if model.is_p5():
+                input_shape = [3, 384, 640] if opt.rect else [3, 640, 640]
+            else:
+                input_shape = [3, 1280, 1280] if opt.rect else [3, 1280, 1280]
+        if any([tensorFlowjs, tensorFlowLite, saved_Model, graphDef]):
+            input_shape = [3, max(input_shape), max(input_shape)]
+
         model_version = model.model_version if hasattr(model, 'model_version') else 0
         model.best_fitness = best_fitness
         model.model_version = model_version
@@ -123,23 +129,21 @@ if __name__ == '__main__':
                         start_points_2_break.append(f'/model.0/Concat_output_0')
                 if isinstance(m.act, SiLU):
                     m.act = nn.SiLU()
-                if RKNN:
-                    if isinstance(m.act, (nn.SiLU, SiLU, nn.ReLU6)) :
-                        m.act = nn.ReLU()
 
             if isinstance(m, (models.yolo.Detect, models.yolo.IDetect, models.yolo.IAuxDetect)):
                 m.dynamic = opt.dynamic
 
         end_points_2_break = end_points_2_break[-len(model.yaml['anchors']):]
 
-        for i,x in enumerate(end_points_2_break):
+        for i, x in enumerate(end_points_2_break):
             from_modul, modul_idx, attr, idx = x.split('.')
             end_points_2_break[i] = f'/{from_modul}.{modul_idx}/{attr}.{idx}/Conv_output_0'
 
-        model_Gflop = model.info(verbose=False, img_size=input_shape)
-        logging.info(model_Gflop)
-        model.model[-1].export = True if coreML and not opt.end2end else False  # set Detect() layer grid export, for coreml export set to True
-        y = model(img)  # dry run
+        model_Gflops = model.info(verbose=False, img_size=input_shape)
+        logging.info(model_Gflops)
+        model.model[-1].export = True if coreML and not opt.end2end else False  # set Detect() layer grid export,
+        # for coreml export set to True
+        y = model(img)
 
         if device.type in ['cuda'] and opt.fp16:
             img = img.to(device).half()
@@ -168,7 +172,7 @@ if __name__ == '__main__':
                 prefix = colorstr('TorchScript:')
                 logging.info(
                     f'\n{prefix} Starting TorchScript export with torch{torch.__version__}')
-                f = weight.replace('.pt', '.torchscript.pt')  # filename
+                f = weight.replace('.pt', '.torch-script.pt')  # filename
                 ts = torch.jit.trace(model, img, strict=False)
                 ts.save(f)
                 logging.info(f'{prefix} export success✅, saved as {f}')
@@ -187,7 +191,11 @@ if __name__ == '__main__':
                 if opt.end2end:
                     ts = iOSModel(model, img)
                     ts = torch.jit.trace(ts, img, strict=False)
-                ct_model = ct.convert(ts, inputs=[ct.ImageType('image', shape=img.shape, scale=1 / 255.0, bias=[0, 0, 0])])
+                ct_model = ct.convert(ts,
+                                      inputs=[ct.ImageType('image',
+                                                           shape=img.shape,
+                                                           scale=1 / 255.0,
+                                                           bias=[0, 0, 0])])
                 bits, mode = (8, 'kmeans_lut') if opt.int8 else (
                     16, 'linear') if opt.fp16 else (32, None)
                 if bits < 32:
@@ -270,6 +278,7 @@ if __name__ == '__main__':
             dml = False
             try:
                 import torch_directml
+
                 dml = True
             except ImportError:
                 pass
@@ -291,7 +300,8 @@ if __name__ == '__main__':
                               dynamic_axes=dynamic_axes,
                               keep_initializers_as_inputs=True)
             if RKNN:
-                onnx.utils.extract_model(input_path=f, output_path=f, input_names=start_points_2_break, output_names=end_points_2_break)
+                onnx.utils.extract_model(input_path=f, output_path=f, input_names=start_points_2_break,
+                                         output_names=end_points_2_break)
             # Checks
             onnx_model = onnx.load(f)  # load onnx model
             onnx.checker.check_model(onnx_model)  # check onnx model
@@ -305,6 +315,7 @@ if __name__ == '__main__':
                 try:
                     check_requirements('onnxsim')
                     import onnxsim
+
                     logging.info(f'{prefix} Starting to simplify ONNX...')
                     onnx_model, check = onnxsim.simplify(onnx_model)
                     assert check, 'assert check failed'
@@ -317,7 +328,7 @@ if __name__ == '__main__':
             onnx.checker.check_model(onnx_model)  # check onnx model
             logging.info(f'{prefix} writing metadata for model...')
 
-            onnx_MetaData = {'model_infor': model_Gflop,
+            onnx_MetaData = {'model_infor': model_Gflops,
                              'export_gitstatus': gitstatus,
                              'best_fitness': best_fitness,
                              'nc': len(labels),
@@ -334,7 +345,8 @@ if __name__ == '__main__':
                 if key == 'model':
                     continue
                 if key == 'best_fitness':
-                    ckpt[key] = ckpt[key].tolist()[0] if isinstance(ckpt[key], (np.ndarray, torch.Tensor)) else ckpt[key]
+                    ckpt[key] = ckpt[key].tolist()[0] if isinstance(ckpt[key], (np.ndarray, torch.Tensor)) else ckpt[
+                        key]
                 onnx_MetaData[key] = ckpt[key]
 
             for index, key in enumerate(onnx_MetaData):
@@ -350,6 +362,7 @@ if __name__ == '__main__':
                 logging.info(
                     f'{prefix} Registering NMS plugin for ONNX TRT...')
                 from utils.add_nms import RegisterNMS
+
                 mo = RegisterNMS(logger=logging,
                                  onnx_model_path=f,
                                  precision='fp16' if img.dtype == torch.float16 else 'fp32', prefix=prefix)
