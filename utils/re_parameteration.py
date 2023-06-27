@@ -24,16 +24,25 @@ def Re_parameterization(inputWeightPath='v7-tiny-training.pt',
         string_cfg = str(old_model.yaml).replace('IDetect', 'Detect').replace('IV6Detect', 'V6Detect')
         if "IAuxDetect" in string_cfg:
             while 1:
-                print(f"maybe your model is {model_named[nodes] if nodes in model_named else model_named[-1]}")
-                input_cfg = input("please put your cfg deploy compatible with your model here (example: type 'cfg/deploy/yolov7.yaml' if you train with 'cfg/training/yolov7.yaml')\n")
+                named = model_named[nodes] if nodes in model_named else model_named[-1]
+                named = named.lower()
+                print(" ".join(["=" for x in range(100)]))
+                print(f"maybe your model is {named}")
+                input_cfg = input(f"please put your cfg deploy compatible with your model here (example: type 'cfg/deploy/{named}.yaml' if you train with 'cfg/training/{named}.yaml')\n")
                 input_cfg = Path(input_cfg)
                 if not input_cfg.exists():
-                    print(f"{input_cfg.as_posix()} not found")
+                    print(f"file '{input_cfg.as_posix()}' not found")
                 else:
-                    break
-            import yaml
-            with open(input_cfg.as_posix(), "r") as f:
-                string_cfg = yaml.load(f, yaml.SafeLoader)
+                    try:
+                        import yaml
+                        with open(input_cfg.as_posix(), "r") as f:
+                            string_cfg = yaml.load(f, yaml.SafeLoader)
+                            break
+                    except Exception as ex:
+                        print(f"error\n{ex}")
+                print(" ".join(["=" for x in range(100)]))
+                print("")
+
         cfg = eval(string_cfg) if isinstance(string_cfg, str) else string_cfg
         if 'head_deploy' in cfg:
             cfg['head'] = cfg['head_deploy']
