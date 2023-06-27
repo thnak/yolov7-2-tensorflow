@@ -1,11 +1,15 @@
 import datetime
 from utils.torch_utils import select_device, prune
-from utils.general import set_logging, check_img_size, check_requirements, colorstr, ONNX_OPSET, ONNX_OPSET_TARGET, \
-    gb2mb, MAX_DET
+from utils.general import (set_logging, check_img_size, check_requirements, colorstr, ONNX_OPSET, ONNX_OPSET_TARGET,
+                           gb2mb, MAX_DET)
 from utils.activations import SiLU
+from utils.re_parameteration import Re_parameterization
 from models.experimental import attempt_load, End2End
-import models
+from models.yolo import (IDetect, Detect, IAuxDetect, IV6Detect)
+from models.common import (ReOrg, Conv)
+# import models
 from torch.utils.mobile_optimizer import optimize_for_mobile
+from pathlib import Path
 import torch.nn as nn
 import torch
 import argparse
@@ -23,6 +27,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--weights', nargs='+', type=str, default=['./best.pt'], help='weights path')
     parser.add_argument('--batch-size', type=int, default=1, help='batch size')
+    parser.add_argument('--imgsz', type=int, nargs='+', default=-1, help="special input shape, ignore this parameter with use default")
     parser.add_argument('--dynamic', action='store_true', help='dynamic ONNX axes')
     parser.add_argument('--dynamic-batch', action='store_true', help='dynamic batch onnx for tensorrt and onnx-runtime')
     parser.add_argument('--include', nargs='+', type=str, default='onnx', help='export format')
@@ -75,13 +80,17 @@ if __name__ == '__main__':
     warnings.filterwarnings(action='ignore', category=UserWarning)
     warnings.filterwarnings(action='ignore', category=FutureWarning)
     for weight in opt.weights:
+        weight = Path(weight)
+        assert weight.exists(), f"file {weight.as_posix()} not found."
         prefix = colorstr('Export:')
         logging.info(f'{prefix} Load PyTorch model')
         device, gitstatus = select_device(opt.device)
         map_device = 'cpu' if device.type == 'privateuseone' else device
         with torch.no_grad():
-            model = attempt_load(weight, map_location=map_device).to(map_device).eval()  # load FP32 model
-            ckpt = torch.load(weight, map_location=map_device)
+            model = attempt_load(weight.as_posix(),
+                                 map_location=map_device).to(map_device).eval()  # load FP32 model
+            ckpt = torch.load(weight.as_posix(),
+                              map_location=map_device)
 
             for m in model.parameters():
                 m.requires_grad = False
@@ -94,15 +103,28 @@ if __name__ == '__main__':
 
         best_fitness = model.best_fitness if hasattr(model, 'best_fitness') else 0.
         total_image = model.total_image if hasattr(model, 'total_image') else [0]
-        if hasattr(model, "input_shape"):
-            input_shape = model.input_shape
-        else:
-            if model.is_p5():
-                input_shape = [3, 384, 640] if opt.rect else [3, 640, 640]
+        gs = int(max(model.stride.max(), 32))  # grid size (max stride)
+
+        input_shape = opt.imgsz
+        if input_shape != -1:
+            if isinstance(input_shape, (tuple, list)):
+                input_shape = [3, check_img_size(input_shape[0], s=gs), check_img_size(input_shape[1 if len(input_shape)>1 else 0], s=gs)]
             else:
-                input_shape = [3, 1280, 1280] if opt.rect else [3, 1280, 1280]
-        if any([tensorFlowjs, tensorFlowLite, saved_Model, graphDef]):
-            input_shape = [3, max(input_shape), max(input_shape)]
+                input_shape = check_img_size(input_shape)
+                input_shape = [3, input_shape, input_shape]
+            logging.info(f"Export: using user input shape {input_shape}")
+
+        else:
+            if hasattr(model, "input_shape"):
+                input_shape = model.input_shape
+            else:
+                if model.is_p5():
+                    input_shape = [3, 384, 640] if opt.rect else [3, 640, 640]
+                else:
+                    input_shape = [3, 1280, 1280] if opt.rect else [3, 1280, 1280]
+            if any([tensorFlowjs, tensorFlowLite, saved_Model, graphDef]):
+                input_shape = [3, max(input_shape), max(input_shape)]
+                logging.info(f"Export: switching to square shape... input_shape: {input_shape}")
 
         model_version = model.model_version if hasattr(model, 'model_version') else 0
         model.best_fitness = best_fitness
@@ -110,7 +132,6 @@ if __name__ == '__main__':
         model.total_image = total_image
         model.input_shape = input_shape
         labels = model.names
-        gs = int(max(model.stride.max(), 32))  # grid size (max stride)
 
         img = torch.zeros(opt.batch_size, *input_shape, device=map_device)
 
@@ -121,17 +142,34 @@ if __name__ == '__main__':
             end_points_2_break.append(k)
 
             m._non_persistent_buffers_set = set()  # pytorch 1.6.0 compatibility
-            if isinstance(m, models.common.ReOrg):
+            if isinstance(m, ReOrg):
                 start_points_2_break = []
-            if isinstance(m, models.common.Conv):
+            if isinstance(m, Conv):
                 if isinstance(start_points_2_break, list):
                     if not len(start_points_2_break):
                         start_points_2_break.append(f'/model.0/Concat_output_0')
                 if isinstance(m.act, SiLU):
                     m.act = nn.SiLU()
 
-            if isinstance(m, (models.yolo.Detect, models.yolo.IDetect, models.yolo.IAuxDetect)):
+            if isinstance(m, (Detect, IDetect, IAuxDetect)):
                 m.dynamic = opt.dynamic
+            if isinstance(m, (IDetect, IAuxDetect)):
+                logging.info(f"Detected IDetect class in the model, trying to re-parameter...")
+                re_paramDir = weight.as_posix().replace(".pt", "_re_param.pt")
+                model = torch.load(weight.as_posix(), map_location=map_device)["model"]
+                model.to(device).eval()
+                model.input_shape = input_shape
+                torch.save({"model": model}, re_paramDir)
+                if Re_parameterization(re_paramDir, re_paramDir):
+                    logging.info(f"Re-parameter finished, exporting...\n")
+                    ckpt = torch.load(re_paramDir, map_location=map_device)
+                    model = ckpt["model"].eval().float().fuse()
+                    end_points_2_break = []
+                    for m_ in model.parameters():
+                        m_.requires_grad = False
+                    for x, y in model.named_modules():
+                        end_points_2_break.append(x)
+                    break
 
         end_points_2_break = end_points_2_break[-len(model.yaml['anchors']):]
 
@@ -172,7 +210,7 @@ if __name__ == '__main__':
                 prefix = colorstr('TorchScript:')
                 logging.info(
                     f'\n{prefix} Starting TorchScript export with torch{torch.__version__}')
-                f = weight.replace('.pt', '.torch-script.pt')  # filename
+                f = weight.as_posix().replace('.pt', '.torch-script.pt')  # filename
                 ts = torch.jit.trace(model, img, strict=False)
                 ts.save(f)
                 logging.info(f'{prefix} export success✅, saved as {f}')
@@ -207,7 +245,7 @@ if __name__ == '__main__':
                     else:
                         logging.info(
                             f'{prefix} quantization only supported on macOS, skipping...')
-                f = weight.replace('.pt', '.mlmodel')  # filename
+                f = weight.as_posix().replace('.pt', '.mlmodel')  # filename
                 ct_model.save(f)
                 logging.info(
                     f'{prefix} CoreML export success✅, saved as %s' % f)
@@ -219,7 +257,7 @@ if __name__ == '__main__':
             try:
                 logging.info(
                     f'\n{prefix} Starting TorchScript-Lite export with torch {torch.__version__}')
-                f = weight.replace('.pt', '.torchscript.ptl')  # filename
+                f = weight.as_posix().replace('.pt', '.torchscript.ptl')  # filename
                 tsl = torch.jit.trace(model, img, strict=False)
                 tsl = optimize_for_mobile(tsl)
                 tsl._save_for_lite_interpreter(f)
@@ -236,7 +274,7 @@ if __name__ == '__main__':
 
             logging.info(
                 f'\n{prefix} Starting ONNX export with onnx {onnx.__version__}')
-            f = weight.replace('.pt', '.onnx')  # filename
+            f = weight.as_posix().replace('.pt', '.onnx')  # filename
             output_names = ['classes',
                             'boxes'] if y is None else ['output']
             dynamic_axes = None
