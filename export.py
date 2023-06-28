@@ -1,3 +1,4 @@
+import argparse
 import datetime
 from utils.torch_utils import select_device, prune
 from utils.general import (set_logging, check_img_size, check_requirements, colorstr, ONNX_OPSET, ONNX_OPSET_TARGET,
@@ -7,39 +8,41 @@ from utils.re_parameteration import Re_parameterization
 from models.experimental import attempt_load, End2End
 from models.yolo import (IDetect, Detect, IAuxDetect, IV6Detect)
 from models.common import (ReOrg, Conv)
-# import models
+
 from torch.utils.mobile_optimizer import optimize_for_mobile
 from pathlib import Path
 import torch.nn as nn
 import torch
-import argparse
 import sys
 import time
 import warnings
 import logging
-import os
 import numpy as np
 from copy import deepcopy
 
 sys.path.append('./')  # to run '$ python *.py' files in subdirectories
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description="Export your pytorch model to another format")
     parser.add_argument('--weights', nargs='+', type=str, default=['./best.pt'], help='weights path')
-    parser.add_argument('--batch-size', type=int, default=1, help='batch size')
-    parser.add_argument('--imgsz', type=int, nargs='+', default=-1, help="special input shape, ignore this parameter with use default")
+    parser.add_argument('--batch-size', type=int, default=1, help='batch size for onnx export')
+    parser.add_argument('--imgsz', type=int, nargs='+', default=-1,
+                        help="special input shape, omitting this parameter will use default argument. "
+                             "Example --imgsz 640 320 or --imgsz 640")
     parser.add_argument('--dynamic', action='store_true', help='dynamic ONNX axes')
     parser.add_argument('--dynamic-batch', action='store_true', help='dynamic batch onnx for tensorrt and onnx-runtime')
-    parser.add_argument('--include', nargs='+', type=str, default='onnx', help='export format')
+    parser.add_argument('--include', nargs='+', type=str, default='onnx',
+                        help='specify a special format for model output')
     parser.add_argument('--end2end', action='store_true', help='export end2end onnx for ORT or TRT)')
     parser.add_argument('--max-hw', '--ort', action='store_true', default=None,
                         help='end2end onnxruntime')
-    parser.add_argument('--topk-all', type=int, default=MAX_DET, help='topk objects for every images')
-    parser.add_argument('--rect', action="store_true", help="export with rectangle input shape")
-    parser.add_argument('--iou-thres', '-iou', type=float, default=0.45, help='iou threshold for NMS')
-    parser.add_argument('--conf-thres', '-conf', type=float, default=0.2, help='conf threshold for NMS')
-    parser.add_argument('--onnx-opset', type=int, default=12, help='onnx opset version, 11 for DmlExecutionProvider')
-    parser.add_argument('--device', default='cpu', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
+    parser.add_argument('--topk-all', type=int, default=MAX_DET,
+                        help=f'topk objects for every frames. Default {MAX_DET}"')
+    parser.add_argument('--iou-thres', '-iou', type=float, default=0.45, help=f'iou threshold for NMS. Default {0.45}')
+    parser.add_argument('--conf-thres', '-conf', type=float, default=0.2, help=f'conf threshold for NMS. Default {0.2}')
+    parser.add_argument('--onnx-opset', type=int, default=12,
+                        help='onnx opset version, 11 for DmlExecutionProvider. Default 12')
+    parser.add_argument('--device', default='cpu', help='cuda:0 or dml:0. default cpu')
     parser.add_argument('--simplify', action='store_true', help='simplify onnx model')
     parser.add_argument('--include-nms', action='store_true',
                         help='registering EfficientNMS_TRT plugin to export TensorRT engine')
@@ -74,16 +77,18 @@ if __name__ == '__main__':
     RKNN = any(x in ['rknn'] for x in opt.include)
 
     t = time.time()
-    opt.weights = [x for x in opt.weights] if isinstance(
-        opt.weights, (tuple, list)) else [os.path.realpath(opt.weights)]
+    opt.weights = [Path(x) for x in opt.weights] if isinstance(
+        opt.weights, (tuple, list)) else [Path(opt.weights)]
     warnings.filterwarnings('ignore', category=torch.jit.TracerWarning)
     warnings.filterwarnings(action='ignore', category=UserWarning)
     warnings.filterwarnings(action='ignore', category=FutureWarning)
+
+    exPrefix = colorstr('Export:')
+
     for weight in opt.weights:
-        weight = Path(weight)
+        # weight = Path(weight)
         assert weight.exists(), f"file {weight.as_posix()} not found."
-        prefix = colorstr('Export:')
-        logging.info(f'{prefix} Load PyTorch model')
+        logging.info(f'{exPrefix} loading PyTorch model')
         device, gitstatus = select_device(opt.device)
         map_device = 'cpu' if device.type == 'privateuseone' else device
         with torch.no_grad():
@@ -108,23 +113,25 @@ if __name__ == '__main__':
         input_shape = opt.imgsz
         if input_shape != -1:
             if isinstance(input_shape, (tuple, list)):
-                input_shape = [3, check_img_size(input_shape[0], s=gs), check_img_size(input_shape[1 if len(input_shape)>1 else 0], s=gs)]
+                input_shape = [3, check_img_size(input_shape[0], s=gs),
+                               check_img_size(input_shape[1 if len(input_shape) > 1 else 0], s=gs)]
             else:
                 input_shape = check_img_size(input_shape)
                 input_shape = [3, input_shape, input_shape]
-            logging.info(f"Export: using user input shape {input_shape}")
+            logging.info(f"{exPrefix} using user input shape {input_shape}")
 
         else:
             if hasattr(model, "input_shape"):
                 input_shape = model.input_shape
+                logging.info(f"{exPrefix} using input shape from pre-trained model")
             else:
-                if model.is_p5():
-                    input_shape = [3, 384, 640] if opt.rect else [3, 640, 640]
-                else:
-                    input_shape = [3, 1280, 1280] if opt.rect else [3, 1280, 1280]
+                input_shape = [3, 640, 640] if model.is_p5() else [3, 1280, 1280]
+                logging.info(
+                    f'{exPrefix} using default input shape. to export with special input shape please use --imgsz arg arg')
             if any([tensorFlowjs, tensorFlowLite, saved_Model, graphDef]):
                 input_shape = [3, max(input_shape), max(input_shape)]
-                logging.info(f"Export: switching to square shape... input_shape: {input_shape}")
+                logging.info(
+                    f"{exPrefix} switching to square shape... input_shape: {input_shape}. since some format does not support rectangle shape")
 
         model_version = model.model_version if hasattr(model, 'model_version') else 0
         model.best_fitness = best_fitness
@@ -154,14 +161,14 @@ if __name__ == '__main__':
             if isinstance(m, (Detect, IDetect, IAuxDetect)):
                 m.dynamic = opt.dynamic
             if isinstance(m, (IDetect, IAuxDetect)):
-                logging.info(f"Detected IDetect class in the model, trying to re-parameter...")
+                logging.info(f"{exPrefix} detected IDetect class in the model, trying to re-parameter...")
                 re_paramDir = weight.as_posix().replace(".pt", "_re_param.pt")
                 model = torch.load(weight.as_posix(), map_location=map_device)["model"]
                 model.to(device).eval()
                 model.input_shape = input_shape
                 torch.save({"model": model}, re_paramDir)
                 if Re_parameterization(re_paramDir, re_paramDir):
-                    logging.info(f"Re-parameter finished, exporting...\n")
+                    logging.info(f"{exPrefix} re-parameter finished, exporting...\n")
                     ckpt = torch.load(re_paramDir, map_location=map_device)
                     model = ckpt["model"].eval().float().fuse()
                     end_points_2_break = []
@@ -192,7 +199,7 @@ if __name__ == '__main__':
 
         # model output shape
         shape = tuple((y[0] if isinstance(y, (tuple, list)) else y).shape)
-        logging.info(f'{prefix} model output shape {shape}')
+        logging.info(f'{exPrefix} model output shape {shape} in pytorch format')
 
         if opt.include_nms:
             model.model[-1].include_nms = True
@@ -202,7 +209,7 @@ if __name__ == '__main__':
             prefix = colorstr('RKNN:')
             if isinstance(start_points_2_break, int):
                 start_points_2_break = ['images']
-            logging.info(f'{prefix} breaking from {start_points_2_break} to {end_points_2_break}')
+            logging.info(f'{prefix} input name: {start_points_2_break} output name: {end_points_2_break}')
             ONNX = True
         # TorchScript export
         if torchScript:
@@ -277,6 +284,10 @@ if __name__ == '__main__':
             f = weight.as_posix().replace('.pt', '.onnx')  # filename
             output_names = ['classes',
                             'boxes'] if y is None else ['output']
+            if y is None:
+                output_names = ["classes", "boxes"]
+            else:
+                output_names = ["output"]
             dynamic_axes = None
             if opt.dynamic:
                 dynamic_axes = {'images': {0: 'batch', 2: 'height', 3: 'width'},  # size(1,3,640,640)
@@ -391,7 +402,7 @@ if __name__ == '__main__':
                 metadata = onnx_model.metadata_props.add()
                 metadata.key = key
                 metadata.value = str(onnx_MetaData[key])
-                logging.info(f'{key_prefix} {key}, value: {onnx_MetaData[key]}')
+                # logging.info(f'{key_prefix} {key}, value: {onnx_MetaData[key]}')
 
             onnxmltools.utils.save_model(onnx_model, f)
             logging.info(f'{prefix} export success✅, saved as {f}')
