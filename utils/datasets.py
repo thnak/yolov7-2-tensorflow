@@ -19,7 +19,7 @@ import torch
 from torchvision import transforms
 import torch.nn.functional as F
 from PIL import Image, ExifTags
-from tqdm.auto import tqdm
+from tqdm import tqdm
 import psutil
 from copy import deepcopy
 # from pycocotools import mask as maskUtils
@@ -175,7 +175,6 @@ class LoadImages:
             img_size (int, optional): _description_. Defaults to 640.
             stride (int, optional): _description_. Defaults to 32. Stride of YOLO network
             auto (bool, optional): _description_. Defaults to True. set False for rectangle shape
-            transforms (_type_, optional): _description_. Defaults to None.
             vid_stride (int, optional): _description_. Defaults to 1.
 
         Raises:
@@ -314,8 +313,6 @@ class LoadStreams:
                 try:
                     url = pafy.new(url).getbest(preftype="mp4").url
                 except Exception as ex:
-                    # logger.error(f'if the error come from pafy library, please report to https://github.com/thnak/pafy.git')
-                    # logger.info('attempting install pafy from git')
                     logger.info(f"{ex}")
                     # os.system('pip install git+https://github.com/thnak/pafy.git')
             cap = cv2.VideoCapture(url, cv2.CAP_ANY)
@@ -380,9 +377,11 @@ class LoadStreams:
 
 class LoadScreenshots:
     def __init__(self, source, img_size=(640, 640), stride=32, auto=True, scaleFill=False, scaleUp=True):
-        check_requirements('mss==7.0.1')
-        import mss
-
+        try:
+            check_requirements('mss')
+            import mss
+        except ImportError as ie:
+            print(f'{ie}')
         source, *params = source.split()
         self.screen, left, top, width, height = 0, None, None, None, None  # default to full screen 0
         if len(params) == 1:
@@ -438,6 +437,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
     def __init__(self, path, img_size=640, batch_size=16, augment=False, hyp=None, rect=False, image_weights=False,
                  cache_images='ram', single_cls=False, stride=32, pad=0.0, single_channel=False, prefix=''):
 
+        self.is_labeled = []
         self.img_size = img_size
         self.augment = augment
         self.hyp = hyp
@@ -447,7 +447,6 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         self.mosaic_border = [-img_size // 2, -img_size // 2]
         self.stride = stride
         self.path = path
-        self.cache_images = cache_images
         self.albumentations = Albumentations(hyp, rect=rect) if augment else None
         self.pin_memory = False
         try:
@@ -475,7 +474,8 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         cache_path = (p if p.is_file() else Path(self.label_files[0]).parent).with_suffix('.cache')  # cached labels
         if cache_path.is_file():
             cache, exists = torch.load(cache_path), True  # load
-            if cache['hash'] != get_hash(self.label_files + self.img_files) or cache['version'] != self.version:  # changed
+            if cache['hash'] != get_hash(self.label_files + self.img_files) or cache[
+                'version'] != self.version:  # changed
                 cache, exists = self.cache_labels(cache_path, prefix), False  # re-cache
         else:
             cache, exists = self.cache_labels(cache_path, prefix), False  # cache
@@ -487,7 +487,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             tqdm(None, desc=prefix + d, total=n, initial=n, mininterval=0.05, maxinterval=1,
                  unit='image', bar_format=TQDM_BAR_FORMAT)  # display cache results
         assert nf > 0 or not augment, f'{prefix}No labels in {cache_path}. Can not train without labels. See {HELP_URL}'
-        self.imgs = [None] * (nf + nm)
+        self.imgs = [np.array([None])] * (nf + nm)
         self.img_npy = [None] * (nf + nm)
 
         # Read cache
@@ -514,12 +514,12 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             # Sort by aspect ratio
             s = self.shapes  # wh
             ar = s[:, 1] / s[:, 0]  # aspect ratio
-            irect = ar.argsort()
-            self.img_files = [self.img_files[i] for i in irect]
-            self.label_files = [self.label_files[i] for i in irect]
-            self.labels = [self.labels[i] for i in irect]
-            self.shapes = s[irect]  # wh
-            ar = ar[irect]
+            i_rect = ar.argsort()
+            self.img_files = [self.img_files[i] for i in i_rect]
+            self.label_files = [self.label_files[i] for i in i_rect]
+            self.labels = [self.labels[i] for i in i_rect]
+            self.shapes = s[i_rect]  # wh
+            ar = ar[i_rect]
 
             # Set training image shapes
             shapes = [[1, 1]] * nb
@@ -533,44 +533,45 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
 
             self.batch_shapes = np.ceil(np.array(shapes) * img_size / stride + pad).astype(np.int32) * stride
         # Cache images into memory for faster training (WARNING: large datasets may exceed system RAM)
-        if self.cache_images in ['ram', 'disk']:
-            if self.cache_images == 'ram':
-                check_ram = self.check_cache_ram(prefix=prefix)
-                if not check_ram:
-                    self.cache_images = 'disk'
-                elif check_ram:
-                    if torch.cuda.is_available():
-                        self.pin_memory = TORCH_PIN_MEMORY
-                        self.cache_images = '' if TORCH_PIN_MEMORY else 'ram'
-                    else:
-                        self.cache_images = 'ram'
-            if self.cache_images == 'disk':
-                self.im_cache_dir = Path(Path(self.img_files[0]).parent.as_posix() + '_npy')
-                self.img_npy = [self.im_cache_dir / Path(f).with_suffix('.npy').name for f in self.img_files]
-                self.im_cache_dir.mkdir(parents=True, exist_ok=True)
-            if self.cache_images:
-                gb = 0  # Gigabytes of cached images
-                self.img_hw0, self.img_hw = [None] * n, [None] * n
-                results = ThreadPool().imap(self.load_image, range(n))
-                pbar = tqdm(enumerate(results), total=n, unit='image',bar_format=TQDM_BAR_FORMAT)
-                checkimgSizeStatus = False
-                for i, x in pbar:
-                    if self.cache_images == 'disk':
-                        if not self.img_npy[i].exists():
-                            np.save(self.img_npy[i].as_posix(), x[0])
-                        else:
-                            if not checkimgSizeStatus:
-                                testSize = np.load(self.img_npy[i])
-                                assert self.img_size in testSize.shape[:2], colored(
-                                    f'You need to re-cache dataset by remove folder {self.im_cache_dir}', 'red')
-                                checkimgSizeStatus = True
-                        gb += os.path.getsize(self.img_npy[i])
-                    else:
-                        self.imgs[i], self.img_hw0[i], self.img_hw[i] = x
-                        gb += self.imgs[i].nbytes
-                    pbar.desc = f'{prefix}Caching images {gb2mb(gb)} {self.cache_images.upper()}'
-                pbar.close()
+        if cache_images in ['ram', 'disk']:
+            ram_idx, disk_idx = self.check_cache_ram(prefix=prefix)
+            if torch.cuda.is_available():
+                self.pin_memory = TORCH_PIN_MEMORY
 
+            self.im_cache_dir = Path(Path(self.img_files[0]).parent.as_posix() + '_npy')
+            self.im_cache_dir.mkdir(parents=True, exist_ok=True)
+
+            self.img_npy = [self.im_cache_dir / Path(f).with_suffix('.npy').name for f in self.img_files]
+
+            gb = 0  # Gigabytes of cached images
+
+            self.img_hw0, self.img_hw = [None] * n, [None] * n
+            results = ThreadPool().imap(self.load_image, range(n))
+            pbar = tqdm(results, total=n, unit='image', bar_format=TQDM_BAR_FORMAT)
+            checkImgSizeStatus = False
+            for i, x in enumerate(pbar):
+                if not self.is_labeled[i]:
+                    continue
+                if i < ram_idx:
+                    cache_images = "ram"
+                    self.imgs[i], self.img_hw0[i], self.img_hw[i] = x
+                    gb += self.imgs[i].nbytes
+                elif i < disk_idx:
+                    cache_images = "disk"
+                    if not self.img_npy[i].exists():
+                        np.save(self.img_npy[i].as_posix(), x[0])
+                    else:
+                        if not checkImgSizeStatus:
+                            testSize = np.load(self.img_npy[i].as_posix())
+                            assert self.img_size in testSize.shape[:2], colored(
+                                f'You need to re-cache dataset by remove folder {self.im_cache_dir}', 'red')
+                            checkImgSizeStatus = True
+                    gb += os.path.getsize(self.img_npy[i])
+                else:
+                    cache_images = ""
+                    continue
+                pbar.desc = f'{prefix}Caching images {gb2mb(gb)} in {cache_images.upper()}'
+            pbar.close()
 
     def check_cache_ram(self, prefix='', safety_margin=1.5):
         tem = int(self.stride * ((self.img_size / self.stride) - 1))
@@ -578,11 +579,18 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         num = np.zeros((*img_sz, 3), dtype=np.uint8 if self.image_8bit else np.uint16)
         b = num.nbytes * len(self.img_files)
         mem = psutil.virtual_memory()
-        cache = True if b < (mem.available * safety_margin) else False  # to cache or not to cache, that is the question
-        print(f"{prefix}{gb2mb(b)} RAM required (estimate), "
-              f"{gb2mb(mem.available)}/{gb2mb(mem.total)} available, "
-              f"{'caching images on RAM💾, reduce img-size to reduce the cache size' if cache else 'caching images DISK💽, reduce img-size to reduce the cache size'}")
-        return cache
+        num2cache_ram = mem.available * (mem.available / (mem.available * safety_margin))
+        num2cache_ram = min(int(num2cache_ram / num.nbytes), len(self.img_files))
+        import shutil
+        total_disk, used_disk, free_disk = shutil.disk_usage(Path(__file__).as_posix())
+        num2cache_disk = free_disk * (free_disk / (free_disk * safety_margin))
+        num2cache_disk = min(int(num2cache_disk / num.nbytes), len(self.img_files) - num2cache_ram)
+
+        print(f"{prefix}{gb2mb(b)} memory required (estimate), "
+              f"ram {gb2mb(mem.available)}/{gb2mb(mem.total)} available, disk {gb2mb(free_disk)}/{gb2mb(total_disk)} "
+              f"available.\n"
+              f"{prefix}Caching {num2cache_ram} in ram, {num2cache_disk} in disk.")
+        return num2cache_ram, num2cache_disk
 
     def cache_labels(self, path=Path('./labels.cache'), prefix=''):
         """Cache dataset labels, check images and read shapes"""
@@ -595,6 +603,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                     maxinterval=1,
                     unit='obj',
                     bar_format=TQDM_BAR_FORMAT)
+        self.is_labeled = [False for x in range(len(self.img_files))]
         for i, (im_file, lb_file) in enumerate(pbar):
             try:
                 # verify images
@@ -602,12 +611,13 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                 im.verify()  # PIL verify
                 shape = exif_size(im)  # image size
                 segments = []  # instance segments
-                assert shape[0]*shape[1] > self.minimum_size, f'image size {shape} < {self.minimum_size} pixels'
+                assert shape[0] * shape[1] > self.minimum_size, f'image size {shape} < {self.minimum_size} pixels'
                 assert im.format.lower() in IMG_FORMATS, f'invalid image format {im.format} the format must be {IMG_FORMATS}'
                 del im
                 # verify labels
                 if os.path.isfile(lb_file):
                     nf += 1  # label found
+                    self.is_labeled[i] = True
                     with open(lb_file, 'r') as f:
                         l = [x.split() for x in f.read().strip().splitlines()]
                         if any([len(x) > 8 for x in l]):  # is segment
@@ -622,13 +632,16 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                         assert np.unique(l, axis=0).shape[0] == l.shape[0], 'duplicate labels'
                     else:
                         ne += 1  # label empty
+                        self.is_labeled[i] = False
                         l = np.zeros((0, 5), dtype=np.float32)
                 else:
                     nm += 1  # label missing
+                    self.is_labeled[i] = False
                     l = np.zeros((0, 5), dtype=np.float32)
                 x[im_file] = [l, shape, segments]
             except Exception as e:
                 nc += 1
+                self.is_labeled[i] = False
                 print(f'{prefix}WARNING: Ignoring corrupted image and/or label {im_file}: {e}')
 
             pbar.desc = f"{prefix}Scanning '{path.parent / path.stem}' images and labels... " \
@@ -646,11 +659,17 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
     def load_image(self, index):
         """Load image from disk if not in cached or from cached if use --cache RAM"""
         img = self.imgs[index]
-        imgnpy = self.img_npy[index]
-        imgnpy = imgnpy if isinstance(imgnpy, str) else 'imgnpy.npy'
-        if img is None and os.path.exists(imgnpy) is False:
+        img_npy = self.img_npy[index]
+        if img is not None:
+            return self.imgs[index], self.img_hw0[index], self.img_hw[index]
+
+        elif img_npy.exists():
+            img = np.load(img_npy.as_posix())
+            return img, img.shape[:2], img.shape[:2]
+
+        else:
             path = self.img_files[index]
-            img = cv2.imread(path)
+            img = cv2.imread(path, cv2.IMREAD_COLOR)  # ignore alpha channel
             assert img is not None, 'Image Not Found ' + path
             h0, w0 = img.shape[:2]
             r = self.img_size / max(h0, w0)
@@ -658,11 +677,6 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                 interp = cv2.INTER_AREA if r < 1 else cv2.INTER_CUBIC
                 img = cv2.resize(img, (int(w0 * r), int(h0 * r)), interpolation=interp)
             return img, (h0, w0), img.shape[:2]
-        elif img is not None:
-            return self.imgs[index], self.img_hw0[index], self.img_hw[index]
-        elif os.path.exists(imgnpy):
-            img = np.load(imgnpy)
-            return img, img.shape[:2], img.shape[:2]
 
     def __len__(self):
         """Return number of valid image include background"""
@@ -721,7 +735,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                 sample_labels, sample_images, sample_masks = [], [], []
                 while len(sample_labels) < 30:
                     sample_labels_, sample_images_, sample_masks_ = self.load_samples(random.randint(0,
-                                                                                                      len(self.labels) - 1))
+                                                                                                     len(self.labels) - 1))
                     sample_labels += sample_labels_
                     sample_images += sample_images_
                     sample_masks += sample_masks_

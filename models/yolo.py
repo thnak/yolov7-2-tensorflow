@@ -1,7 +1,5 @@
-from utils.plots import plot_one_box
-import numpy as np
+from pathlib import Path
 from utils.general import check_requirements
-from utils.loss import SigmoidBin
 from utils.torch_utils import time_synchronized, fuse_conv_and_bn, model_info, scale_img, initialize_weights, \
     select_device, copy_attr
 from utils.general import make_divisible, check_file, set_logging, colorstr, xywh2xyxy, box_iou
@@ -9,7 +7,6 @@ from utils.autoanchor import check_anchor_order
 from utils.activations import *
 from models.experimental import *
 from models.common import *
-import torchvision
 import torch
 import argparse
 import logging
@@ -25,6 +22,21 @@ except ImportError:
     thop = None
 
 UPSAMPLEMODE = ['nearest', 'linear', 'bilinear', 'bicubic']
+
+
+class Classify(nn.Module):
+    def __init__(self, c1, c2, k=1, s=1, p=None, g=1, dropout_p=0.0):
+        super(Classify, self).__init__()
+        c_ = int(c2*1.25)
+        self.conv = Conv(c1, c_, k, s, autopad(k, p), g)
+        self.pool = nn.AdaptiveAvgPool2d(1)  # to x(b,c_,1,1)
+        self.drop = nn.Dropout(p=dropout_p, inplace=True)
+        self.linear = nn.Linear(c_, c2)  # to x(b,c2)
+
+    def forward(self, x):
+        if isinstance(x, list):
+            x = torch.cat(x, 1)
+        return self.linear(self.drop(self.pool(self.conv(x)).flatten(1)))
 
 
 class Detect(nn.Module):
@@ -280,7 +292,7 @@ class IAuxDetect(nn.Module):
             x[i] = x[i].view(bs, self.na, self.no, ny, nx).permute(0, 1, 3, 4, 2).contiguous()
 
             if not self.training:  # inference
-                self.grid = self._make_grid(nx, ny).to(x[i].device)
+                grid = self._make_grid(nx, ny).to(x[i].device)
 
                 y = x[i].sigmoid()
                 if not torch.onnx.is_in_onnx_export():
@@ -522,7 +534,7 @@ class Model(nn.Module):
             logger.info(
                 f'Overriding model.yaml anchors with anchors={anchors}')
             self.yaml['anchors'] = round(anchors)  # override yaml value
-        self.model, self.save = parse_model(deepcopy(self.yaml), ch=[ch])  # model, savelist
+        self.model, self.save = parse_model(deepcopy(self.yaml), ch=[ch], nc=nc)  # model, savelist
         self.names = [str(i) for i in range(self.yaml['nc'])]  # default names
         self.best_fitness = 0.
         self.model_version = 0
@@ -535,23 +547,26 @@ class Model(nn.Module):
         m = self.model[-1]  # Detect()
         m.inplace = self.inplace
         s = 1024  # scale it up for large shape
-        inputSampleShape = [1024]*2
-        if isinstance(m, (Detect, IDetect)):
-            m.stride = torch.tensor([s / x.shape[-2] for x in self.forward(torch.zeros(1, ch, *inputSampleShape))])  # forward
+        inputSampleShape = [1024] * 2
+        if isinstance(m, (Detect, IDetect, Classify)):
+            m.stride = torch.tensor(
+                [s / x.shape[-2] for x in self.forward(torch.zeros(1, ch, *inputSampleShape))])  # forward
             check_anchor_order(m)
             m.anchors /= m.stride.view(-1, 1, 1)
             self.stride = m.stride
             self._initialize_biases()  # only run once
 
         elif isinstance(m, IAuxDetect):
-            m.stride = torch.tensor([s / x.shape[-2] for x in self.forward(torch.zeros(1, ch, *inputSampleShape))[:4]])  # forward
+            m.stride = torch.tensor(
+                [s / x.shape[-2] for x in self.forward(torch.zeros(1, ch, *inputSampleShape))[:4]])  # forward
             check_anchor_order(m)
             m.anchors /= m.stride.view(-1, 1, 1)
             self.stride = m.stride
             self._initialize_aux_biases()  # only run once
 
         elif isinstance(m, (V6Detect, IV6Detect)):
-            m.stride = torch.tensor([s / x.shape[-2] for x in self.forward(torch.zeros(1, ch, *inputSampleShape))[0]])  # forward
+            m.stride = torch.tensor(
+                [s / x.shape[-2] for x in self.forward(torch.zeros(1, ch, *inputSampleShape))[0]])  # forward
             self.stride = m.stride
             m.bias_init()
             self.anchorFree = True
@@ -604,7 +619,7 @@ class Model(nn.Module):
                     m(x.copy() if c else x)
                 dt.append((time_synchronized() - t) * 100)
                 print('%10.1f%10.0f%10.1fms %-40s' % (o, m.np, dt[-1], m.type))
-
+            # print(f'debug: {m.i} {m}')
             x = m(x)  # run
 
             y.append(x if m.i in self.save else None)  # save output
@@ -850,9 +865,8 @@ class ONNX_Engine(object):
         y[3] = (x[3] - x[1]) / dim[0]  # height
         return y
 
-
     @staticmethod
-    def end2end(outputs, ori_images, dwdh, ratio, names, xyxy2xywh, confThres=0.2,):
+    def end2end(outputs, ori_images, dwdh, ratio, names, xyxy2xywh, confThres=0.2, ):
         """
         @param confThres: minimum score allowed
         @param outputs: outputs of prediction
@@ -906,10 +920,13 @@ class TensorRT_Engine(object):
     """
 
     def __init__(self, TensorRT_EnginePath, confThres=0.5, iouThres=0.45, prefix=''):
-
-        import tensorrt as trt
-        import pycuda.driver as cuda
-        import pycuda.autoinit
+        try:
+            import tensorrt as trt
+            import pycuda.driver as cuda
+            import pycuda.autoinit
+        except ImportError as ie:
+            print(ie)
+            exit()
         from utils.general import BackgroundForegroundColors
         import yaml
         import cv2
@@ -1185,8 +1202,8 @@ class TensorRT_Engine(object):
         return img
 
 
-def parse_model(d, ch):  # model_dict, input_channels(3)
-    logger.info('\n%3s%18s%3s%10s  %-40s%-30s' %
+def parse_model(d, ch, nc=80):  # model_dict, input_channels(3)
+    logger.info('\n%3s%42s%3s%10s  %-40s%-30s' %
                 ('', 'from', 'n', 'params', 'module', 'arguments'))
     anchors, nc, gd, gw = d['anchors'], d['nc'], d['depth_multiple'], d['width_multiple']
     na = (len(anchors[0]) // 2) if isinstance(anchors, list) else anchors  # number of anchors
@@ -1199,9 +1216,9 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
         m = eval(m) if isinstance(m, str) else m  # eval strings
         for j, a in enumerate(args):
             try:
-                args[j] = a if a in UPSAMPLEMODE else eval(a) if isinstance(a, str) else a
+                args[j] = a if a in UPSAMPLEMODE else (eval(a) if isinstance(a, str) else a)
             except Exception as ex:
-                logger.error(f'ex: {ex}')
+                logger.error(f'def parse: {ex}')
 
         n = max(round(n * gd), 1) if n > 1 else n  # depth gain
         if m in [nn.Conv2d, Conv, RobustConv, RobustConv2, DWConv, GhostConv, RepConv, RepConv_OREPA, DownC,
@@ -1246,6 +1263,8 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
                 args[1] = [list(range(args[1] * 2))] * len(f)
         elif m in [IV6Detect, V6Detect]:
             args.append([ch[x] for x in f])
+        elif m is Classify:
+            args = [128, nc]
         elif m is ReOrg:
             c2 = ch[f] * 4
         elif m is Contract:
@@ -1261,10 +1280,9 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
         nparam = sum([x.numel() for x in m_.parameters()])  # number params
         # attach index, 'from' index, type, number params
         m_.i, m_.f, m_.type, m_.np = i, f, t, nparam
-        logger.info('%3s%18s%3s%10.0f  %-40s%-30s' %
+        logger.info('%3s%42s%3s%10.0f  %-40s%-30s' %
                     (i, f, n, nparam, t, args))  # print
-        save.extend(x % i for x in ([f] if isinstance(
-            f, int) else f) if x != -1)  # append to savelist
+        save.extend(x % i for x in ([f] if isinstance(f, int) else f) if x != -1)  # append to savelist
         layers.append(m_)
         if i == 0:
             ch = []

@@ -86,8 +86,6 @@ if __name__ == '__main__':
     exPrefix = colorstr('Export:')
 
     for weight in opt.weights:
-        # weight = Path(weight)
-        assert weight.exists(), f"file {weight.as_posix()} not found."
         logging.info(f'{exPrefix} loading PyTorch model')
         device, gitstatus = select_device(opt.device)
         map_device = 'cpu' if device.type == 'privateuseone' else device
@@ -160,23 +158,23 @@ if __name__ == '__main__':
 
             if isinstance(m, (Detect, IDetect, IAuxDetect)):
                 m.dynamic = opt.dynamic
-            if isinstance(m, (IDetect, IAuxDetect)):
-                logging.info(f"{exPrefix} detected IDetect class in the model, trying to re-parameter...")
-                re_paramDir = weight.as_posix().replace(".pt", "_re_param.pt")
-                model = torch.load(weight.as_posix(), map_location=map_device)["model"]
-                model.to(device).eval()
-                model.input_shape = input_shape
-                torch.save({"model": model}, re_paramDir)
-                if Re_parameterization(re_paramDir, re_paramDir):
-                    logging.info(f"{exPrefix} re-parameter finished, exporting...\n")
-                    ckpt = torch.load(re_paramDir, map_location=map_device)
-                    model = ckpt["model"].eval().float().fuse()
-                    end_points_2_break = []
-                    for m_ in model.parameters():
-                        m_.requires_grad = False
-                    for x, y in model.named_modules():
-                        end_points_2_break.append(x)
-                    break
+                if isinstance(m, (IDetect, IAuxDetect)):
+                    logging.info(f"{exPrefix} detected IDetect class in the model, trying to re-parameter...")
+                    re_paramDir = weight.as_posix().replace(".pt", "_re_param.pt")
+                    model = torch.load(weight.as_posix(), map_location=map_device)["model"]
+                    model.to(device).eval()
+                    model.input_shape = input_shape
+                    torch.save({"model": model}, re_paramDir)
+                    if Re_parameterization(re_paramDir, re_paramDir):
+                        logging.info(f"{exPrefix} re-parameter finished, exporting...\n")
+                        ckpt = torch.load(re_paramDir, map_location=map_device)
+                        model = ckpt["model"].eval().float().fuse()
+                        end_points_2_break = []
+                        for m_ in model.parameters():
+                            m_.requires_grad = False
+                        for x, y in model.named_modules():
+                            end_points_2_break.append(x)
+                        break
 
         end_points_2_break = end_points_2_break[-len(model.yaml['anchors']):]
 

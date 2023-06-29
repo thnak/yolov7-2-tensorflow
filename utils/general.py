@@ -47,8 +47,19 @@ def set_logging(rank=-1, filename=None, filemode=None):
 
 
 def gb2mb(inp0):
-    value = round(inp0 / 1E9, 3)
-    return f'{value}GB' if value > 1 else f'{value * 1000}MB'
+    value = f"{inp0:,}"
+    len_ = value.split(",")
+    digit = len(len_)
+    if digit > 1:
+        return f'{len_[0]}.{len_[1]}KB'
+    if digit > 2:
+        return f"{len_[0]}.{len_[1]}MB"
+    if digit > 3:
+        return f'{len_[0]}.{len_[1]}GB'
+    if digit > 4:
+        return f'{len_[0]}.{len_[1]}TB'
+    else:
+        return f"{inp0}B"
 
 
 def init_torch_seeds(seed=0):

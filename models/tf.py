@@ -21,7 +21,8 @@ FILE = Path(__file__).resolve()
 ROOT = FILE.parents[1]  # YOLOv5 root directory
 if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))  # add ROOT to PATH
-LOGGER = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
+
 
 # ROOT = ROOT.relative_to(Path.cwd())  # relative
 
@@ -37,7 +38,7 @@ def print_args(args: Optional[dict] = None, show_file=True, show_func=False):
     except ValueError:
         file = Path(file).stem
     s = (f'{file}: ' if show_file else '') + (f'{func}: ' if show_func else '')
-    LOGGER.info(colorstr(s) + ', '.join(f'{k}={v}' for k, v in args.items()))
+    logger.info(colorstr(s) + ', '.join(f'{k}={v}' for k, v in args.items()))
 
 
 class TFShortcut(Layer):
@@ -47,7 +48,6 @@ class TFShortcut(Layer):
 
     def __call__(self, x):
         return x[0] + x[1]
-# [80, [[19, 27, 44, 40, 38, 94], [96, 68, 86, 152, 180, 137], [140, 301, 303, 264, 238, 542], [436, 615, 739, 380, 925, 792]], [256, 512, 768, 1024, 320, 640, 960, 1280]]
 
 
 class TFRepConv(Layer):
@@ -96,14 +96,14 @@ class TFSPPCSPC(Layer):
     def __init__(self, c1, c2, n=1, shortcut=False, g=1, e=0.5, k=(5, 9, 13), w=None):
         super(TFSPPCSPC, self).__init__()
         c_ = int(2 * c2 * e)  # hidden channels
-        self.cv1 = TFConv(c1, c_, 1, 1, w=w.cv1)
-        self.cv2 = TFConv(c1, c_, 1, 1, w=w.cv2)
-        self.cv3 = TFConv(c_, c_, 3, 1, w=w.cv3)
-        self.cv4 = TFConv(c_, c_, 1, 1, w=w.cv4)
+        self.cv1 = TFConv(c1, c_, 1, 1, w=w.cv1, g=g)
+        self.cv2 = TFConv(c1, c_, 1, 1, w=w.cv2, g=g)
+        self.cv3 = TFConv(c_, c_, 3, 1, w=w.cv3, g=g)
+        self.cv4 = TFConv(c_, c_, 1, 1, w=w.cv4, g=g)
         self.m = [keras.layers.MaxPool2D(pool_size=x, strides=1, padding='SAME') for i, x in enumerate(k)]
-        self.cv5 = TFConv(4 * c_, c_, 1, 1, w=w.cv5)
-        self.cv6 = TFConv(c_, c_, 3, 1, w=w.cv6)
-        self.cv7 = TFConv(2 * c_, c2, 1, 1, w=w.cv7)
+        self.cv5 = TFConv(4 * c_, c_, 1, 1, w=w.cv5, g=g)
+        self.cv6 = TFConv(c_, c_, 3, 1, w=w.cv6, g=g)
+        self.cv7 = TFConv(2 * c_, c2, 1, 1, w=w.cv7, g=g)
 
     def __call__(self, inputs):
         x1 = self.cv4(self.cv3(self.cv1(inputs)))
@@ -111,17 +111,44 @@ class TFSPPCSPC(Layer):
         y2 = self.cv2(inputs)
         return self.cv7(tf.concat((y1, y2), 3))
 
-def ReOrg_slice(inputs):
+
+class TFSPPFCSPC(nn.Module):
+    """CSP https://github.com/WongKinYiu/CrossStagePartialNetworks"""
+
+    def __init__(self, c1, c2, n=1, shortcut=False, g=1, e=0.5, k=5):
+        super(TFSPPFCSPC, self).__init__()
+        c_ = int(2 * c2 * e)  # hidden channels
+        self.cv1 = TFConv(c1, c_, 1, 1, g=g)
+        self.cv2 = TFConv(c1, c_, 1, 1, g=g)
+        self.cv3 = TFConv(c_, c_, 3, 1, g=g)
+        self.cv4 = TFConv(c_, c_, 1, 1, g=g)
+        self.m = keras.layers.MaxPool2D(pool_size=k, strides=1, padding="same")
+        self.cv5 = TFConv(4 * c_, c_, 1, 1, g=g)
+        self.cv6 = TFConv(c_, c_, 3, 1, g=g)
+        self.cv7 = TFConv(2 * c_, c2, 1, 1, g=g)
+
+    def __call__(self, x):
+        x1 = self.cv4(self.cv3(self.cv1(x)))
+        x2 = self.m(x1)
+        x3 = self.m(x2)
+        y1 = self.cv6(self.cv5(torch.cat((x1, x2, x3, self.m(x3)), 1)))
+        y2 = self.cv2(x)
+        return self.cv7(torch.cat((y1, y2), dim=1))
+
+
+def reorg_slice(inputs):
     return tf.concat([inputs[:, ::2, ::2, :],
-                         inputs[:, 1::2, ::2, :],
-                         inputs[:, ::2, 1::2, :],
-                         inputs[:, 1::2, 1::2, :]], 3)
+                      inputs[:, 1::2, ::2, :],
+                      inputs[:, ::2, 1::2, :],
+                      inputs[:, 1::2, 1::2, :]], 3)
+
+
 class TFReOrg(Layer):
     def __init__(self, w=None):
         super(TFReOrg, self).__init__()
 
     def __call__(self, out):  # inputs(b,c,w,h) -> y(b,4c,w/2,h/2)
-        out = ReOrg_slice(out)
+        out = reorg_slice(out)
         return out
 
 
@@ -468,7 +495,6 @@ class TFDetect(Layer):
 
             xy = (y[..., 0:2] * 2. - 0.5 + grid) * self.stride[i]  # xy
             wh = ((y[..., 2:4] * 2) ** 2) * anchor_grid  # wh
-            # Normalize xywh to 0-1 to reduce calibration error
             xy /= tf.constant([[self.imgsz[1], self.imgsz[0]]], dtype=tf.float32)
             wh /= tf.constant([[self.imgsz[1], self.imgsz[0]]], dtype=tf.float32)
             y = tf.concat([xy, wh, y[..., 4:5 + self.nc], y[..., 5 + self.nc:]], -1)
@@ -482,7 +508,7 @@ class TFDetect(Layer):
 
 
 def parse_model(d, ch, model, imgsz):  # model_dict, input_channels(3)
-    LOGGER.info(f"\n{'':>3}{'from':>18}{'n':>3}{'params':>10}  {'module':<40}{'arguments':<30}")
+    logger.info(f"\n{'':>3}{'from':>42}{'n':>3}{'params':>10}  {'module':<40}{'arguments':<30}")
     anchors, nc, gd, gw = d['anchors'], d['nc'], d['depth_multiple'], d['width_multiple']
     na = (len(anchors[0]) // 2) if isinstance(anchors, list) else anchors  # number of anchors
     no = na * (nc + 5)  # number of outputs = anchors * (classes + 5)
@@ -493,13 +519,13 @@ def parse_model(d, ch, model, imgsz):  # model_dict, input_channels(3)
         m = eval(m) if isinstance(m, str) else m  # eval strings
         for j, a in enumerate(args):
             try:
-                args[j] = eval(a) if isinstance(a, str) else a  # eval strings
+                args[j] = a if a in UPSAMPLEMODE else (eval(a) if isinstance(a, str) else a)
             except Exception as ex:
-                pass
+                logger.info(ex)
 
         n = max(round(n * gd), 1) if n > 1 else n  # depth gain
         if m in [nn.Conv2d, Conv, RobustConv, RobustConv2, DWConv, GhostConv, RepConv, RepConv_OREPA, DownC,
-                 SPP, SPPF, SPPCSPC, GhostSPPCSPC, MixConv2d, Focus, Stem, GhostStem, CrossConv,
+                 SPP, SPPF, SPPCSPC, SPPFCSPC, GhostSPPCSPC, MixConv2d, Focus, Stem, GhostStem, CrossConv,
                  Bottleneck, BottleneckCSPA, BottleneckCSPB, BottleneckCSPC,
                  RepBottleneck, RepBottleneckCSPA, RepBottleneckCSPB, RepBottleneckCSPC,
                  Res, ResCSPA, ResCSPB, ResCSPC,
@@ -551,7 +577,7 @@ def parse_model(d, ch, model, imgsz):  # model_dict, input_channels(3)
         t = str(m)[8:-2].replace('__main__.', '')  # module type
         nparam = sum([x.numel() for x in torch_m.parameters()])  # number params
         m_.i, m_.f, m_.type, m_.np = i, f, t, nparam  # attach index, 'from' index, type, number params
-        LOGGER.info('%3s%18s%3s%10.0f  %-40s%-30s' % (i, f, n, nparam, t, args))  # print
+        logger.info('%3s%42s%3s%10.0f  %-40s%-30s' % (i, f, n, nparam, t, args))  # print
         save.extend(x % i for x in ([f] if isinstance(f, int) else f) if x != -1)  # append to savelist
         layers.append(m_)
         ch.append(c2)
@@ -571,10 +597,9 @@ class TFModel:
 
         # Define model
         if nc and nc != self.yaml['nc']:
-            LOGGER.info(f"Overriding {cfg} nc={self.yaml['nc']} with nc={nc}")
+            logger.info(f"Overriding {cfg} nc={self.yaml['nc']} with nc={nc}")
             self.yaml['nc'] = nc  # override yaml value
         self.model, self.savelist = parse_model(deepcopy(self.yaml), ch=[ch], model=model, imgsz=imgsz)
-
 
     def __call__(self,
                  inputs,
@@ -730,7 +755,7 @@ def run(
     keras_model = keras.Model(inputs=im, outputs=tf_model.predict(im))
     keras_model.summary()
 
-    LOGGER.info('PyTorch, TensorFlow and Keras models successfully verified.\nUse export.py for TF model export.')
+    logger.info('PyTorch, TensorFlow and Keras models successfully verified.\nUse export.py for TF model export.')
 
 
 def parse_opt():

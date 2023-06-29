@@ -1,21 +1,10 @@
 import math
-from copy import copy
-from pathlib import Path
-
-import cv2
 import numpy as np
-import pandas as pd
-import requests
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import warnings
-from torch.cuda import amp
-
-from utils.datasets import letterbox
 from utils.general import non_max_suppression, make_divisible, scale_coords, increment_path, xyxy2xywh
-from utils.plots import color_list, plot_one_box
-from utils.torch_utils import time_synchronized
 
 
 def autopad(k, p=None):  # kernel, padding
@@ -312,14 +301,14 @@ class SPPCSPC(nn.Module):
     def __init__(self, c1, c2, n=1, shortcut=False, g=1, e=0.5, k=(5, 9, 13)):
         super(SPPCSPC, self).__init__()
         c_ = int(2 * c2 * e)  # hidden channels
-        self.cv1 = Conv(c1, c_, 1, 1)
-        self.cv2 = Conv(c1, c_, 1, 1)
-        self.cv3 = Conv(c_, c_, 3, 1)
-        self.cv4 = Conv(c_, c_, 1, 1)
+        self.cv1 = Conv(c1, c_, 1, 1, g=g)
+        self.cv2 = Conv(c1, c_, 1, 1, g=g)
+        self.cv3 = Conv(c_, c_, 3, 1, g=g)
+        self.cv4 = Conv(c_, c_, 1, 1, g=g)
         self.m = nn.ModuleList([nn.MaxPool2d(kernel_size=x, stride=1, padding=x // 2) for x in k])
-        self.cv5 = Conv(4 * c_, c_, 1, 1)
-        self.cv6 = Conv(c_, c_, 3, 1)
-        self.cv7 = Conv(2 * c_, c2, 1, 1)
+        self.cv5 = Conv(4 * c_, c_, 1, 1, g=g)
+        self.cv6 = Conv(c_, c_, 3, 1, g=g)
+        self.cv7 = Conv(2 * c_, c2, 1, 1, g=g)
 
     def forward(self, x):
         x1 = self.cv4(self.cv3(self.cv1(x)))
@@ -334,14 +323,14 @@ class SPPFCSPC(nn.Module):
     def __init__(self, c1, c2, n=1, shortcut=False, g=1, e=0.5, k=5):
         super(SPPFCSPC, self).__init__()
         c_ = int(2 * c2 * e)  # hidden channels
-        self.cv1 = Conv(c1, c_, 1, 1)
-        self.cv2 = Conv(c1, c_, 1, 1)
-        self.cv3 = Conv(c_, c_, 3, 1)
-        self.cv4 = Conv(c_, c_, 1, 1)
+        self.cv1 = Conv(c1, c_, 1, 1, g=g)
+        self.cv2 = Conv(c1, c_, 1, 1, g=g)
+        self.cv3 = Conv(c_, c_, 3, 1, g=g)
+        self.cv4 = Conv(c_, c_, 1, 1, g=g)
         self.m = nn.MaxPool2d(kernel_size=k, stride=1, padding=k // 2)
-        self.cv5 = Conv(4 * c_, c_, 1, 1)
-        self.cv6 = Conv(c_, c_, 3, 1)
-        self.cv7 = Conv(2 * c_, c2, 1, 1)
+        self.cv5 = Conv(4 * c_, c_, 1, 1, g=g)
+        self.cv6 = Conv(c_, c_, 3, 1, g=g)
+        self.cv7 = Conv(2 * c_, c2, 1, 1, g=g)
 
     def forward(self, x):
         x1 = self.cv4(self.cv3(self.cv1(x)))
@@ -356,7 +345,7 @@ class GhostSPPCSPC(SPPCSPC):
     """CSP https://github.com/WongKinYiu/CrossStagePartialNetworks"""
 
     def __init__(self, c1, c2, n=1, shortcut=False, g=1, e=0.5, k=(5, 9, 13)):
-        super().__init__(c1, c2, n, shortcut, g, e, k)
+        super(GhostSPPCSPC).__init__()
         c_ = int(2 * c2 * e)  # hidden channels
         self.cv1 = GhostConv(c1, c_, 1, 1)
         self.cv2 = GhostConv(c1, c_, 1, 1)
@@ -370,7 +359,7 @@ class GhostSPPCSPC(SPPCSPC):
 class GhostStem(Stem):
     # Stem
     def __init__(self, c1, c2, k=1, s=1, p=None, g=1, act=True):  # ch_in, ch_out, kernel, stride, padding, groups
-        super().__init__(c1, c2, k, s, p, g, act)
+        super(GhostStem).__init__()
         c_ = int(c2 / 2)  # hidden channels
         self.cv1 = GhostConv(c1, c_, 3, 2)
         self.cv2 = GhostConv(c_, c_, 1, 1)
@@ -401,9 +390,9 @@ class BottleneckCSPB(nn.Module):
     def __init__(self, c1, c2, n=1, shortcut=False, g=1, e=0.5):  # ch_in, ch_out, number, shortcut, groups, expansion
         super(BottleneckCSPB, self).__init__()
         c_ = int(c2)  # hidden channels
-        self.cv1 = Conv(c1, c_, 1, 1)
-        self.cv2 = Conv(c_, c_, 1, 1)
-        self.cv3 = Conv(2 * c_, c2, 1, 1)
+        self.cv1 = Conv(c1, c_, 1, 1, g=g)
+        self.cv2 = Conv(c_, c_, 1, 1, g=g)
+        self.cv3 = Conv(2 * c_, c2, 1, 1, g=g)
         self.m = nn.Sequential(*[Bottleneck(c_, c_, shortcut, g, e=1.0) for _ in range(n)])
 
     def forward(self, x):

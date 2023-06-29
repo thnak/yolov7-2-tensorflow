@@ -4,8 +4,6 @@ import math
 import os
 import random
 import csv
-import subprocess
-import sys
 import threading
 from copy import deepcopy
 from pathlib import Path
@@ -21,8 +19,7 @@ import yaml
 from torch import autocast, float16, bfloat16, float32
 from torch.cuda.amp import GradScaler
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.utils.tensorboard import SummaryWriter
-from tqdm.auto import tqdm
+from tqdm import tqdm
 
 from tools.test import test as tester
 from models.yolo import Model
@@ -776,6 +773,7 @@ if __name__ == '__main__':
             prefix = colorstr('tensorboard: ')
             try:
                 assert opt.tensorboard, 'not using Tensorboard'
+                from torch.utils.tensorboard import SummaryWriter
                 tb_writer = SummaryWriter(opt.save_dir)  # Tensorboard
                 tensorboard_lauch = threading.Thread(target=lambda: os.system(f'tensorboard --bind_all --logdir {opt.project}'), daemon=True).start()
                 logger.info(
