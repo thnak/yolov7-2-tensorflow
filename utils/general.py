@@ -5,6 +5,8 @@ import os
 import platform
 import random
 import re
+import sys
+import urllib
 from subprocess import check_output
 import time
 from pathlib import Path
@@ -210,13 +212,10 @@ def check_dataset(dict_):
                 if s.startswith('http') and s.endswith('.zip'):  # URL
                     f = Path(s).name  # filename
                     f = f"{dict_.get('path')}/{f}"
+                    Path(f"{dict_.get('path')}").mkdir(exist_ok=True)
                     if not os.path.exists(f):
                         torch.hub.download_url_to_file(s, f)
-                    try:
-                        r = os.system(f'tar -xf {f}')
-                        os.system(f'del TrainRes/coco128.zip')
-                    except Exception:
-                        r = os.system('unzip -q %s -d ../ && rm %s' % (f, f))  # unzip
+                    r = os.system('unzip -q %s -d ../ && rm %s' % (f, f))  # unzip
                 else:  # bash script
                     r = os.system(s)
                 print('Dataset autodownload %s\n' % ('success' if r == 0 else 'failure'))  # analyze return value
@@ -250,9 +249,9 @@ def check_file(file, suffix=''):
         url = file  # warning: Pathlib turns :// -> :/
         file = Path(urllib.parse.unquote(file).split('?')[0]).name  # '%2F' to '/', split https://url.com/file.txt?auth
         if os.path.isfile(file):
-            LOGGER.info(f'Found {url} locally at {file}')  # file already exists
+            print(f'Found {url} locally at {file}')  # file already exists
         else:
-            LOGGER.info(f'Downloading {url} to {file}...')
+            print(f'Downloading {url} to {file}...')
             torch.hub.download_url_to_file(url, file)
             assert Path(file).exists() and Path(file).stat().st_size > 0, f'File download failed: {url}'  # check
         return file
@@ -693,7 +692,7 @@ def non_max_suppression(prediction: torch.Tensor, conf_thres=0.25, iou_thres=0.4
                         multi_label=False,
                         labels=(), max_det=300, min_wh=2,
                         max_wh=4096, max_nms=30000,
-                        time_limit=10.0, redunant=True, merge=False):
+                        time_limit=10.0, redundant=True, merge=False):
     """Runs Non-Maximum Suppression (NMS) on inference results
 
     Returns:

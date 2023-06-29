@@ -54,8 +54,9 @@ def detect(opt=None):
         model.half()  # to FP16
 
     vid_path = None
+    cudnn.benchmark = True  # set True to speed up constant image size inference
+
     if source_type == 'stream':
-        cudnn.benchmark = True  # set True to speed up constant image size inference
         dataset = LoadStreams(source, img_size=imgsz, stride=stride, auto=True)
     elif source_type == 'screen':
         dataset = LoadScreenshots(source=source, img_size=imgsz, stride=model.stride, auto=True)
