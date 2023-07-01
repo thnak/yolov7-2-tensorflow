@@ -69,7 +69,7 @@ class SigmoidBin(nn.Module):
 
     def forward(self, pred):
         assert pred.shape[-1] == self.length, 'pred.shape[-1]=%d is not equal to self.length=%d' % (
-        pred.shape[-1], self.length)
+            pred.shape[-1], self.length)
 
         pred_reg = (pred[..., 0] * self.reg_scale - self.reg_scale / 2.0) * self.step
         pred_bin = pred[..., 1:(1 + self.bin_count)]
@@ -87,9 +87,9 @@ class SigmoidBin(nn.Module):
 
     def training_loss(self, pred, target):
         assert pred.shape[-1] == self.length, 'pred.shape[-1]=%d is not equal to self.length=%d' % (
-        pred.shape[-1], self.length)
+            pred.shape[-1], self.length)
         assert pred.shape[0] == target.shape[0], 'pred.shape=%d is not equal to the target.shape=%d' % (
-        pred.shape[0], target.shape[0])
+            pred.shape[0], target.shape[0])
         device = pred.device
 
         pred_reg = (pred[..., 0].sigmoid() * self.reg_scale - self.reg_scale / 2.0) * self.step
@@ -560,7 +560,7 @@ class TaskAlignedAssigner(nn.Module):
             if CIoU or DIoU:  # Distance or Complete IoU https://arxiv.org/abs/1911.08287v1
                 c2 = cw ** 2 + ch ** 2 + eps  # convex diagonal squared
                 rho2 = ((b2_x1 + b2_x2 - b1_x1 - b1_x2) ** 2 + (
-                            b2_y1 + b2_y2 - b1_y1 - b1_y2) ** 2) / 4  # center dist ** 2
+                        b2_y1 + b2_y2 - b1_y1 - b1_y2) ** 2) / 4  # center dist ** 2
                 if CIoU:  # https://github.com/Zzh-tju/DIoU-SSD-pytorch/blob/master/utils/box/box_utils.py#L47
                     v = (4 / torch.pi ** 2) * torch.pow(torch.atan(w2 / h2) - torch.atan(w1 / h1), 2)
                     with torch.no_grad():
@@ -580,7 +580,8 @@ class TaskAlignedAssigner(nn.Module):
         # get the scores of each grid for each gt cls
         bbox_scores = pd_scores[ind[0], :, ind[1]]  # b, max_num_obj, h*w
 
-        overlaps = self.bbox_iou(gt_bboxes.unsqueeze(2), pd_bboxes.unsqueeze(1), xywh=False, CIoU=True).squeeze(3).clamp(0)
+        overlaps = self.bbox_iou(gt_bboxes.unsqueeze(2), pd_bboxes.unsqueeze(1), xywh=False, CIoU=True).squeeze(
+            3).clamp(0)
         align_metric = bbox_scores.pow(self.alpha) * overlaps.pow(self.beta)
         return align_metric, overlaps
 
@@ -713,7 +714,7 @@ class BboxLoss(nn.Module):
             if CIoU or DIoU:  # Distance or Complete IoU https://arxiv.org/abs/1911.08287v1
                 c2 = cw ** 2 + ch ** 2 + eps  # convex diagonal squared
                 rho2 = ((b2_x1 + b2_x2 - b1_x1 - b1_x2) ** 2 + (
-                            b2_y1 + b2_y2 - b1_y1 - b1_y2) ** 2) / 4  # center dist ** 2
+                        b2_y1 + b2_y2 - b1_y1 - b1_y2) ** 2) / 4  # center dist ** 2
                 if CIoU:  # https://github.com/Zzh-tju/DIoU-SSD-pytorch/blob/master/utils/box/box_utils.py#L47
                     v = (4 / torch.pi ** 2) * torch.pow(torch.atan(w2 / h2) - torch.atan(w1 / h1), 2)
                     with torch.no_grad():
@@ -884,7 +885,7 @@ class ComputeLoss:
         self.cp, self.cn = smooth_BCE(eps=h.get('label_smoothing', 0.0))  # positive, negative BCE targets
 
         # Focal loss
-        g = h['fl_gamma']  # focal loss gamma
+        g = h.get("fl_gramma", 0)  # focal loss gamma
         if g > 0:
             BCEcls, BCEobj = FocalLoss(BCEcls, g), FocalLoss(BCEobj, g)
 
@@ -1020,7 +1021,7 @@ class ComputeLossOTA:
         self.cp, self.cn = smooth_BCE(eps=h.get('label_smoothing', 0.0))  # positive, negative BCE targets
 
         # Focal loss
-        g = h['fl_gamma']  # focal loss gamma
+        g = h.get("fl_gramma", 0)  # focal loss gamma
         if g > 0:
             BCEcls, BCEobj = FocalLoss(BCEcls, g), FocalLoss(BCEobj, g)
 
@@ -1324,7 +1325,7 @@ class ComputeLossBinOTA:
         self.cp, self.cn = smooth_BCE(eps=h.get('label_smoothing', 0.0))  # positive, negative BCE targets
 
         # Focal loss
-        g = h['fl_gamma']  # focal loss gamma
+        g = h.get("fl_gramma", 0)  # focal loss gamma
         if g > 0:
             BCEcls, BCEobj = FocalLoss(BCEcls, g), FocalLoss(BCEobj, g)
 
@@ -1654,7 +1655,7 @@ class ComputeLossAuxOTA:
         self.cp, self.cn = smooth_BCE(eps=h.get('label_smoothing', 0.0))  # positive, negative BCE targets
 
         # Focal loss
-        g = h['fl_gamma']  # focal loss gamma
+        g = h.get("fl_gramma", 0)  # focal loss gamma
         if g > 0:
             BCEcls, BCEobj = FocalLoss(BCEcls, g), FocalLoss(BCEobj, g)
 
@@ -2172,3 +2173,14 @@ class ComputeLossAuxOTA:
             anch.append(anchors[a])  # anchors
 
         return indices, anch
+
+
+def SmartLoss(model, hyp):
+    compute_loss_val = ComputeLoss(model)
+    if model.anchorFree:
+        return ComputeLoss_AnchorFree(model), compute_loss_val
+
+    if not model.is_p5():
+        return ComputeLossAuxOTA(model), compute_loss_val
+
+    return ComputeLossOTA(model), compute_loss_val

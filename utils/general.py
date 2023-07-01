@@ -33,7 +33,7 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 FILE = Path(__file__).resolve()
 ROOT = FILE.parents[1]  # YOLOv5 root directory
 TQDM_BAR_FORMAT = '{l_bar}{bar:10}{r_bar}'  # tqdm bar format
-ONNX_OPSET = [11, 12, 13, 14, 15, 16, 17]
+ONNX_OPSET = [x for x in range(11, 19)]
 ONNX_OPSET_TARGET = ONNX_OPSET
 CUDA = torch.cuda.is_available()
 MAX_DET = 300  # topk objects for every images
@@ -50,13 +50,15 @@ def gb2mb(inp0):
     value = f"{inp0:,}"
     len_ = value.split(",")
     digit = len(len_)
-    if digit > 1:
+    if digit <= 1:
+        return f"{inp0}B"
+    elif digit == 2:
         return f'{len_[0]}.{len_[1]}KB'
-    if digit > 2:
+    elif digit == 3:
         return f"{len_[0]}.{len_[1]}MB"
-    if digit > 3:
+    elif digit == 4:
         return f'{len_[0]}.{len_[1]}GB'
-    if digit > 4:
+    elif digit == 5:
         return f'{len_[0]}.{len_[1]}TB'
     else:
         return f"{inp0}B"
@@ -215,9 +217,9 @@ def check_dataset(dict_):
     """Download dataset if not found locally"""
     val, s = dict_.get('val'), dict_.get('download')
     if val and len(val):
-        val = [Path(x).resolve() for x in (val if isinstance(val, list) else [val])]  # val path
+        val = [Path(x) for x in (val if isinstance(val, list) else [val])]  # val path
         if not all(x.exists() for x in val):
-            print('\nWARNING: Dataset not found, nonexistent paths: %s' % [str(x) for x in val if not x.exists()])
+            print('\nWARNING: Dataset not found, nonexistent paths: %s' % [x.as_posix() for x in val if not x.exists()])
             if s and len(s):  # download script
                 print('Downloading %s ...' % s)
                 if s.startswith('http') and s.endswith('.zip'):  # URL

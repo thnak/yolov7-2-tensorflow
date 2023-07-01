@@ -289,8 +289,8 @@ head:
    [-1, 1, Conv, [256, 3, 1, None, 1, nn.LeakyReLU(0.1)]],
    [-1, 1, Conv, [256, 3, 1, None, 1, nn.LeakyReLU(0.1)]],
    [[-1, -2, -3, -4, -5, -6, -7, -8], 1, Concat, [1]],
-   [-1, 1, Conv, [640, 1, 1]], # 255
-   [[-1, -11], 1, Shortcut, [1, None, 1, nn.LeakyReLU(0.1)]],  # 256
+   [-1, 1, Conv, [640, 1, 1, None, 1, nn.LeakyReLU(0.1)]], # 255
+   [[-1, -11], 1, Shortcut, [1]],  # 256
    
    [187, 1, Conv, [320, 3, 1, None, 1, nn.LeakyReLU(0.1)]],
    [210, 1, Conv, [640, 3, 1, None, 1, nn.LeakyReLU(0.1)]],

@@ -159,7 +159,7 @@ if __name__ == '__main__':
             if isinstance(m, (Detect, IDetect, IAuxDetect)):
                 m.dynamic = opt.dynamic
                 if isinstance(m, (IDetect, IAuxDetect)):
-                    logging.info(f"{exPrefix} detected IDetect class in the model, trying to re-parameter...")
+                    logging.info(f"{exPrefix} detected training class in the model, trying to re-parameter...")
                     re_paramDir = weight.as_posix().replace(".pt", "_re_param.pt")
                     model = torch.load(weight.as_posix(), map_location=map_device)["model"]
                     model.to(device).eval()
@@ -174,13 +174,17 @@ if __name__ == '__main__':
                             m_.requires_grad = False
                         for x, y in model.named_modules():
                             end_points_2_break.append(x)
+                    else:
+                        for m_ in model.parameters():
+                            m_.requires_grad = False
+                        model.fuse()
                         break
 
-        end_points_2_break = end_points_2_break[-len(model.yaml['anchors']):]
-
-        for i, x in enumerate(end_points_2_break):
-            from_modul, modul_idx, attr, idx = x.split('.')
-            end_points_2_break[i] = f'/{from_modul}.{modul_idx}/{attr}.{idx}/Conv_output_0'
+        if RKNN:
+            end_points_2_break = end_points_2_break[-len(model.yaml['anchors']):]
+            for i, x in enumerate(end_points_2_break):
+                from_modul, modul_idx, attr, idx = x.split('.')
+                end_points_2_break[i] = f'/{from_modul}.{modul_idx}/{attr}.{idx}/Conv_output_0'
 
         model_Gflops = model.info(verbose=False, img_size=input_shape)
         logging.info(model_Gflops)

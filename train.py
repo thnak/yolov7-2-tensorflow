@@ -29,7 +29,7 @@ from utils.general import labels_to_class_weights, increment_path, labels_to_ima
     fitness, strip_optimizer, get_latest_run, check_dataset, check_file, check_img_size, \
     print_mutation, set_logging, one_cycle, colorstr, TQDM_BAR_FORMAT
 from utils.google_utils import attempt_download
-from utils.loss import ComputeLoss, ComputeLossOTA, ComputeLossAuxOTA, ComputeLoss_AnchorFree
+from utils.loss import SmartLoss
 from utils.plots import plot_images, plot_results, plot_evolution
 from utils.torch_utils import ModelEMA, select_device, intersect_dicts, torch_distributed_zero_first, is_parallel, \
     time_synchronized, smart_optimizer, save_model, prune
@@ -354,20 +354,17 @@ def train(hyp, opt, tb_writer=None,
     scheduler.last_epoch = start_epoch - 1  # do not move
     scaler = GradScaler()
 
-    hyp['loss_ota'] = 0 if model.anchorFree else hyp.get('loss_ota', 0)
-    use_loss_ota = 'loss_ota' not in hyp or hyp['loss_ota'] >= 1 or not model.is_p5()
-    if use_loss_ota:
-        compute_loss = (ComputeLossOTA(model) if p5_model else ComputeLossAuxOTA(model)) if not model.anchorFree else None
-    else:
-        compute_loss = ComputeLoss(model) if not model.anchorFree else ComputeLoss_AnchorFree(model)
-    compute_loss_val = ComputeLoss(model)
+    compute_loss, compute_loss_val = SmartLoss(model, hyp)
+
     logger.info(f'Image sizes {imgsz} train, {imgsz_test} test\n'
                 f'Using {dataloader.num_workers} dataloader workers\n'
                 f'Logging results to {save_dir}\n'
                 f'Starting training for {epochs} epochs...\n')
     model.to(device=torch.device('cpu'))
     save_dir_ = wdir / 'init.pt'
+    model.cpu()
     torch.save({'model': model}, save_dir_)
+    model.to(device)
     logger.info(f'saved init model at: {save_dir_}')
     # epoch ------------------------------------------------------------------
     for epoch in range(start_epoch, epochs):
@@ -725,9 +722,6 @@ if __name__ == '__main__':
     opt.global_rank = int(os.environ['RANK']) if 'RANK' in os.environ else -1
     set_logging(opt.global_rank)
     opt.epochs = 300 if opt.epochs < 1 else opt.epochs
-    # if opt.global_rank in [-1, 0]:
-    #     check_git_status()
-    #     check_requirements()
 
     # Resume
     wandb_run = check_wandb_resume(opt)
@@ -740,7 +734,6 @@ if __name__ == '__main__':
         opt.cfg, opt.weights, opt.resume, opt.batch_size, opt.global_rank, opt.local_rank = '', ckpt, True, opt.total_batch_size, opt.global_rank, opt.local_rank  # reinstate
         logger.info('Resuming training from %s' % ckpt)
     else:
-        # opt.hyp = opt.hyp or ('hyp.finetune.yaml' if opt.weights else 'hyp.scratch.yaml')
         opt.data, opt.cfg, opt.hyp = check_file(opt.data), check_file(
             opt.cfg), check_file(opt.hyp)  # check files
         assert len(opt.cfg) or len(
@@ -800,7 +793,7 @@ if __name__ == '__main__':
                 'obj_pw': (1, 0.5, 2.0),  # obj BCELoss positive_weight
                 'iou_t': (1, 0.1, 0.7),  # IoU training threshold
                 'anchor_t': (1, 2.0, 8.0),  # anchor-multiple threshold
-                'anchors': (0, 3.0, 10.0),  # anchors != 3 make error with reparamater
+                'anchors': (1, 3.0, 10.0),  # anchors != 3 make error with reparamater
                 'fl_gamma': (1, 0.0, 2.0),
                 'lost_ota': (1, 0, 1)}  # focal loss gamma (efficientDet default gamma=1.5)
 

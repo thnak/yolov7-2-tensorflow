@@ -12,9 +12,8 @@ obj: 0.755
 obj_pw: 1.2
 iou_t: 0.271
 anchor_t: 3.48
-loss_ota: 0
 # anchors: 3.0
-fl_gamma: 0.0
+fl_gamma: 1.0
 # Data argument
 degrees: 0.0
 translate: 0.2

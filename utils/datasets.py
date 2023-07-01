@@ -481,15 +481,17 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             cache, exists = self.cache_labels(cache_path, prefix), False  # cache
 
         # Display cache
-        nf, nm, ne, nc, n = cache.pop('results')  # found, missing, empty, corrupted, total
+        self.is_labeled = cache.get("labeled", [])
+        cache.pop("labeled")
+        nf, nb, ne, nc, n = cache.pop('results')  # found, missing, empty, corrupted, total
         if exists:
-            d = f"Scanning '{cache_path}' images and labels... {nf} found, {nm} background, {ne} empty, {nc} corrupted"
+            d = f"Scanning '{cache_path}' images and labels... {nf} found, {nb} background, {ne} empty, {nc} corrupted"
             tqdm(None, desc=prefix + d, total=n, initial=n, mininterval=0.05, maxinterval=1,
                  unit='image', bar_format=TQDM_BAR_FORMAT)  # display cache results
         assert nf > 0 or not augment, f'{prefix}No labels in {cache_path}. Can not train without labels. See {HELP_URL}'
-        self.imgs = [np.array([None])] * (nf + nm)
-        self.img_npy = [None] * (nf + nm)
-
+        self.imgs = [None] * (nf + nb)
+        self.img_npy = [None] * (nf + nb)
+        self.ignores = nb + ne + nc
         # Read cache
         cache.pop('hash')  # remove hash
         cache.pop('version')  # remove version
@@ -532,16 +534,16 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                     shapes[i] = [1, 1 / mini]
 
             self.batch_shapes = np.ceil(np.array(shapes) * img_size / stride + pad).astype(np.int32) * stride
+
+        self.im_cache_dir = Path(Path(self.img_files[0]).parent.as_posix() + '_npy')
+        self.im_cache_dir.mkdir(parents=True, exist_ok=True)
+        self.img_npy = [self.im_cache_dir / Path(f).with_suffix('.npy').name for f in self.img_files]
+
         # Cache images into memory for faster training (WARNING: large datasets may exceed system RAM)
         if cache_images in ['ram', 'disk']:
             ram_idx, disk_idx = self.check_cache_ram(prefix=prefix)
             if torch.cuda.is_available():
                 self.pin_memory = TORCH_PIN_MEMORY
-
-            self.im_cache_dir = Path(Path(self.img_files[0]).parent.as_posix() + '_npy')
-            self.im_cache_dir.mkdir(parents=True, exist_ok=True)
-
-            self.img_npy = [self.im_cache_dir / Path(f).with_suffix('.npy').name for f in self.img_files]
 
             gb = 0  # Gigabytes of cached images
 
@@ -570,21 +572,22 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                 else:
                     cache_images = ""
                     continue
-                pbar.desc = f'{prefix}Caching images {gb2mb(gb)} in {cache_images.upper()}'
+                pbar.set_description(f'{prefix}Caching images {gb2mb(gb)} in {cache_images.upper()}')
             pbar.close()
 
     def check_cache_ram(self, prefix='', safety_margin=1.5):
         tem = int(self.stride * ((self.img_size / self.stride) - 1))
         img_sz = [self.img_size] * 2 if not self.rect else [self.img_size, tem]
         num = np.zeros((*img_sz, 3), dtype=np.uint8 if self.image_8bit else np.uint16)
-        b = num.nbytes * len(self.img_files)
+        files_canbe_cache = len(self.img_files) - self.ignores
+        b = num.nbytes * files_canbe_cache
         mem = psutil.virtual_memory()
         num2cache_ram = mem.available * (mem.available / (mem.available * safety_margin))
-        num2cache_ram = min(int(num2cache_ram / num.nbytes), len(self.img_files))
+        num2cache_ram = min(int(num2cache_ram / num.nbytes), files_canbe_cache)
         import shutil
         total_disk, used_disk, free_disk = shutil.disk_usage(Path(__file__).as_posix())
         num2cache_disk = free_disk * (free_disk / (free_disk * safety_margin))
-        num2cache_disk = min(int(num2cache_disk / num.nbytes), len(self.img_files) - num2cache_ram)
+        num2cache_disk = min(int(num2cache_disk / num.nbytes), files_canbe_cache - num2cache_ram)
 
         print(f"{prefix}{gb2mb(b)} memory required (estimate), "
               f"ram {gb2mb(mem.available)}/{gb2mb(mem.total)} available, disk {gb2mb(free_disk)}/{gb2mb(total_disk)} "
@@ -603,7 +606,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                     maxinterval=1,
                     unit='obj',
                     bar_format=TQDM_BAR_FORMAT)
-        self.is_labeled = [False for x in range(len(self.img_files))]
+        self.is_labeled = [False] * len(self.img_files)
         for i, (im_file, lb_file) in enumerate(pbar):
             try:
                 # verify images
@@ -652,6 +655,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         x['hash'] = get_hash(self.label_files + self.img_files)
         x['results'] = nf, nm, ne, nc, i + 1
         x['version'] = self.version  # cache version
+        x["labeled"] = self.is_labeled
         torch.save(x, path)  # save for next time
         logging.info(f'{prefix}New cache created: {path}')
         return x

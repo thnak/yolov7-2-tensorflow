@@ -26,12 +26,18 @@ def Re_parameterization(inputWeightPath='v7-tiny-training.pt',
             while 1:
                 named = model_named[nodes] if nodes in model_named else model_named[-1]
                 named = named.lower()
-                print(" ".join(["=" for x in range(100)]))
-                print(f"maybe your model is {named}")
-                input_cfg = input(f"please put your cfg deploy compatible with your model here (example: type 'cfg/deploy/{named}.yaml' if you train with 'cfg/training/{named}.yaml')\n")
+                print()
+                print(f"Maybe your model is {named}")
+                input_cfg = input(f"Please put your cfg deploy compatible with your model "
+                                  f"here.\nExample: type 'cfg/deploy/{named}.yaml' if you "
+                                  f"train with 'cfg/training/{named}.yaml'.\n"
+                                  f"Say no to ignore re-paramater.\n")
+                if input_cfg.lower() == "no":
+                    Path(inputWeightPath).unlink(missing_ok=True)
+                    return False
                 input_cfg = Path(input_cfg)
                 if not input_cfg.exists():
-                    print(f"file '{input_cfg.as_posix()}' not found")
+                    print(f"File '{input_cfg.as_posix()}' not found.")
                 else:
                     try:
                         import yaml
@@ -40,8 +46,7 @@ def Re_parameterization(inputWeightPath='v7-tiny-training.pt',
                             break
                     except Exception as ex:
                         print(f"error\n{ex}")
-                print(" ".join(["=" for x in range(100)]))
-                print("")
+                print()
 
         cfg = eval(string_cfg) if isinstance(string_cfg, str) else string_cfg
         if 'head_deploy' in cfg:
