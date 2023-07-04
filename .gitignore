@@ -41,3 +41,4 @@ venv/
 .idea
 detect_or_track.py
 sort.py
+imagenette160/

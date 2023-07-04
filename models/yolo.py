@@ -1,17 +1,18 @@
-from pathlib import Path
-from utils.general import check_requirements
-from utils.torch_utils import time_synchronized, fuse_conv_and_bn, model_info, scale_img, initialize_weights, \
-    select_device, copy_attr
-from utils.general import make_divisible, check_file, set_logging, colorstr, xywh2xyxy, box_iou
-from utils.autoanchor import check_anchor_order
-from utils.activations import *
-from models.experimental import *
-from models.common import *
-import torch
 import argparse
 import logging
 import sys
 from copy import deepcopy
+from pathlib import Path
+
+import torch
+
+from models.common import *
+from models.experimental import *
+from utils.autoanchor import check_anchor_order
+from utils.general import check_file, set_logging, colorstr
+from utils.general import check_requirements
+from utils.torch_utils import time_synchronized, fuse_conv_and_bn, model_info, scale_img, initialize_weights, \
+    select_device
 
 sys.path.append('./')  # to run '$ python *.py' files in subdirectories
 logger = logging.getLogger(__name__)
@@ -25,18 +26,36 @@ UPSAMPLEMODE = ['nearest', 'linear', 'bilinear', 'bicubic']
 
 
 class Classify(nn.Module):
-    def __init__(self, c1, c2, k=1, s=1, p=None, g=1, dropout_p=0.0):
+    def __init__(self, nc=80, anchors=(), ch=(), inplace=True):  # detection layer
         super(Classify, self).__init__()
-        c_ = int(c2*1.25)
-        self.conv = Conv(c1, c_, k, s, autopad(k, p), g)
-        self.pool = nn.AdaptiveAvgPool2d(1)  # to x(b,c_,1,1)
-        self.drop = nn.Dropout(p=dropout_p, inplace=True)
-        self.linear = nn.Linear(c_, c2)  # to x(b,c2)
+        self.nc = nc  # number of classes
+        no = nc + 5  # number of outputs per anchor
+        self.nl = len(anchors)  # number of detection layers
+        na = len(anchors[0]) // 2  # number of anchors
+        self.na = na
+        list_conv = []
+        # connect = 4 * no * na
+        for x in ch:
+            a = nn.Sequential(nn.Conv2d(x, 2*x, 1, 1, bias=False),
+                              nn.BatchNorm2d(2*x),
+                              nn.SiLU(),
+                              nn.AdaptiveAvgPool2d(1),
+                              nn.Flatten(1))
+            list_conv.append(a)
+        self.m = nn.ModuleList(list_conv)  # output conv
+        self.linear = nn.Linear(sum([x*2 for x in ch]), nc)
+        # self.act = nn.Softmax(1)
+        self.inplace = inplace
 
     def forward(self, x):
-        if isinstance(x, list):
-            x = torch.cat(x, 1)
-        return self.linear(self.drop(self.pool(self.conv(x)).flatten(1)))
+        z = []  # inference output
+        for i, m in enumerate(self.m):
+            out = m(x[i])  # conv
+            z.append(out)
+        out = torch.concatenate(z, dim=1)
+        out = self.linear(out)
+        # out = self.act(out)
+        return out
 
 
 class Detect(nn.Module):
@@ -542,13 +561,17 @@ class Model(nn.Module):
         self.input_shape = [-1, -1, -1]
         self.reparam = False
         self.inplace = self.yaml.get('inplace', True)
-        self.anchorFree = False
+        self.is_anchorFree = False
+
         # Build strides, anchors
         m = self.model[-1]  # Detect()
         m.inplace = self.inplace
+        self.is_classify = isinstance(m, Classify)
+        if self.is_classify:
+            self.stride = torch.tensor([8])
         s = 1024  # scale it up for large shape
         inputSampleShape = [1024] * 2
-        if isinstance(m, (Detect, IDetect, Classify)):
+        if isinstance(m, (Detect, IDetect)):
             m.stride = torch.tensor(
                 [s / x.shape[-2] for x in self.forward(torch.zeros(1, ch, *inputSampleShape))])  # forward
             check_anchor_order(m)
@@ -569,8 +592,9 @@ class Model(nn.Module):
                 [s / x.shape[-2] for x in self.forward(torch.zeros(1, ch, *inputSampleShape))[0]])  # forward
             self.stride = m.stride
             m.bias_init()
-            self.anchorFree = True
-
+            self.is_anchorFree = True
+        # elif isinstance(m, Classify):
+        #     self._initialize_biases()
         # Init weights, biases
         initialize_weights(self)
 
@@ -642,7 +666,7 @@ class Model(nn.Module):
     # initialize biases into Detect(), cf is class frequency
     def _initialize_aux_biases(self, cf=None):
         # https://arxiv.org/abs/1708.02002 section 3.3
-        m = self.model[-1]  # Detect() module
+        m = self.model[-1]  # IAuxDetect() module
         for mi, mi2, s in zip(m.m, m.m2, m.stride):  # from
             b = mi.bias.view(m.na, -1).detach()  # conv.bias(255) to (3,85)
             # obj (8 objects per 640 image)
@@ -1257,14 +1281,12 @@ def parse_model(d, ch, nc=80):  # model_dict, input_channels(3)
             c2 = ch[f[0]]
         elif m is Foldcut:
             c2 = ch[f] // 2
-        elif m in [Detect, IDetect, IAuxDetect]:
+        elif m in [Detect, IDetect, IAuxDetect, Classify]:
             args.append([ch[x] for x in f])
             if isinstance(args[1], int):  # number of anchors
                 args[1] = [list(range(args[1] * 2))] * len(f)
         elif m in [IV6Detect, V6Detect]:
             args.append([ch[x] for x in f])
-        elif m is Classify:
-            args = [128, nc]
         elif m is ReOrg:
             c2 = ch[f] * 4
         elif m is Contract:

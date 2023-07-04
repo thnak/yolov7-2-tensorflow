@@ -1,0 +1,14 @@
+train: imagenette160/train  # train images (relative to 'path') 1281167 images
+val: imagenette160/val  # val images (relative to 'path') 50000 images
+#test:  # test images (optional)
+names:
+  0: n01440764
+  1: n02102040
+  2: n02979186
+  3: n03000684
+  4: n03028079
+  5: n03394916
+  6: n03417042
+  7: n03425413
+  8: n03445777
+  9: n03888257

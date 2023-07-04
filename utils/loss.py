@@ -2175,9 +2175,12 @@ class ComputeLossAuxOTA:
         return indices, anch
 
 
-def SmartLoss(model, hyp):
+def SmartLoss(model, hyp, label_smoothing=0.1):
+    if model.is_classify:
+        return nn.CrossEntropyLoss(label_smoothing=label_smoothing), nn.CrossEntropyLoss(label_smoothing=label_smoothing)
+
     compute_loss_val = ComputeLoss(model)
-    if model.anchorFree:
+    if model.is_anchorFree:
         return ComputeLoss_AnchorFree(model), compute_loss_val
 
     if not model.is_p5():

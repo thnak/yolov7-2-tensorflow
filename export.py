@@ -1,24 +1,25 @@
 import argparse
 import datetime
-from utils.torch_utils import select_device, prune
-from utils.general import (set_logging, check_img_size, check_requirements, colorstr, ONNX_OPSET, ONNX_OPSET_TARGET,
-                           gb2mb, MAX_DET)
-from utils.activations import SiLU
-from utils.re_parameteration import Re_parameterization
-from models.experimental import attempt_load, End2End
-from models.yolo import (IDetect, Detect, IAuxDetect, IV6Detect)
-from models.common import (ReOrg, Conv)
-
-from torch.utils.mobile_optimizer import optimize_for_mobile
-from pathlib import Path
-import torch.nn as nn
-import torch
+import logging
 import sys
 import time
 import warnings
-import logging
-import numpy as np
 from copy import deepcopy
+from pathlib import Path
+
+import numpy as np
+import torch
+import torch.nn as nn
+from torch.utils.mobile_optimizer import optimize_for_mobile
+
+from models.common import (ReOrg, Conv)
+from models.experimental import attempt_load, End2End
+from models.yolo import (IDetect, Detect, IAuxDetect)
+from utils.activations import SiLU
+from utils.general import (set_logging, check_img_size, check_requirements, colorstr, ONNX_OPSET, ONNX_OPSET_TARGET,
+                           MAX_DET)
+from utils.re_parameteration import Re_parameterization
+from utils.torch_utils import select_device
 
 sys.path.append('./')  # to run '$ python *.py' files in subdirectories
 
@@ -379,6 +380,8 @@ if __name__ == '__main__':
             onnx.checker.check_model(onnx_model)  # check onnx model
             logging.info(f'{prefix} writing metadata for model...')
 
+            anchor_grid = model.model[-1].anchor_grid.detach().cpu().numpy().tolist() if not model.is_classify else None
+            anchors = model.model[-1].anchors.detach().cpu().numpy().tolist() if not model.is_classify else None
             onnx_MetaData = {'model_infor': model_Gflops,
                              'export_gitstatus': gitstatus,
                              'best_fitness': best_fitness,
@@ -388,8 +391,8 @@ if __name__ == '__main__':
                              'total_image': total_image,
                              'export_date': datetime.datetime.now().isoformat('#'),
                              'exporting_opt': vars(opt),
-                             "anchor_grid": model.model[-1].anchor_grid.detach().cpu().numpy().tolist(),
-                             "anchors": model.model[-1].anchors.detach().cpu().numpy().tolist(),
+                             "anchor_grid": anchor_grid,
+                             "anchors": anchors,
                              }
             key_prefix = colorstr('yellow', 'key:')
             for index, key in enumerate(ckpt):
