@@ -566,8 +566,8 @@ class Model(nn.Module):
         # Build strides, anchors
         m = self.model[-1]  # Detect()
         m.inplace = self.inplace
-        self.is_classify = isinstance(m, Classify)
-        if self.is_classify:
+        self.is_Classify = isinstance(m, Classify)
+        if self.is_Classify:
             self.stride = torch.tensor([8])
         s = 1024  # scale it up for large shape
         inputSampleShape = [1024] * 2

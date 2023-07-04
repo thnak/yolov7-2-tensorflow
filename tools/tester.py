@@ -11,12 +11,72 @@ from tqdm.auto import tqdm
 
 from models.experimental import attempt_load
 from utils.datasets import create_dataloader
-from utils.general import coco80_to_coco91_class, check_dataset, check_file, check_img_size, check_requirements, \
-    box_iou, non_max_suppression, scale_coords, xyxy2xywh, xywh2xyxy, set_logging, increment_path, colorstr, \
+from utils.general import coco80_to_coco91_class, check_dataset, check_file, check_img_size, box_iou, \
+    non_max_suppression, scale_coords, xyxy2xywh, xywh2xyxy, set_logging, increment_path, colorstr, \
     TQDM_BAR_FORMAT
 from utils.metrics import ap_per_class, ConfusionMatrix
 from utils.plots import plot_images, output_to_target, plot_study_txt
 from utils.torch_utils import select_device, time_synchronized, TracedModel
+
+
+@torch.no_grad()
+def cls_test(data,
+             weights=None,
+             batch_size=32,
+             imgsz=640,
+             conf_thres=0.001,
+             iou_thres=0.6,  # for NMS
+             save_json=False,
+             single_cls=False,
+             augment=False,
+             verbose=False,
+             model=None,
+             dataloader=None,
+             save_dir=Path(''),  # for saving images
+             save_txt=False,  # for auto-labelling
+             save_hybrid=False,  # for hybrid auto-labelling
+             save_conf=False,  # save auto-label confidences
+             plots=True,
+             wandb_logger=None,
+             compute_loss=None,
+             trace=False,
+             is_coco=False,
+             v5_metric=False,
+             project=None,
+             name=None,
+             task=None,
+             exist_ok=None,
+             device=None,
+             max_nms=30000,
+             max_det=300, pbar=None):
+    training = model is not None
+    if training:  # called by train.py
+        device = next(model.parameters()).device  # get model device
+        map_device = 'cpu' if device.type == 'privateuseone' else device
+    half = device.type in ['cuda']  # half precision only supported on CUDA
+    if half:
+        model.half()
+    # Configure
+    model.eval()
+    preds, targets, loss = [], [], 0
+    n = len(dataloader)
+    bar = tqdm(dataloader, f"{' ':>69}", total=n, bar_format=TQDM_BAR_FORMAT)
+    for i, (imgs, labels) in enumerate(bar):
+        with torch.autocast(enabled=device.type == "cuda", device_type="cuda"):
+            imgs, labels = imgs.to(device), labels.to(device)
+            pred = model(imgs)
+            preds.append(pred.argsort(1, descending=True)[:, :5])
+            targets.append(labels)
+            if compute_loss:
+                loss += compute_loss(pred, labels)
+
+    loss /= n
+    preds, targets = torch.cat(preds), torch.cat(targets)
+    correct = (targets[:, None] == preds).float()
+    acc = torch.stack((correct[:, 0], correct.max(1).values), dim=1)  # (top1, top5) accuracy
+    top1, top5 = acc.mean(0).tolist()
+    print(f"{' ':>33}{loss:>11.3g}{top1:>11.3g}{top5:>11.3g}")
+    return top1, top5, loss
 
 
 @torch.no_grad()
@@ -108,7 +168,7 @@ def test(data,
     confusion_matrix = ConfusionMatrix(nc=nc)
     names = {k: v for k, v in enumerate(model.names if hasattr(model, 'names') else model.module.names)}
     coco91class = coco80_to_coco91_class()
-    if not model.anchorFree:
+    if not model.is_anchorFree:
         s = ('%22s' + '%11s' * 6) % ('Class', 'Images', 'Labels', 'P', 'R', 'mAP@.5', 'mAP@.5:.95')
         pf = '%22s' + '%11i' * 2 + '%11.3g' * 4  # print format
     else:

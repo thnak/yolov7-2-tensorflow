@@ -2176,7 +2176,7 @@ class ComputeLossAuxOTA:
 
 
 def SmartLoss(model, hyp, label_smoothing=0.1):
-    if model.is_classify:
+    if model.is_Classify:
         return nn.CrossEntropyLoss(label_smoothing=label_smoothing), nn.CrossEntropyLoss(label_smoothing=label_smoothing)
 
     compute_loss_val = ComputeLoss(model)

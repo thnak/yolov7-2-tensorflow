@@ -347,7 +347,7 @@ def model_info(model, verbose=False, img_size=640):
         fs = f'{flops} Gflops\n'  # 640x640 GFLOPS
         fs += f'               Model size (in memory): {size_in_mem} (FP32)\n'
         fs += f'               Anchor Free: {model.is_anchorFree if hasattr(model, "is_anchorFree") else False}\n'
-        fs += f'               Classify: {model.is_classify if hasattr(model, "is_classify") else False}\n'
+        fs += f'               Classify: {model.is_Classify if hasattr(model, "is_Classify") else False}\n'
         fs += f'               Version: {model.model_version if hasattr(model, "model_version") else "0"}\n'
         fs += f'               Best fitness: {model.best_fitness if hasattr(model, "best_fitness") else "-1.0"}\n'
         fs += f'               Dataset: {str(model.total_image[-1])+" images" if hasattr(model, "total_image") else "[]"}\n'
@@ -521,8 +521,8 @@ class TracedModel(nn.Module):
         self.stride = model.stride
         self.names = model.names
         self.model = model
-        self.anchorFree = model.is_anchorFree if hasattr(model, "is_anchorFree") else False
-
+        self.is_anchorFree = model.is_anchorFree if hasattr(model, "is_anchorFree") else False
+        self.is_Classify = model.is_Classify if hasattr(model, "is_Classify") else False
         self.model = revert_sync_batchnorm(self.model)
         self.model.to('cpu')
         self.model.eval()
@@ -549,7 +549,7 @@ class TracedModel(nn.Module):
 
 def save_model(ckpt=None, last=None, best=None, best_fitness=None, fi=None, epoch=0, epochs=0, wdir=None, wandb_logger=None, opt=None):
     if ckpt is not None:
-        ckpt['model'] = deepcopy(ckpt['model']).to('cpu')
+        ckpt['model'] = deepcopy(ckpt['model']).eval().cpu()
         torch.save(ckpt, last)
         if best_fitness == fi:
             torch.save(ckpt, best)

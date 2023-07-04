@@ -19,7 +19,7 @@ from torch.optim.lr_scheduler import LambdaLR
 from tqdm import tqdm
 
 from models.yolo import Model
-from tools.tester import test
+from tools.tester import test, cls_test
 from utils.autoanchor import check_anchors
 from utils.datasets import create_dataloader, create_dataloader_cls
 from utils.general import colorstr, init_seeds, check_dataset, check_img_size, one_cycle, labels_to_class_weights, \
@@ -40,6 +40,7 @@ def parse_path(data_dict):
     val_path = data_dict.get("val", train_path)
     test_path = data_dict.get("test", val_path)
     return train_path, val_path, test_path
+
 
 def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None):
     if data_loader is None:
@@ -62,7 +63,8 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None):
     logger.info(colorstr('hyperparameters: ') +
                 ', '.join(f'{k}={v}' for k, v in hyp.items()))
     # Directories
-    tag_results = ('Epoch', 'GPU_mem', "tloss")
+
+    tag_results = ('Epochs', 'VRAMs', "t_loss", "v_loss", "top1", "top5")
     if not os.path.exists(str(results_file_csv)):
         with open(results_file_csv, 'w') as f:
             csv_writer = csv.writer(f)
@@ -145,7 +147,7 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None):
         nodes = model.is_p5(nodes)
         nodes2 = model.is_p5()
         assert nodes == nodes2, f'Please paste the same model cfg branch like P5vsP5 or P6vsP6'
-        assert model.is_classify, f"Please patse the cls model cfg here"
+        assert model.is_Classify, f"Please patse the cls model cfg here"
     else:
         model = Model(opt.cfg,
                       ch=hyp.get('ch', 3),
@@ -375,15 +377,14 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None):
             # Print
             if rank in [-1, 0]:
                 tloss = (tloss * i + loss.item()) / (i + 1)  # update mean losses
-                mem = '%.3gG' % (torch.cuda.memory_reserved() / 1E9 if torch.cuda.is_available() else 0)  # (GB)
+                mem = '%.3gG' % (
+                    torch.cuda.memory_reserved(device=device) / 1E9 if torch.cuda.is_available() else 0)  # (GB)
 
-                pbar.desc = f"{f'{epoch + 1}/{epochs}':>10}{mem:>12}{tloss:>12.6g}" + ' ' * 12
+                pbar.desc = f"{f'{epoch + 1}/{epochs}':>11}{mem:>11}{tloss:>11.6g}" + ' ' * 36
 
         # Scheduler
         lr = [xx['lr'] for xx in optimizer.param_groups]  # for tensorboard
         scheduler.step()
-        input_shape = list(imgs.shape[1:]) if isinstance(imgs.shape[1:], torch.Size) else imgs.shape[1:]
-        continue
 
         # DDP process 0 or single-GPU
         if rank in [-1, 0]:
@@ -392,62 +393,29 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None):
                 model, include=['yaml', 'nc', 'hyp', 'gr', 'names',
                                 'stride', 'class_weights', 'best_fitness',
                                 'input_shape', 'model_version', 'total_image',
-                                'is_anchorFree', 'is_classify'])
+                                'is_anchorFree', 'is_Classify'])
             final_epoch = epoch + 1 == epochs
             if not opt.notest or final_epoch:  # Calculate mAP
                 wandb_logger.current_epoch = epoch + 1
-                results_, maps = test(data_dict,
-                                      batch_size=batch_size * 2,
-                                      imgsz=imgsz_test,
-                                      model=ema.ema,
-                                      single_cls=opt.single_cls,
-                                      dataloader=val_dataloader,
-                                      save_dir=save_dir,
-                                      verbose=False,
-                                      plots=plots and final_epoch,
-                                      wandb_logger=wandb_logger,
-                                      compute_loss=compute_loss_val,
-                                      is_coco=is_coco,
-                                      v5_metric=opt.v5_metric)[:2]
-
-                # Write
-                with open(results_file, 'aa') as f:
-                    f.write(s + '%10.4g' * 7 % results_ + '\n')
-                with open(results_file_csv, 'aa') as f:
-                    csv_writer = csv.writer(f)
-                    aa = []
-                    for xx in s.split(' '):
-                        if xx not in ['', ' ', '  ', '   ', '    ']:
-                            aa.append(xx)
-                    csv_writer.writerow(tuple(aa) + results_)
-
-                if len(opt.name) and opt.bucket:
-                    os.system('gsutil cp %s gs://%s/results_/results_%s.txt' %
-                              (results_file, opt.bucket, opt.name))
-
-                # Log
-                tags = ['train/box_loss', 'train/obj_loss', 'train/cls_loss',  # train loss
-                        'metrics/precision', 'metrics/recall', 'metrics/mAP_0.5', 'metrics/mAP_0.5:0.95',
-                        'val/box_loss', 'val/obj_loss', 'val/cls_loss',  # val loss
-                        'xx/lr0', 'xx/lr1', 'xx/lr2']  # params
-                if tb_writer or wandb_logger.wandb:
-                    for xx, tag in zip(list(tloss[:-1]) + list(results_) + lr, tags):
-                        if tb_writer:
-                            tb_writer.add_scalar(tag, xx, epoch)  # tensorboard
-                        if wandb_logger.wandb:
-                            wandb_logger.log({tag: xx})  # W&B
-
-            # Update best mAP
-            # weighted combination of [P, R, mAP@.5, mAP@.5-.95]
-            fi = fitness(np.array(results_).reshape(1, -1))
-
-            if fi > best_fitness:
-                best_fitness = fi.tolist()[0]
-                model.best_fitness = best_fitness
-            wandb_logger.end_epoch(best_result=best_fitness == fi)
-
+                top1, top5, tested_loss = cls_test(data_dict,
+                                                   batch_size=batch_size * 2,
+                                                   imgsz=imgsz_test,
+                                                   model=ema.ema,
+                                                   single_cls=opt.single_cls,
+                                                   dataloader=val_dataloader,
+                                                   save_dir=save_dir,
+                                                   verbose=False,
+                                                   plots=plots and final_epoch,
+                                                   wandb_logger=wandb_logger,
+                                                   compute_loss=compute_loss_val,
+                                                   is_coco=is_coco,
+                                                   v5_metric=opt.v5_metric)
+                fi = top1
+            if best_fitness < fi:
+                best_fitness = fi
             # Save model
             if (not opt.nosave) or (final_epoch and opt.evolve < 1):  # if save
+                input_shape = list(imgs.shape[1:]) if isinstance(imgs.shape[1:], torch.Size) else imgs.shape[1:]
                 model.input_shape = input_shape
                 if rank in [-1, 0]:
                     ema.update_attr(model,
@@ -716,7 +684,7 @@ def train(hyp, opt, tb_writer=None,
     # Optimizer
     nbs = 64  # nominal batch size
     # Image sizes
-    if model.is_classify:
+    if model.is_Classify:
         gs = 8
     else:
         gs = max(int(model.stride.max()), 32)  # grid size (max stride)
@@ -858,7 +826,7 @@ def train(hyp, opt, tb_writer=None,
 
             # Anchors
             if not opt.noautoanchor:
-                if not any([model.is_anchorFree, model.is_classify]):
+                if not any([model.is_anchorFree, model.is_Classify]):
                     check_anchors(dataset, model=model,
                                   thr=hyp['anchor_t'], imgsz=imgsz, device='cpu')
             model.half().float() if device.type == 'xla' else model.to(device).half().float()
@@ -996,7 +964,8 @@ def train(hyp, opt, tb_writer=None,
             # Print
             if rank in [-1, 0]:
                 mloss = (mloss * i + loss_items.to(device)) / (i + 1)  # update mean losses
-                mem = '%.3gG' % (torch.cuda.memory_reserved() / 1E9 if torch.cuda.is_available() else 0)  # (GB)
+                mem = '%.3gG' % (
+                    torch.cuda.memory_reserved(device=device) / 1E9 if torch.cuda.is_available() else 0)  # (GB)
 
                 s = ('%11s' * 2 + '%11.4g' * (2 + len(mloss))) % (
                 f'{epoch}/{epochs - 1}', mem, *mloss, targets.shape[0], imgs.shape[-1])
@@ -1028,7 +997,7 @@ def train(hyp, opt, tb_writer=None,
                 model, include=['yaml', 'nc', 'hyp', 'gr', 'names',
                                 'stride', 'class_weights', 'best_fitness',
                                 'input_shape', 'model_version', 'total_image',
-                                'is_anchorFree', 'is_classify'])
+                                'is_anchorFree', 'is_Classify'])
             final_epoch = epoch + 1 == epochs
             if not opt.notest or final_epoch:  # Calculate mAP
                 wandb_logger.current_epoch = epoch + 1
