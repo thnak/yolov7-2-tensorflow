@@ -1,6 +1,6 @@
-path: ./coco128  # dataset root dir
-train: coco128/images/train2017 # train images (relative to 'path') 128 images
-val: coco128/images/train2017 #val images (relative to 'path') 128 images
+#path: datasets  # dataset root dir
+train: datasets/coco128/images/train2017 # train images (relative to 'path') 128 images
+val: datasets/coco128/images/train2017 #val images (relative to 'path') 128 images
 
 names: [ 'person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus', 'train', 'truck', 'boat', 'traffic light',
          'fire hydrant', 'stop sign', 'parking meter', 'bench', 'bird', 'cat', 'dog', 'horse', 'sheep', 'cow',

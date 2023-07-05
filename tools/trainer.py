@@ -147,7 +147,7 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None):
         nodes = model.is_p5(nodes)
         nodes2 = model.is_p5()
         assert nodes == nodes2, f'Please paste the same model cfg branch like P5vsP5 or P6vsP6'
-        assert model.is_Classify, f"Please patse the cls model cfg here"
+        assert model.is_Classify, f"Please paste the cls model cfg here"
     else:
         model = Model(opt.cfg,
                       ch=hyp.get('ch', 3),
@@ -670,7 +670,7 @@ def train(hyp, opt, tb_writer=None,
 
     with torch_distributed_zero_first(rank):
         check_dataset(data_dict)  # check
-    train_path, val_path, test_path = parse_path(datadict=data_dict)
+    train_path, val_path, test_path = parse_path(data_dict=data_dict)
 
     # Freeze
     freeze = [f'model.{x}.' for x in (freeze if len(freeze) > 1 else range(

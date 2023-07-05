@@ -216,12 +216,12 @@ if __name__ == '__main__':
             ONNX = True
         # TorchScript export
         if torchScript:
+            prefix = colorstr('TorchScript:')
             try:
-                prefix = colorstr('TorchScript:')
                 logging.info(
                     f'\n{prefix} Starting TorchScript export with torch{torch.__version__}')
                 f = weight.as_posix().replace('.pt', '.torch-script.pt')  # filename
-                ts = torch.jit.trace(model, img, strict=False)
+                ts = torch.jit.trace(model, img, strict=True, check_trace=True)
                 ts.save(f)
                 logging.info(f'{prefix} export success✅, saved as {f}')
                 filenames.append(f)
@@ -229,8 +229,8 @@ if __name__ == '__main__':
                 logging.info(f'{prefix} export failure❌:\n{e}')
             # CoreML export
         if coreML:
+            prefix = colorstr('CoreML:')
             try:
-                prefix = colorstr('CoreML:')
                 check_requirements('coremltools')
                 from models.yolo import iOSModel
                 import coremltools as ct

@@ -223,12 +223,12 @@ def check_dataset(dict_):
             if s and len(s):  # download script
                 print('Downloading %s ...' % s)
                 if s.startswith('http') and s.endswith('.zip'):  # URL
-                    f = Path(s).name  # filename
-                    f = f"{dict_.get('path')}/{f}"
-                    Path(f"{dict_.get('path')}").mkdir(exist_ok=True)
-                    if not os.path.exists(f):
-                        torch.hub.download_url_to_file(s, f)
-                    r = os.system('unzip -q %s -d ../ && rm %s' % (f, f))  # unzip
+                    root_dir = Path(dict_.get("path", "datasets"))
+                    root_dir.mkdir(exist_ok=True)
+                    file_name = Path(s).name
+                    if not Path(s).exists():
+                        torch.hub.download_url_to_file(s, file_name)
+                    r = os.system('unzip -q %s -d %s && rm %s' % (file_name, root_dir.as_posix(), file_name))
                 else:  # bash script
                     r = os.system(s)
                 print('Dataset autodownload %s\n' % ('success' if r == 0 else 'failure'))  # analyze return value

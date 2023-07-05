@@ -3,8 +3,8 @@
 # Download ILSVRC2012 ImageNet dataset https://image-net.org
 # Example usage: bash data/scripts/get_imagenet.sh
 # parent
-# ├── yolov5
-# └── datasets
+# └── yolov5
+#  └── datasets
 #     └── imagenet  ← downloads here
 
 # Arguments (optional) Usage: bash data/scripts/get_imagenet.sh --train --val
@@ -21,7 +21,7 @@ else
 fi
 
 # Make dir
-d='../datasets/imagenet' # unzip directory
+d='datasets/imagenet' # unzip directory
 mkdir -p $d && cd $d
 
 # Download/unzip train

@@ -593,9 +593,6 @@ class Model(nn.Module):
             self.stride = m.stride
             m.bias_init()
             self.is_anchorFree = True
-        # elif isinstance(m, Classify):
-        #     self._initialize_biases()
-        # Init weights, biases
         initialize_weights(self)
 
     def forward(self, x, augment=False, profile=False):
