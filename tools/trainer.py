@@ -1018,7 +1018,7 @@ def train(hyp, opt, tb_writer=None,
                 # Write
                 with open(results_file, 'aa') as f:
                     f.write(s + '%10.4g' * 7 % results_ + '\n')
-                with open(results_file_csv, 'aa') as f:
+                with open(results_file_csv, 'a') as f:
                     csv_writer = csv.writer(f)
                     aa = []
                     for xx in s.split(' '):
