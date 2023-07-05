@@ -189,7 +189,7 @@ if __name__ == '__main__':
 
         model_Gflops = model.info(verbose=False, img_size=input_shape)
         logging.info(model_Gflops)
-        model.model[-1].export = True if coreML and not opt.end2end else False  # set Detect() layer grid export,
+        model.model[-1].export = True if any([coreML]) and not opt.end2end else False  # set Detect() layer grid export,
         # for coreml export set to True
         y = model(img)
 
@@ -380,8 +380,8 @@ if __name__ == '__main__':
             onnx.checker.check_model(onnx_model)  # check onnx model
             logging.info(f'{prefix} writing metadata for model...')
 
-            anchor_grid = model.model[-1].anchor_grid.detach().cpu().numpy().tolist() if not model.is_classify else None
-            anchors = model.model[-1].anchors.detach().cpu().numpy().tolist() if not model.is_classify else None
+            anchor_grid = model.model[-1].anchor_grid.detach().cpu().numpy().tolist() if not model.is_Classify else None
+            anchors = model.model[-1].anchors.detach().cpu().numpy().tolist() if not model.is_Classify else None
             onnx_MetaData = {'model_infor': model_Gflops,
                              'export_gitstatus': gitstatus,
                              'best_fitness': best_fitness,
