@@ -569,7 +569,16 @@ class Model(nn.Module):
         m.inplace = self.inplace
         self.is_Classify = isinstance(m, Classify)
         if self.is_Classify:
-            self.stride = torch.tensor([8])
+            strides = [x for x in range(7, 17)]
+            for x in strides:
+                try:
+                    inputSampleShape = [x*32] * 2
+                    _ = self.forward(torch.zeros(1, ch, *inputSampleShape))
+                    self.stride = torch.tensor([x**2])
+                    break
+                except Exception as ex:
+                    self.stride = torch.tensor([x**2])
+                    continue
         s = 1024  # scale it up for large shape
         inputSampleShape = [1024] * 2
         if isinstance(m, (Detect, IDetect)):

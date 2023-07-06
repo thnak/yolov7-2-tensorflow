@@ -167,7 +167,7 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None):
     # Optimizer
     nbs = 64  # nominal batch size
     # Image sizes
-    gs = 8
+    gs = int(model.stride.max())  # grid size (max stride)
     # verify imgsz are gs-multiples
     imgsz, imgsz_test = [check_img_size(size, gs) for size in opt.imgsz]
     model.model_version = model_version
@@ -679,10 +679,8 @@ def train(hyp, opt, tb_writer=None,
     # Optimizer
     nbs = 64  # nominal batch size
     # Image sizes
-    if model.is_Classify:
-        gs = 8
-    else:
-        gs = max(int(model.stride.max()), 32)  # grid size (max stride)
+
+    gs = max(int(model.stride.max()), 32)  # grid size (max stride)
     # verify imgsz are gs-multiples
     imgsz, imgsz_test = [check_img_size(size, gs) for size in opt.imgsz]
     model.model_version = model_version

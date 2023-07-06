@@ -4,10 +4,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import warnings
-from utils.general import non_max_suppression, make_divisible, scale_coords, increment_path, xyxy2xywh
+from utils.general import non_max_suppression, make_divisible, scale_coords, increment_path, xyxy2xywh, check_requirements
 
 try:
-    from timm.models.layers import DropPath, to_2tuple, trunc_normal_
+    from timm.models.layers import DropPath, to_2tuple
 except ImportError:
     pass
 
@@ -1298,6 +1298,7 @@ class C3STR(C3):
         super().__init__(c1, c2, c2, n, shortcut, g, e)
         c_ = int(c2 * e)
         num_heads = c_ // 32
+        check_requirements("timm")
         self.m = SwinTransformerBlock(c_, c_, num_heads, n)
 
 
@@ -2026,6 +2027,7 @@ class SwinTransformerLayer(nn.Module):
         #     self.window_size = min(self.input_resolution)
         assert 0 <= self.shift_size < self.window_size, "shift_size must in 0-window_size"
         self.norm1 = norm_layer(dim)
+        check_requirements("timm")
         self.attn = WindowAttention(
             dim, window_size=to_2tuple(self.window_size), num_heads=num_heads,
             qkv_bias=qkv_bias, qk_scale=qk_scale, attn_drop=attn_drop, proj_drop=drop)
