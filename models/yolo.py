@@ -4,7 +4,7 @@ import sys
 from copy import deepcopy
 from pathlib import Path
 
-import torch
+import torch.nn
 from tqdm import tqdm
 
 from models.common import *
@@ -37,15 +37,14 @@ class Classify(nn.Module):
         list_conv = []
         # connect = 4 * no * na
         for x in ch:
-            a = nn.Sequential(nn.Conv2d(x, 2*x, 1, 1, bias=False),
-                              nn.BatchNorm2d(2*x),
+            a = nn.Sequential(nn.Conv2d(x, 2 * x, 1, 1, bias=False),
+                              nn.BatchNorm2d(2 * x),
                               nn.SiLU(),
                               nn.AdaptiveAvgPool2d(1),
                               nn.Flatten(1))
             list_conv.append(a)
         self.m = nn.ModuleList(list_conv)  # output conv
-        self.linear = nn.Linear(sum([x*2 for x in ch]), nc)
-        # self.act = nn.Softmax(1)
+        self.linear = nn.Linear(sum([x * 2 for x in ch]), nc)
         self.inplace = inplace
 
     def forward(self, x):
@@ -55,8 +54,11 @@ class Classify(nn.Module):
             z.append(out)
         out = torch.concatenate(z, dim=1)
         out = self.linear(out)
-        # out = self.act(out)
         return out
+
+    def switch_to_deploy(self):
+        """add softmax activation for deploy"""
+        self.linear = nn.Sequential(self.linear, nn.Softmax(1))
 
 
 class Detect(nn.Module):
@@ -217,8 +219,7 @@ class IDetect(nn.Module):
         return out
 
     def fuse(self):
-        print("IDetect.fuse")
-        # fuse ImplicitA and Convolution
+        """fuse ImplicitA and Convolution"""
         for i in range(len(self.m)):
             c1, c2, _, _ = self.m[i].weight.shape
             c1_, c2_, _, _ = self.ia[i].implicit.shape
@@ -339,8 +340,7 @@ class IAuxDetect(nn.Module):
         return out
 
     def fuse(self):
-        print("IAuxDetect.fuse")
-        # fuse ImplicitA and Convolution
+        """fuse ImplicitA and Convolution"""
         for i in range(len(self.m)):
             c1, c2, _, _ = self.m[i].weight.shape
             c1_, c2_, _, _ = self.ia[i].implicit.shape
@@ -604,7 +604,7 @@ class Model(nn.Module):
             y = []  # outputs
             for si, fi in zip(s, f):
                 xi = scale_img(x.flip(fi) if fi else x, si, gs=int(self.stride.max()))
-                yi = self.forward_once(xi)[0]  # forward
+                yi = self.forward_once(xi, profile=profile)[0]  # forward
                 # cv2.imwrite(f'img_{si}.jpg', 255 * xi[0].cpu().numpy().transpose((1, 2, 0))[:, :, ::-1])  # save
                 yi[..., :4] /= si  # de-scale
                 if fi == 2:
@@ -641,9 +641,7 @@ class Model(nn.Module):
                     m(x.copy() if c else x)
                 dt.append((time_synchronized() - t) * 100)
                 print('%10.1f%10.0f%10.1fms %-40s' % (o, m.np, dt[-1], m.type))
-            # print(f'debug: {m.i} {m}')
             x = m(x)  # run
-
             y.append(x if m.i in self.save else None)  # save output
 
         if profile:
@@ -689,26 +687,30 @@ class Model(nn.Module):
             if type(m) is Bottleneck:
                 print('%10.3g' % (m.w.detach().sigmoid() * 2))  # shortcut weights
 
-    def fuse(self):  # fuse model Conv2d() + BatchNorm2d() layers
+    def fuse(self):
+        """fuse model Conv2d() + BatchNorm2d() layers, fuse Conv2d + im"""
         prefix = "Fusing layers... "
         print(prefix)
-        pbar = tqdm(self.model.modules(), desc=f'', unit="layer")
+        pbar = tqdm(self.model.modules(), desc=f'', unit=" layer")
         for m in pbar:
             if isinstance(m, RepConv):
-                pbar.set_description_str(f"fusing RepConv")
+                pbar.set_description_str(f"fusing {m.__class__.__name__}")
                 m.fuse_repvgg_block()
             elif isinstance(m, RepConv_OREPA):
-                pbar.set_description_str(f"switching to deploy RepConv_OREPA")
+                pbar.set_description_str(f"switching to deploy {m.__class__.__name__}")
                 m.switch_to_deploy()
             elif isinstance(m, (Conv, DWConv)) and hasattr(m, 'bn'):
-                pbar.set_description_str(f"fusing Conv/DWConv")
+                pbar.set_description_str(f"fusing {m.__class__.__name__}")
                 m.conv = fuse_conv_and_bn(m.conv, m.bn)  # update conv
                 delattr(m, 'bn')  # remove batchnorm
                 m.forward = m.fuseforward  # update forward
             elif isinstance(m, (IDetect, IAuxDetect)):
-                pbar.set_description_str(f"fusing IDetect/IAuxDetect")
+                pbar.set_description_str(f"fusing {m.__class__.__name__}")
                 m.fuse()
                 m.forward = m.fuseforward
+            elif isinstance(m, Classify):
+                pbar.set_description_str(f"switching to deploy {m.__class__.__name__}")
+                m.switch_to_deploy()
         return self
 
     def nms(self, mode=True, conf=0.25, iou=0.45, classes=None):  # add or remove NMS module
@@ -1228,7 +1230,7 @@ class TensorRT_Engine(object):
 
 
 def parse_model(d, ch, nc=80):  # model_dict, input_channels(3)
-    logger.info('\n%3s%42s%3s%10s  %-40s%-30s' %
+    logger.info('\n%3s%45s%3s%15s  %-50s%-30s' %
                 ('', 'from', 'n', 'params', 'module', 'arguments'))
     anchors, nc, gd, gw = d['anchors'], d['nc'], d['depth_multiple'], d['width_multiple']
     na = (len(anchors[0]) // 2) if isinstance(anchors, list) else anchors  # number of anchors
@@ -1256,12 +1258,12 @@ def parse_model(d, ch, nc=80):  # model_dict, input_channels(3)
                  RepResX, RepResXCSPA, RepResXCSPB, RepResXCSPC,
                  Ghost, GhostCSPA, GhostCSPB, GhostCSPC,
                  SwinTransformerBlock, STCSPA, STCSPB, STCSPC,
-                 SwinTransformer2Block, ST2CSPA, ST2CSPB, ST2CSPC, C3, C2f]:
+                 SwinTransformer2Block, ST2CSPA, ST2CSPB, ST2CSPC, SimAM, C3, C3TR, C2f, CNeB, C3HB, C3STR, BoT3]:
             c1, c2 = ch[f], args[0]
             if c2 != no:  # if not output
                 c2 = make_divisible(c2 * gw, 8)
 
-            args = [c1, c2, *args[1:]]
+            args = [c1, *args[1:]] if m is SimAM else [c1, c2, *args[1:]]
             if m in [DownC, SPPCSP, SPPCSPC, SPPFCSPC, GhostSPPCSPC, BottleneckCSP,
                      BottleneckCSPA, BottleneckCSPB, BottleneckCSPC,
                      RepBottleneckCSPA, RepBottleneckCSPB, RepBottleneckCSPC,
@@ -1271,9 +1273,10 @@ def parse_model(d, ch, nc=80):  # model_dict, input_channels(3)
                      RepResXCSPA, RepResXCSPB, RepResXCSPC,
                      GhostCSPA, GhostCSPB, GhostCSPC,
                      STCSPA, STCSPB, STCSPC,
-                     ST2CSPA, ST2CSPB, ST2CSPC, C3, C3TR, C3Ghost, C3x]:
+                     ST2CSPA, ST2CSPB, ST2CSPC, C3, C3TR, C3Ghost, C3x, CNeB, C3HB, C3STR, BoT3]:
                 args.insert(2, n)  # number of repeats
                 n = 1
+
         elif m is nn.BatchNorm2d:
             args = [ch[f]]
         elif m in [Concat, Chuncat]:
@@ -1297,13 +1300,12 @@ def parse_model(d, ch, nc=80):  # model_dict, input_channels(3)
 
         else:
             c2 = ch[f]
-        # assert c2 < 1024, f'torch 1.13.1 max channel size is 1024, yours {torch.__version__}'
         m_ = nn.Sequential(*[m(*args) for _ in range(n)]) if n > 1 else m(*args)  # module
         t = str(m)[8:-2].replace('__main__.', '')  # module type
         nparam = sum([x.numel() for x in m_.parameters()])  # number params
-        # attach index, 'from' index, type, number params
+        # index, 'from', type, number params
         m_.i, m_.f, m_.type, m_.np = i, f, t, nparam
-        logger.info('%3s%42s%3s%10.0f  %-40s%-30s' %(i, f, n_, nparam, t, args))  # print
+        logger.info('%3s%45s%3s%15s  %-50s%-30s' % (i, f, n_, f"{nparam:,}", t, args))  # print
         save.extend(x % i for x in ([f] if isinstance(f, int) else f) if x != -1)  # append to savelist
         layers.append(m_)
         if i == 0:

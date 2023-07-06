@@ -81,47 +81,37 @@ def Re_parameterization(inputWeightPath='v7-tiny-training.pt',
 
         if p5_model:
             for i in range((model.nc+5)*anchors):
-                model.state_dict()[f'model.{nodes}.m.0.weight'].data[i, :, :, :] *= state_dict[f'model.{nodes}.im.0.implicit'].data[:, i, ::].squeeze()
-                model.state_dict()[f'model.{nodes}.m.1.weight'].data[i, :, :, :] *= state_dict[f'model.{nodes}.im.1.implicit'].data[:, i, ::].squeeze()
-                model.state_dict()[f'model.{nodes}.m.2.weight'].data[i, :, :, :] *= state_dict[f'model.{nodes}.im.2.implicit'].data[:, i, ::].squeeze()
-            model.state_dict()[f'model.{nodes}.m.0.bias'].data += state_dict[f'model.{nodes}.m.0.weight'].mul(state_dict[f'model.{nodes}.ia.0.implicit']).sum(1).squeeze()
-            model.state_dict()[f'model.{nodes}.m.1.bias'].data += state_dict[f'model.{nodes}.m.1.weight'].mul(state_dict[f'model.{nodes}.ia.1.implicit']).sum(1).squeeze()
-            model.state_dict()[f'model.{nodes}.m.2.bias'].data += state_dict[f'model.{nodes}.m.2.weight'].mul(state_dict[f'model.{nodes}.ia.2.implicit']).sum(1).squeeze()
-            model.state_dict()[f'model.{nodes}.m.0.bias'].data *= state_dict[f'model.{nodes}.im.0.implicit'].data.squeeze()
-            model.state_dict()[f'model.{nodes}.m.1.bias'].data *= state_dict[f'model.{nodes}.im.1.implicit'].data.squeeze()
-            model.state_dict()[f'model.{nodes}.m.2.bias'].data *= state_dict[f'model.{nodes}.im.2.implicit'].data.squeeze()
+                for index, x in enumerate(model.model[-1].m):
+                    model.state_dict()[f'model.{nodes}.m.{index}.weight'].data[i, :, :, :] *= state_dict[f'model.{nodes}.im.{index}.implicit'].data[:, i, ::].squeeze()
+
+            for i, m in enumerate(model.model[-1].m):
+                bias_key = f"model.{nodes}.m.{i}.bias"
+                model.state_dict()[bias_key].data += state_dict[f'model.{nodes}.m.{i}.weight'].mul(state_dict[f'model.{nodes}.ia.{i}.implicit']).sum(1).squeeze()
+                model.state_dict()[bias_key].data *= state_dict[f'model.{nodes}.im.{i}.implicit'].data.squeeze()
 
         else:
-            model.state_dict()[f'model.{idx[nodes][0]}.m.0.weight'].data -= model.state_dict()[f'model.{idx[nodes][0]}.m.0.weight'].data
-            model.state_dict()[f'model.{idx[nodes][0]}.m.1.weight'].data -= model.state_dict()[f'model.{idx[nodes][0]}.m.1.weight'].data
-            model.state_dict()[f'model.{idx[nodes][0]}.m.2.weight'].data -= model.state_dict()[f'model.{idx[nodes][0]}.m.2.weight'].data
-            model.state_dict()[f'model.{idx[nodes][0]}.m.3.weight'].data -= model.state_dict()[f'model.{idx[nodes][0]}.m.3.weight'].data
-            model.state_dict()[f'model.{idx[nodes][0]}.m.0.weight'].data += state_dict[f'model.{idx[nodes][1]}.m.0.weight'].data
-            model.state_dict()[f'model.{idx[nodes][0]}.m.1.weight'].data += state_dict[f'model.{idx[nodes][1]}.m.1.weight'].data
-            model.state_dict()[f'model.{idx[nodes][0]}.m.2.weight'].data += state_dict[f'model.{idx[nodes][1]}.m.2.weight'].data
-            model.state_dict()[f'model.{idx[nodes][0]}.m.3.weight'].data += state_dict[f'model.{idx[nodes][1]}.m.3.weight'].data
-            model.state_dict()[f'model.{idx[nodes][0]}.m.0.bias'].data -= model.state_dict()[f'model.{idx[nodes][0]}.m.0.bias'].data
-            model.state_dict()[f'model.{idx[nodes][0]}.m.1.bias'].data -= model.state_dict()[f'model.{idx[nodes][0]}.m.1.bias'].data
-            model.state_dict()[f'model.{idx[nodes][0]}.m.2.bias'].data -= model.state_dict()[f'model.{idx[nodes][0]}.m.2.bias'].data
-            model.state_dict()[f'model.{idx[nodes][0]}.m.3.bias'].data -= model.state_dict()[f'model.{idx[nodes][0]}.m.3.bias'].data
-            model.state_dict()[f'model.{idx[nodes][0]}.m.0.bias'].data += state_dict[f'model.{idx[nodes][1]}.m.0.bias'].data
-            model.state_dict()[f'model.{idx[nodes][0]}.m.1.bias'].data += state_dict[f'model.{idx[nodes][1]}.m.1.bias'].data
-            model.state_dict()[f'model.{idx[nodes][0]}.m.2.bias'].data += state_dict[f'model.{idx[nodes][1]}.m.2.bias'].data
-            model.state_dict()[f'model.{idx[nodes][0]}.m.3.bias'].data += state_dict[f'model.{idx[nodes][1]}.m.3.bias'].data
+            for index, x in enumerate(model.model[-1].m):
+                weight_key_0 = f"model.{idx[nodes][0]}.m.{index}.weight"
+                weight_key_1 = f"model.{idx[nodes][1]}.m.{index}.weight"
+                bias_key_0 = f'model.{idx[nodes][0]}.m.{index}.bias'
+                bias_key_1 = f"model.{idx[nodes][1]}.m.{index}.bias"
+                model.state_dict()[weight_key_0].data -= model.state_dict()[weight_key_0].data
+                model.state_dict()[weight_key_0].data += state_dict[weight_key_1].data
+                model.state_dict()[bias_key_0].data -= model.state_dict()[bias_key_0].data
+                model.state_dict()[bias_key_0].data += state_dict[bias_key_1].data
 
             for i in range((model.nc+5)*anchors):
-                model.state_dict()[f'model.{idx[nodes][0]}.m.0.weight'].data[i, :, :, :] *= state_dict[f'model.{idx[nodes][1]}.im.0.implicit'].data[:, i, : :].squeeze()
-                model.state_dict()[f'model.{idx[nodes][0]}.m.1.weight'].data[i, :, :, :] *= state_dict[f'model.{idx[nodes][1]}.im.1.implicit'].data[:, i, : :].squeeze()
-                model.state_dict()[f'model.{idx[nodes][0]}.m.2.weight'].data[i, :, :, :] *= state_dict[f'model.{idx[nodes][1]}.im.2.implicit'].data[:, i, : :].squeeze()
-                model.state_dict()[f'model.{idx[nodes][0]}.m.3.weight'].data[i, :, :, :] *= state_dict[f'model.{idx[nodes][1]}.im.3.implicit'].data[:, i, : :].squeeze()
-            model.state_dict()[f'model.{idx[nodes][0]}.m.0.bias'].data += state_dict[f'model.{idx[nodes][1]}.m.0.weight'].mul(state_dict[f'model.{idx[nodes][1]}.ia.0.implicit']).sum(1).squeeze()
-            model.state_dict()[f'model.{idx[nodes][0]}.m.1.bias'].data += state_dict[f'model.{idx[nodes][1]}.m.1.weight'].mul(state_dict[f'model.{idx[nodes][1]}.ia.1.implicit']).sum(1).squeeze()
-            model.state_dict()[f'model.{idx[nodes][0]}.m.2.bias'].data += state_dict[f'model.{idx[nodes][1]}.m.2.weight'].mul(state_dict[f'model.{idx[nodes][1]}.ia.2.implicit']).sum(1).squeeze()
-            model.state_dict()[f'model.{idx[nodes][0]}.m.3.bias'].data += state_dict[f'model.{idx[nodes][1]}.m.3.weight'].mul(state_dict[f'model.{idx[nodes][1]}.ia.3.implicit']).sum(1).squeeze()
-            model.state_dict()[f'model.{idx[nodes][0]}.m.0.bias'].data *= state_dict[f'model.{idx[nodes][1]}.im.0.implicit'].data.squeeze()
-            model.state_dict()[f'model.{idx[nodes][0]}.m.1.bias'].data *= state_dict[f'model.{idx[nodes][1]}.im.1.implicit'].data.squeeze()
-            model.state_dict()[f'model.{idx[nodes][0]}.m.2.bias'].data *= state_dict[f'model.{idx[nodes][1]}.im.2.implicit'].data.squeeze()
-            model.state_dict()[f'model.{idx[nodes][0]}.m.3.bias'].data *= state_dict[f'model.{idx[nodes][1]}.im.3.implicit'].data.squeeze()
+                for index, x in enumerate(model.model[-1].m):
+                    weight_key_0 = f'model.{idx[nodes][0]}.m.{index}.weight'
+                    implicit_key = f'model.{idx[nodes][1]}.im.{index}.implicit'
+                    model.state_dict()[weight_key_0].data[i, :, :, :] *= state_dict[implicit_key].data[:, i, : :].squeeze()
+            for index, x in enumerate(model.model[-1].m):
+                weight_key_1 = f"model.{idx[nodes][1]}.m.{index}.weight"
+                bias_key_0 = f'model.{idx[nodes][0]}.m.{index}.bias'
+                implicit_key = f'model.{idx[nodes][1]}.im.{index}.implicit'
+                implicit_key_1 = f"model.{idx[nodes][1]}.ia.{index}.implicit"
+                model.state_dict()[bias_key_0].data += state_dict[weight_key_1].mul(state_dict[implicit_key_1]).sum(1).squeeze()
+                model.state_dict()[bias_key_0].data *= state_dict[implicit_key].data.squeeze()
 
         with torch.no_grad():
             ckpt['model'] = deepcopy(model.module if is_parallel(model) else model).to('cpu')

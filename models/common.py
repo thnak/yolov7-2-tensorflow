@@ -6,6 +6,11 @@ import torch.nn.functional as F
 import warnings
 from utils.general import non_max_suppression, make_divisible, scale_coords, increment_path, xyxy2xywh
 
+try:
+    from timm.models.layers import DropPath, to_2tuple, trunc_normal_
+except ImportError:
+    pass
+
 
 def autopad(k, p=None):  # kernel, padding
     # Pad to 'same' shape outputs
@@ -908,10 +913,321 @@ class TransformerBlock(nn.Module):
 
 ##### end of transformer #####
 
+##### yoloair #####
+class CNeB(nn.Module):
+    # CSP ConvNextBlock with 3 convolutions by iscyy/yoloair
+    def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5):  # ch_in, ch_out, number, shortcut, groups, expansion
+        super().__init__()
+        c_ = int(c2 * e)  # hidden channels
+        self.cv1 = Conv(c1, c_, 1, 1)
+        self.cv2 = Conv(c1, c_, 1, 1)
+        self.cv3 = Conv(2 * c_, c2, 1)
+        self.m = nn.Sequential(*(ConvNextBlock(c_) for _ in range(n)))
+
+    def forward(self, x):
+        return self.cv3(torch.cat((self.m(self.cv1(x)), self.cv2(x)), dim=1))
+
+
+class ConvNextBlock(nn.Module):
+
+    def __init__(self, dim, drop_path=0., layer_scale_init_value=1e-6):
+        super().__init__()
+        self.dwconv = nn.Conv2d(dim, dim, kernel_size=7, padding=3, groups=dim)  # depthwise conv
+        self.norm = LayerNorm_s(dim, eps=1e-6)
+        self.pwconv1 = nn.Linear(dim, 4 * dim)
+        self.act = nn.GELU()
+        self.pwconv2 = nn.Linear(4 * dim, dim)
+        self.gamma = nn.Parameter(layer_scale_init_value * torch.ones((dim)),
+                                  requires_grad=True) if layer_scale_init_value > 0 else None
+        self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
+
+    def forward(self, x):
+        input = x
+        x = self.dwconv(x)
+        x = x.permute(0, 2, 3, 1)  # (N, C, H, W) -> (N, H, W, C)
+        x = self.norm(x)
+        x = self.pwconv1(x)
+        x = self.act(x)
+        x = self.pwconv2(x)
+        if self.gamma is not None:
+            x = self.gamma * x
+        x = x.permute(0, 3, 1, 2)  # (N, H, W, C) -> (N, C, H, W)
+
+        x = input + self.drop_path(x)
+        return x
+
+
+class LayerNorm_s(nn.Module):
+
+    def __init__(self, normalized_shape, eps=1e-6, data_format="channels_last"):
+        super().__init__()
+        self.weight = nn.Parameter(torch.ones(normalized_shape))
+        self.bias = nn.Parameter(torch.zeros(normalized_shape))
+        self.eps = eps
+        self.data_format = data_format
+        if self.data_format not in ["channels_last", "channels_first"]:
+            raise NotImplementedError
+        self.normalized_shape = (normalized_shape,)
+
+    def forward(self, x):
+        if self.data_format == "channels_last":
+            return F.layer_norm(x, self.normalized_shape, self.weight, self.bias, self.eps)
+        elif self.data_format == "channels_first":
+            u = x.mean(1, keepdim=True)
+            s = (x - u).pow(2).mean(1, keepdim=True)
+            x = (x - u) / torch.sqrt(s + self.eps)
+            x = self.weight[:, None, None] * x + self.bias[:, None, None]
+            return x
+
+
+class SimAM(torch.nn.Module):
+    def __init__(self, channels=None, e_lambda=1e-4):
+        super(SimAM, self).__init__()
+
+        self.activaton = nn.Sigmoid()
+        self.e_lambda = e_lambda
+
+    def __repr__(self):
+        s = self.__class__.__name__ + '('
+        s += ('lambda=%f)' % self.e_lambda)
+        return s
+
+    @staticmethod
+    def get_module_name():
+        return "simam"
+
+    def forward(self, x):
+        b, c, h, w = x.size()
+
+        n = w * h - 1
+
+        x_minus_mu_square = (x - x.mean(dim=[2, 3], keepdim=True)).pow(2)
+        y = x_minus_mu_square / (4 * (x_minus_mu_square.sum(dim=[2, 3], keepdim=True) / n + self.e_lambda)) + 0.5
+
+        return x * self.activaton(y)
+
+
+class C3HB(nn.Module):
+    # CSP HorBlock with 3 convolutions by iscyy/yoloair
+    def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5):  # ch_in, ch_out, number, shortcut, groups, expansion
+        super().__init__()
+        c_ = int(c2 * e)  # hidden channels
+        self.cv1 = Conv(c1, c_, 1, 1)
+        self.cv2 = Conv(c1, c_, 1, 1)
+        self.cv3 = Conv(2 * c_, c2, 1)
+        self.m = nn.Sequential(*(HorBlock(c_) for _ in range(n)))
+
+    def forward(self, x):
+        return self.cv3(torch.cat((self.m(self.cv1(x)), self.cv2(x)), dim=1))
+
+
+def get_dwconv(dim, kernel, bias):
+    return nn.Conv2d(dim, dim, kernel_size=kernel, padding=(kernel - 1) // 2, bias=bias, groups=dim)
+
+
+class gnconv(nn.Module):
+    def __init__(self, dim, order=5, gflayer=None, h=14, w=8, s=1.0):
+        super().__init__()
+        self.order = order
+        self.dims = [dim // 2 ** i for i in range(order)]
+        self.dims.reverse()
+        self.proj_in = nn.Conv2d(dim, 2 * dim, 1)
+
+        if gflayer is None:
+            self.dwconv = get_dwconv(sum(self.dims), 7, True)
+        else:
+            self.dwconv = gflayer(sum(self.dims), h=h, w=w)
+
+        self.proj_out = nn.Conv2d(dim, dim, 1)
+
+        self.pws = nn.ModuleList(
+            [nn.Conv2d(self.dims[i], self.dims[i + 1], 1) for i in range(order - 1)]
+        )
+        self.scale = s
+
+    def forward(self, x, mask=None, dummy=False):
+        # B, C, H, W = x.shape gnconv [512]by iscyy/air
+        fused_x = self.proj_in(x)
+        pwa, abc = torch.split(fused_x, (self.dims[0], sum(self.dims)), dim=1)
+        dw_abc = self.dwconv(abc) * self.scale
+        dw_list = torch.split(dw_abc, self.dims, dim=1)
+        x = pwa * dw_list[0]
+        for i in range(self.order - 1):
+            x = self.pws[i](x) * dw_list[i + 1]
+        x = self.proj_out(x)
+
+        return x
+
+
+class HorBlock(nn.Module):
+    r""" HorNet block
+    """
+
+    def __init__(self, dim, drop_path=0., layer_scale_init_value=1e-6, gnconv=gnconv):
+        super().__init__()
+
+        self.norm1 = HorLayerNorm(dim, eps=1e-6, data_format='channels_first')
+        self.gnconv = gnconv(dim)
+        self.norm2 = HorLayerNorm(dim, eps=1e-6)
+        self.pwconv1 = nn.Linear(dim, 4 * dim)
+        self.act = nn.GELU()
+        self.pwconv2 = nn.Linear(4 * dim, dim)
+
+        self.gamma1 = nn.Parameter(layer_scale_init_value * torch.ones(dim),
+                                   requires_grad=True) if layer_scale_init_value > 0 else None
+
+        self.gamma2 = nn.Parameter(layer_scale_init_value * torch.ones((dim)),
+                                   requires_grad=True) if layer_scale_init_value > 0 else None
+        self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
+
+    def forward(self, x):
+        B, C, H, W = x.shape  # [512]
+        if self.gamma1 is not None:
+            gamma1 = self.gamma1.view(C, 1, 1)
+        else:
+            gamma1 = 1
+        x = x + self.drop_path(gamma1 * self.gnconv(self.norm1(x)))
+
+        input = x
+        x = x.permute(0, 2, 3, 1)  # (N, C, H, W) -> (N, H, W, C)
+        x = self.norm2(x)
+        x = self.pwconv1(x)
+        x = self.act(x)
+        x = self.pwconv2(x)
+        if self.gamma2 is not None:
+            x = self.gamma2 * x
+        x = x.permute(0, 3, 1, 2)  # (N, H, W, C) -> (N, C, H, W)
+
+        x = input + self.drop_path(x)
+        return x
+
+
+class HorLayerNorm(nn.Module):
+    r""" LayerNorm that supports two data formats: channels_last (default) or channels_first.
+    The ordering of the dimensions in the inputs. channels_last corresponds to inputs with
+    shape (batch_size, height, width, channels) while channels_first corresponds to inputs
+    with shape (batch_size, channels, height, width).# https://ar5iv.labs.arxiv.org/html/2207.14284
+    """
+
+    def __init__(self, normalized_shape, eps=1e-6, data_format="channels_last"):
+        super().__init__()
+        self.weight = nn.Parameter(torch.ones(normalized_shape))
+        self.bias = nn.Parameter(torch.zeros(normalized_shape))
+        self.eps = eps
+        self.data_format = data_format
+        if self.data_format not in ["channels_last", "channels_first"]:
+            raise NotImplementedError  # by iscyy/air
+        self.normalized_shape = (normalized_shape,)
+
+    def forward(self, x):
+        if self.data_format == "channels_last":
+            return F.layer_norm(x, self.normalized_shape, self.weight, self.bias, self.eps)
+        elif self.data_format == "channels_first":
+            u = x.mean(1, keepdim=True)
+            s = (x - u).pow(2).mean(1, keepdim=True)
+            x = (x - u) / torch.sqrt(s + self.eps)
+            x = self.weight[:, None, None] * x + self.bias[:, None, None]
+            return x
+
+
+class MHSA(nn.Module):
+    def __init__(self, n_dims, width=14, height=14, heads=4, pos_emb=False):
+        super(MHSA, self).__init__()
+
+        self.heads = heads
+        self.query = nn.Conv2d(n_dims, n_dims, kernel_size=1)
+        self.key = nn.Conv2d(n_dims, n_dims, kernel_size=1)
+        self.value = nn.Conv2d(n_dims, n_dims, kernel_size=1)
+        self.pos = pos_emb
+        if self.pos:
+            self.rel_h_weight = nn.Parameter(torch.randn([1, heads, (n_dims) // heads, 1, int(height)]),
+                                             requires_grad=True)
+            self.rel_w_weight = nn.Parameter(torch.randn([1, heads, (n_dims) // heads, int(width), 1]),
+                                             requires_grad=True)
+        self.softmax = nn.Softmax(dim=-1)
+
+    def forward(self, x):
+        n_batch, C, width, height = x.size()
+        q = self.query(x).view(n_batch, self.heads, C // self.heads, -1)
+        k = self.key(x).view(n_batch, self.heads, C // self.heads, -1)
+        v = self.value(x).view(n_batch, self.heads, C // self.heads, -1)
+        # print('q shape:{},k shape:{},v shape:{}'.format(q.shape,k.shape,v.shape))  #1,4,64,256
+        content_content = torch.matmul(q.permute(0, 1, 3, 2), k)  # 1,C,h*w,h*w
+        # print("qkT=",content_content.shape)
+        c1, c2, c3, c4 = content_content.size()
+        if self.pos:
+            # print("old content_content shape",content_content.shape) #1,4,256,256
+            content_position = (self.rel_h_weight + self.rel_w_weight).view(1, self.heads, C // self.heads, -1).permute(
+                0, 1, 3, 2)  # 1,4,1024,64
+
+            content_position = torch.matmul(content_position, q)  # ([1, 4, 1024, 256])
+            content_position = content_position if (
+                    content_content.shape == content_position.shape) else content_position[:, :, :c3, ]
+            assert (content_content.shape == content_position.shape)
+            # print('new pos222-> shape:',content_position.shape)
+            # print('new content222-> shape:',content_content.shape)
+            energy = content_content + content_position
+        else:
+            energy = content_content
+        attention = self.softmax(energy)
+        out = torch.matmul(v, attention.permute(0, 1, 3, 2))  # 1,4,256,64
+        out = out.view(n_batch, C, width, height)
+        return out
+
+
+class BottleneckTransformer(nn.Module):
+    # Transformer bottleneck
+    # expansion = 1
+
+    def __init__(self, c1, c2, stride=1, heads=4, mhsa=True, resolution=None, expansion=1):
+        super(BottleneckTransformer, self).__init__()
+        c_ = int(c2 * expansion)
+        self.cv1 = Conv(c1, c_, 1, 1)
+        # self.bn1 = nn.BatchNorm2d(c2)
+        if not mhsa:
+            self.cv2 = Conv(c_, c2, 3, 1)
+        else:
+            self.cv2 = nn.ModuleList()
+            self.cv2.append(MHSA(c2, width=int(resolution[0]), height=int(resolution[1]), heads=heads))
+            if stride == 2:
+                self.cv2.append(nn.AvgPool2d(2, 2))
+            self.cv2 = nn.Sequential(*self.cv2)
+        self.shortcut = c1 == c2
+        if stride != 1 or c1 != expansion * c2:
+            self.shortcut = nn.Sequential(
+                nn.Conv2d(c1, expansion * c2, kernel_size=1, stride=stride),
+                nn.BatchNorm2d(expansion * c2)
+            )
+        self.fc1 = nn.Linear(c2, c2)
+
+    def forward(self, x):
+        out = x + self.cv2(self.cv1(x)) if self.shortcut else self.cv2(self.cv1(x))
+        return out
+
+
+class BoT3(nn.Module):
+    # CSP Bottleneck with 3 convolutions
+    def __init__(self, c1, c2, n=1, e=0.5, e2=1, w=20, h=20):  # ch_in, ch_out, number, , expansion,w,h
+        super(BoT3, self).__init__()
+        c_ = int(c2 * e)  # hidden channels
+        self.cv1 = Conv(c1, c_, 1, 1)
+        self.cv2 = Conv(c1, c_, 1, 1)
+        self.cv3 = Conv(2 * c_, c2, 1)  # act=FReLU(c2)
+        self.m = nn.Sequential(
+            *[BottleneckTransformer(c_, c_, stride=1, heads=4, mhsa=True, resolution=(w, h), expansion=e2) for _ in
+              range(n)])
+        # self.m = nn.Sequential(*[CrossConv(c_, c_, 3, 1, g, 1.0, shortcut) for _ in range(n)])
+
+    def forward(self, x):
+        return self.cv3(torch.cat((self.m(self.cv1(x)), self.cv2(x)), dim=1))
+
+
+##### en of yoloair #####
 
 ##### yolov5 #####
 class C1(nn.Module):
-    # CSP Bottleneck with 3 convolutions
+    """CSP Bottleneck with 3 convolutions"""
+
     def __init__(self, c1, c2, n=1):  # ch_in, ch_out, number, shortcut, groups, expansion
         super().__init__()
         self.cv1 = Conv(c1, c2, 1, 1)
@@ -923,7 +1239,8 @@ class C1(nn.Module):
 
 
 class C2(nn.Module):
-    # CSP Bottleneck with 2 convolutions
+    """CSP Bottleneck with 2 convolutions"""
+
     def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5):  # ch_in, ch_out, number, shortcut, groups, expansion
         super().__init__()
         self.c = int(c2 * e)  # hidden channels
@@ -938,7 +1255,8 @@ class C2(nn.Module):
 
 
 class C2f(nn.Module):
-    # CSP Bottleneck with 2 convolutions
+    """CSP Bottleneck with 2 convolutions"""
+
     def __init__(self, c1, c2, n=1, shortcut=False, g=1, e=0.5):  # ch_in, ch_out, number, shortcut, groups, expansion
         super().__init__()
         self.c = int(c2 * e)  # hidden channels
@@ -972,6 +1290,15 @@ class C3(nn.Module):
 
     def forward(self, x):
         return self.cv3(torch.cat((self.m(self.cv1(x)), self.cv2(x)), 1))
+
+
+class C3STR(C3):
+    # C3 module with SwinTransformerBlock()
+    def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=1):
+        super().__init__(c1, c2, c2, n, shortcut, g, e)
+        c_ = int(c2 * e)
+        num_heads = c_ // 32
+        self.m = SwinTransformerBlock(c_, c_, num_heads, n)
 
 
 class C3x(C3):
@@ -1666,10 +1993,27 @@ def window_reverse(windows, window_size, H, W):
 
 
 class SwinTransformerLayer(nn.Module):
+    r""" Swin Transformer Layer.
 
-    def __init__(self, dim, num_heads, window_size=8, shift_size=0,
+    Args:
+        dim (int): Number of input channels.
+        input_resolution (tuple[int]): Input resulotion.
+        num_heads (int): Number of attention heads.
+        window_size (int): Window size.
+        shift_size (int): Shift size for SW-MSA.
+        mlp_ratio (float): Ratio of mlp hidden dim to embedding dim.
+        qkv_bias (bool, optional): If True, add a learnable bias to query, key, value. Default: True
+        qk_scale (float | None, optional): Override default qk scale of head_dim ** -0.5 if set.
+        drop (float, optional): Dropout rate. Default: 0.0
+        attn_drop (float, optional): Attention dropout rate. Default: 0.0
+        drop_path (float, optional): Stochastic depth rate. Default: 0.0
+        act_layer (nn.Module, optional): Activation layer. Default: nn.GELU
+        norm_layer (nn.Module, optional): Normalization layer.  Default: nn.LayerNorm
+    """
+
+    def __init__(self, dim, num_heads, window_size=7, shift_size=0,
                  mlp_ratio=4., qkv_bias=True, qk_scale=None, drop=0., attn_drop=0., drop_path=0.,
-                 act_layer=nn.SiLU, norm_layer=nn.LayerNorm):
+                 act_layer=nn.GELU, norm_layer=nn.LayerNorm):
         super().__init__()
         self.dim = dim
         self.num_heads = num_heads
@@ -1681,13 +2025,12 @@ class SwinTransformerLayer(nn.Module):
         #     self.shift_size = 0
         #     self.window_size = min(self.input_resolution)
         assert 0 <= self.shift_size < self.window_size, "shift_size must in 0-window_size"
-
         self.norm1 = norm_layer(dim)
         self.attn = WindowAttention(
-            dim, window_size=(self.window_size, self.window_size), num_heads=num_heads,
+            dim, window_size=to_2tuple(self.window_size), num_heads=num_heads,
             qkv_bias=qkv_bias, qk_scale=qk_scale, attn_drop=attn_drop, proj_drop=drop)
-        # not sure what is the DropPath
-        self.drop_path = torch.nn.Dropout(drop_path) if drop_path > 0. else nn.Identity()
+
+        self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
         self.norm2 = norm_layer(dim)
         mlp_hidden_dim = int(dim * mlp_ratio)
         self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)
@@ -1719,7 +2062,7 @@ class SwinTransformerLayer(nn.Module):
         _, _, H_, W_ = x.shape
 
         Padding = False
-        if min(H_, W_) < self.window_size or H_ % self.window_size != 0 or W_ % self.window_size != 0:
+        if min(H_, W_) < self.window_size or H_ % self.window_size != 0:
             Padding = True
             # print(f'img_size {min(H_, W_)} is less than (or not divided by) window_size {self.window_size}, Padding.')
             pad_r = (self.window_size - W_ % self.window_size) % self.window_size
