@@ -30,7 +30,7 @@ if __name__ == '__main__':
     parser.add_argument('--epochs', type=int, default=300)
     parser.add_argument('--augment', action='store_true', help='using augment for training')
     parser.add_argument('--batch-size', type=int, default=16, help='total batch size for all GPUs')
-    parser.add_argument('--img-size', nargs='+', type=int, default=[640, 640], help='[train, test] image sizes')
+    parser.add_argument('--imgsz', nargs='+', type=int, default=[640, 640], help='[train, test] image sizes')
     parser.add_argument('--rect', action='store_true', help='rectangular training')
     parser.add_argument('--resume', nargs='?', const=True, default=False, help='resume most recent training')
     parser.add_argument('--nosave', action='store_true', help='only save final checkpoint')
@@ -89,7 +89,7 @@ if __name__ == '__main__':
         assert len(opt.cfg) or len(
             opt.weights), 'either --cfg or --weights must be specified'
         # extend to 2 sizes (train, test)
-        opt.img_size.extend([opt.img_size[-1]] * (2 - len(opt.img_size)))
+        opt.imgsz.extend([opt.imgsz[-1]] * (2 - len(opt.imgsz)))
         opt.name = 'evolve' if opt.evolve > 1 else opt.name
         opt.save_dir = increment_path(Path(
             opt.project) / opt.name, exist_ok=opt.exist_ok | opt.evolve > 1)  # increment run

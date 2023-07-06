@@ -143,10 +143,7 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None):
         logger.info('Transferred %g/%g items from: %s, best fitness: %s, dataset %s images\n' % (
             len(state_dict), len(model.state_dict()), weights, best_fitness, total_image[-1]))  # report
 
-        nodes = len(pretrained_model.yaml['head']) + len(pretrained_model.yaml['backbone']) - 1
-        nodes = model.is_p5(nodes)
-        nodes2 = model.is_p5()
-        assert nodes == nodes2, f'Please paste the same model cfg branch like P5vsP5 or P6vsP6'
+        assert model.is_p5() == pretrained_model.is_p5(), f'Please paste the same model cfg branch like P5vsP5 or P6vsP6'
         assert model.is_Classify, f"Please paste the cls model cfg here"
     else:
         model = Model(opt.cfg,
@@ -172,7 +169,7 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None):
     # Image sizes
     gs = 8
     # verify imgsz are gs-multiples
-    imgsz, imgsz_test = [check_img_size(size, gs) for size in opt.img_size]
+    imgsz, imgsz_test = [check_img_size(size, gs) for size in opt.imgsz]
     model.model_version = model_version
     model.total_image = total_image
     model.input_shape = [3, imgsz, imgsz] if isinstance(imgsz, int) else [3, *imgsz]
@@ -653,9 +650,7 @@ def train(hyp, opt, tb_writer=None,
         logger.info('Transferred %g/%g items from: %s, best fitness: %s, dataset %s images\n' % (
             len(state_dict), len(model.state_dict()), weights, best_fitness, total_image[-1]))  # report
 
-        nodes = len(pretrained_model.yaml['head']) + len(pretrained_model.yaml['backbone']) - 1
-        nodes = model.is_p5(nodes)
-        nodes2 = model.is_p5()
+        assert model.is_p5() == pretrained_model.is_p5(), f'Please paste the same model cfg branch like P5vsP5 or P6vsP6'
         assert nodes == nodes2, f'Please paste the same model cfg branch like P5vsP5 or P6vsP6'
     else:
         model = Model(opt.cfg,
@@ -689,7 +684,7 @@ def train(hyp, opt, tb_writer=None,
     else:
         gs = max(int(model.stride.max()), 32)  # grid size (max stride)
     # verify imgsz are gs-multiples
-    imgsz, imgsz_test = [check_img_size(size, gs) for size in opt.img_size]
+    imgsz, imgsz_test = [check_img_size(size, gs) for size in opt.imgsz]
     model.model_version = model_version
     model.total_image = total_image
     model.input_shape = [3, imgsz, imgsz] if isinstance(imgsz, int) else [3, *imgsz]
@@ -1016,7 +1011,7 @@ def train(hyp, opt, tb_writer=None,
                                       v5_metric=opt.v5_metric)[:2]
 
                 # Write
-                with open(results_file, 'aa') as f:
+                with open(results_file, 'a') as f:
                     f.write(s + '%10.4g' * 7 % results_ + '\n')
                 with open(results_file_csv, 'a') as f:
                     csv_writer = csv.writer(f)

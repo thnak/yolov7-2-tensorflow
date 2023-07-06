@@ -7,10 +7,10 @@ opencv-python
 PyYAML~=6.0
 requests==2.31.0
 scipy>=1.10.0
-# torch>=1.13.1
+torch
 mss
-# torch-directml
-tqdm==4.65.0
+# torch-directml for windows user
+tqdm
 #pycuda==2022.2.2
 #nvidia-pyindex==1.0.9
 # nvidia-tensorrt==8.4.3.1
@@ -44,7 +44,7 @@ psutil
 # pycocotools>=2.0  # COCO mAP
 # roboflow
 
-Pillow
+Pillow<10.0.0
 onnx
 # torchvision==0.15.1
 thop~=0.1.1.post2209072238

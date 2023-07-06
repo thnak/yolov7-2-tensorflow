@@ -379,9 +379,12 @@ if __name__ == '__main__':
             # onnx_model = onnx.load(f)  # load onnx model
             onnx.checker.check_model(onnx_model)  # check onnx model
             logging.info(f'{prefix} writing metadata for model...')
-
-            anchor_grid = model.model[-1].anchor_grid.detach().cpu().numpy().tolist() if not model.is_Classify else None
-            anchors = model.model[-1].anchors.detach().cpu().numpy().tolist() if not model.is_Classify else None
+            if hasattr(model, "is_Classify"):
+                anchor_grid = model.model[-1].anchor_grid.detach().cpu().numpy().tolist() if not model.is_Classify else None
+                anchors = model.model[-1].anchors.detach().cpu().numpy().tolist() if not model.is_Classify else None
+            else:
+                anchor_grid = model.model[-1].anchor_grid.detach().cpu().numpy().tolist()
+                anchors = model.model[-1].anchors.detach().cpu().numpy().tolist()
             onnx_MetaData = {'model_infor': model_Gflops,
                              'export_gitstatus': gitstatus,
                              'best_fitness': best_fitness,

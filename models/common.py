@@ -47,6 +47,7 @@ def ReOrg_slice(out):
 
 class ReOrg(nn.Module):
     """https://arxiv.org/pdf/2101.00745.pdf"""
+
     def __init__(self):
         super(ReOrg, self).__init__()
 
@@ -102,9 +103,11 @@ class Foldcut(nn.Module):
 
 class Conv(nn.Module):
     """Standard convolution"""
-    def __init__(self, c1, c2, k=1, s=1, p=None, g=1, act=True, dropout=0):  # ch_in, ch_out, kernel, stride, padding, groups
+
+    def __init__(self, c1, c2, k=1, s=1, p=None, g=1, d=1, act=True,
+                 dropout=0):  # ch_in, ch_out, kernel, stride, padding, groups
         super(Conv, self).__init__()
-        self.conv = nn.Conv2d(c1, c2, k, s, autopad(k, p), groups=g, bias=False)
+        self.conv = nn.Conv2d(c1, c2, k, s, autopad(k, p), groups=g, dilation=d, bias=False)
         self.bn = nn.BatchNorm2d(c2)
         if dropout > 0:
             self.drop = nn.Dropout(p=dropout)
@@ -126,7 +129,7 @@ class DFL(nn.Module):
     def __init__(self, c1=17):
         super().__init__()
         self.conv = nn.Conv2d(c1, 1, 1, bias=False).requires_grad_(False)
-        self.conv.weight.data[:] = nn.Parameter(torch.arange(c1, dtype=torch.float).view(1, c1, 1, 1)) # / 120.0
+        self.conv.weight.data[:] = nn.Parameter(torch.arange(c1, dtype=torch.float).view(1, c1, 1, 1))  # / 120.0
         self.c1 = c1
         # self.bn = nn.BatchNorm2d(4)
 
@@ -172,9 +175,9 @@ class RobustConv2(nn.Module):
         return x
 
 
-def DWConv(c1, c2, k=1, s=1, act=True):
-    """Depthwise convolution"""
-    return Conv(c1, c2, k, s, g=math.gcd(c1, c2), act=act)
+# def DWConv(c1, c2, k=1, s=1, act=True):
+#     """Depthwise convolution"""
+#     return Conv(c1, c2, k, s, g=math.gcd(c1, c2), act=act)
 
 
 class GhostConv(nn.Module):
@@ -239,7 +242,8 @@ class SPP(nn.Module):
 
 class Bottleneck(nn.Module):
     # Standard bottleneck
-    def __init__(self, c1, c2, shortcut=True, g=1, k=(3, 3), e=0.5, act=True):  # ch_in, ch_out, shortcut, groups, kernels, expand
+    def __init__(self, c1, c2, shortcut=True, g=1, k=(3, 3), e=0.5,
+                 act=True):  # ch_in, ch_out, shortcut, groups, kernels, expand
         super(Bottleneck, self).__init__()
         c_ = int(c2 * e)  # hidden channels
         act = nn.SiLU() if act is True else (act if isinstance(act, nn.Module) else nn.Identity())
@@ -294,6 +298,30 @@ class Ghost(nn.Module):
 
 
 ##### cspnet #####
+class SPPCSP(nn.Module):
+    """CSP SPP https://github.com/WongKinYiu/CrossStagePartialNetworks"""
+
+    def __init__(self, c1, c2, n=1, shortcut=False, g=1, e=0.5, k=(5, 9, 13)):
+        super(SPPCSP, self).__init__()
+        c_ = int(2 * c2 * e)  # hidden channels
+        self.cv1 = Conv(c1, c_, 1, 1)
+        self.cv2 = nn.Conv2d(c1, c_, 1, 1, bias=False)
+        self.cv3 = Conv(c_, c_, 3, 1)
+        self.cv4 = Conv(c_, c_, 1, 1)
+        self.m = nn.ModuleList([nn.MaxPool2d(kernel_size=x, stride=1, padding=x // 2) for x in k])
+        self.cv5 = Conv(4 * c_, c_, 1, 1)
+        self.cv6 = Conv(c_, c_, 3, 1)
+        self.bn = nn.BatchNorm2d(2 * c_)
+        from mish_cuda import MishCuda as Mish
+        self.act = Mish()
+        self.cv7 = Conv(2 * c_, c2, 1, 1)
+
+    def forward(self, x):
+        x1 = self.cv4(self.cv3(self.cv1(x)))
+        y1 = self.cv6(self.cv5(torch.cat([x1] + [m(x1) for m in self.m], 1)))
+        y2 = self.cv2(x)
+        return self.cv7(self.act(self.bn(torch.cat((y1, y2), dim=1))))
+
 
 class SPPCSPC(nn.Module):
     """CSP https://github.com/WongKinYiu/CrossStagePartialNetworks"""
@@ -657,7 +685,6 @@ class RepConv(nn.Module):
     def fuse_repvgg_block(self):
         if self.deploy:
             return
-        print(f"RepConv.fuse_repvgg_block")
 
         self.rbr_dense = self.fuse_conv_bn(self.rbr_dense[0], self.rbr_dense[1])
 
@@ -930,7 +957,8 @@ class C2f(nn.Module):
 class C3(nn.Module):
     """CSP Bottleneck with 3 convolutions"""
 
-    def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5, act=True):  # ch_in, ch_out, number, shortcut, groups, expansion
+    def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5,
+                 act=True):  # ch_in, ch_out, number, shortcut, groups, expansion
         super().__init__()
         c_ = int(c2 * e)  # hidden channels
         act = nn.SiLU() if act is True else (act if isinstance(act, nn.Module) else nn.Identity())
@@ -977,6 +1005,13 @@ class DWConvTranspose2d(nn.ConvTranspose2d):
         super().__init__(c1, c2, k, s, p1, p2, groups=math.gcd(c1, c2))
 
 
+class DWConv(Conv):
+    """Depth-wise convolution"""
+
+    def __init__(self, c1, c2, k=1, s=1, d=1, act=True):  # ch_in, ch_out, kernel, stride, dilation, activation
+        super().__init__(c1, c2, k, s, g=math.gcd(c1, c2), d=d, act=act)
+
+
 class CrossConv(nn.Module):
     """Cross Convolution Downsample"""
 
@@ -1021,7 +1056,8 @@ class C3Ghost(C3):
 class BottleneckCSP(nn.Module):
     """CSP Bottleneck https://github.com/WongKinYiu/CrossStagePartialNetworks"""
 
-    def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5, act=True):  # ch_in, ch_out, number, shortcut, groups, expansion
+    def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5,
+                 act=True):  # ch_in, ch_out, number, shortcut, groups, expansion
         super(BottleneckCSP, self).__init__()
         c_ = int(c2 * e)  # hidden channels
         self.cv1 = Conv(c1, c_, 1, 1)
@@ -1101,6 +1137,7 @@ class Expand(nn.Module):
 
 class NMS(nn.Module):
     """Non-Maximum Suppression (NMS) module"""
+
     # conf = 0.25  # confidence threshold
     # iou = 0.45  # IoU threshold
     # classes = None  # (optional list) filter by class
@@ -1347,8 +1384,28 @@ class OREPA_3x3_RepConv(nn.Module):
         return self.nonlinear(self.bn(out))
 
 
-class RepConv_OREPA(nn.Module):
+class SEBlock(nn.Module):
+    """https://github.com/DingXiaoH/RepVGG/blob/main/se_block.py"""
 
+    def __init__(self, input_channels, internal_neurons):
+        super(SEBlock, self).__init__()
+        self.down = nn.Conv2d(in_channels=input_channels, out_channels=internal_neurons, kernel_size=1, stride=1,
+                              bias=True)
+        self.up = nn.Conv2d(in_channels=internal_neurons, out_channels=input_channels, kernel_size=1, stride=1,
+                            bias=True)
+        self.input_channels = input_channels
+
+    def forward(self, inputs):
+        x = F.avg_pool2d(inputs, kernel_size=inputs.size(3))
+        x = self.down(x)
+        x = F.relu(x)
+        x = self.up(x)
+        x = torch.sigmoid(x)
+        x = x.view(-1, self.input_channels, 1, 1)
+        return inputs * x
+
+
+class RepConv_OREPA(nn.Module):
     def __init__(self, c1, c2, k=3, s=1, padding=1, dilation=1, groups=1, padding_mode='zeros', deploy=False,
                  use_se=False, nonlinear=nn.SiLU()):
         super(RepConv_OREPA, self).__init__()
@@ -1480,7 +1537,6 @@ class RepConv_OREPA(nn.Module):
     def switch_to_deploy(self):
         if hasattr(self, 'rbr_reparam'):
             return
-        print(f"RepConv_OREPA.switch_to_deploy")
         kernel, bias = self.get_equivalent_kernel_bias()
         self.rbr_reparam = nn.Conv2d(in_channels=self.rbr_dense.in_channels, out_channels=self.rbr_dense.out_channels,
                                      kernel_size=self.rbr_dense.kernel_size, stride=self.rbr_dense.stride,
@@ -1627,8 +1683,8 @@ class SwinTransformerLayer(nn.Module):
         self.attn = WindowAttention(
             dim, window_size=(self.window_size, self.window_size), num_heads=num_heads,
             qkv_bias=qkv_bias, qk_scale=qk_scale, attn_drop=attn_drop, proj_drop=drop)
-
-        self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
+        # not sure what is the DropPath
+        self.drop_path = torch.nn.Dropout(drop_path) if drop_path > 0. else nn.Identity()
         self.norm2 = norm_layer(dim)
         mlp_hidden_dim = int(dim * mlp_ratio)
         self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)
@@ -1980,7 +2036,7 @@ class SwinTransformerLayer_v2(nn.Module):
             qkv_bias=qkv_bias, attn_drop=attn_drop, proj_drop=drop,
             pretrained_window_size=(pretrained_window_size, pretrained_window_size))
 
-        self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
+        self.drop_path = torch.nn.Dropout(drop_path) if drop_path > 0. else nn.Identity()
         self.norm2 = norm_layer(dim)
         mlp_hidden_dim = int(dim * mlp_ratio)
         self.mlp = Mlp_v2(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)

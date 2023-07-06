@@ -5,6 +5,7 @@ from copy import deepcopy
 from pathlib import Path
 
 import torch
+from tqdm import tqdm
 
 from models.common import *
 from models.experimental import *
@@ -689,19 +690,23 @@ class Model(nn.Module):
                 print('%10.3g' % (m.w.detach().sigmoid() * 2))  # shortcut weights
 
     def fuse(self):  # fuse model Conv2d() + BatchNorm2d() layers
-        print('Fusing layers... ')
-        for m in self.model.modules():
+        prefix = "Fusing layers... "
+        print(prefix)
+        pbar = tqdm(self.model.modules(), desc=f'', unit="layer")
+        for m in pbar:
             if isinstance(m, RepConv):
-                # print(f" fuse_repvgg_block")
+                pbar.set_description_str(f"fusing RepConv")
                 m.fuse_repvgg_block()
             elif isinstance(m, RepConv_OREPA):
-                # print(f" switch_to_deploy")
+                pbar.set_description_str(f"switching to deploy RepConv_OREPA")
                 m.switch_to_deploy()
-            elif type(m) is Conv and hasattr(m, 'bn'):
+            elif isinstance(m, (Conv, DWConv)) and hasattr(m, 'bn'):
+                pbar.set_description_str(f"fusing Conv/DWConv")
                 m.conv = fuse_conv_and_bn(m.conv, m.bn)  # update conv
                 delattr(m, 'bn')  # remove batchnorm
                 m.forward = m.fuseforward  # update forward
             elif isinstance(m, (IDetect, IAuxDetect)):
+                pbar.set_description_str(f"fusing IDetect/IAuxDetect")
                 m.fuse()
                 m.forward = m.fuseforward
         return self
@@ -722,13 +727,12 @@ class Model(nn.Module):
     def info(self, verbose=False, img_size=640):  # print model information
         return model_info(self, verbose, img_size)
 
-    def is_p5(self, nodes=None):
-        if 'p5' in self.yaml:
-            return eval(self.yaml['p5']) if isinstance(self.yaml['p5'], str) else self.yaml['p5']
-        if not nodes:
-            nodes = self.num_nodes()
-        out = nodes in [77, 105, 121]
-        return out
+    def is_p5(self):
+        for m in self.model.modules():
+            if isinstance(m, ReOrg):
+                return False
+        else:
+            return True
 
     def num_nodes(self):
         return len(self.yaml['backbone']) + len(self.yaml['head']) - 1
@@ -1241,10 +1245,10 @@ def parse_model(d, ch, nc=80):  # model_dict, input_channels(3)
             except Exception as ex:
                 logger.error(f'def parse: {ex}')
 
-        n = max(round(n * gd), 1) if n > 1 else n  # depth gain
+        n = n_ = max(round(n * gd), 1) if n > 1 else n  # depth gain
         if m in [nn.Conv2d, Conv, RobustConv, RobustConv2, DWConv, GhostConv, RepConv, RepConv_OREPA, DownC,
-                 SPP, SPPF, SPPCSPC, SPPFCSPC, GhostSPPCSPC, MixConv2d, Focus, Stem, GhostStem, CrossConv,
-                 Bottleneck, BottleneckCSPA, BottleneckCSPB, BottleneckCSPC,
+                 SPP, SPPF, SPPCSP, SPPCSPC, SPPFCSPC, GhostSPPCSPC, MixConv2d, Focus, Stem, GhostStem, CrossConv,
+                 Bottleneck, BottleneckCSP, BottleneckCSPA, BottleneckCSPB, BottleneckCSPC,
                  RepBottleneck, RepBottleneckCSPA, RepBottleneckCSPB, RepBottleneckCSPC,
                  Res, ResCSPA, ResCSPB, ResCSPC,
                  RepRes, RepResCSPA, RepResCSPB, RepResCSPC,
@@ -1258,7 +1262,7 @@ def parse_model(d, ch, nc=80):  # model_dict, input_channels(3)
                 c2 = make_divisible(c2 * gw, 8)
 
             args = [c1, c2, *args[1:]]
-            if m in [DownC, SPPCSPC, SPPFCSPC, GhostSPPCSPC,
+            if m in [DownC, SPPCSP, SPPCSPC, SPPFCSPC, GhostSPPCSPC, BottleneckCSP,
                      BottleneckCSPA, BottleneckCSPB, BottleneckCSPC,
                      RepBottleneckCSPA, RepBottleneckCSPB, RepBottleneckCSPC,
                      ResCSPA, ResCSPB, ResCSPC,
@@ -1267,7 +1271,7 @@ def parse_model(d, ch, nc=80):  # model_dict, input_channels(3)
                      RepResXCSPA, RepResXCSPB, RepResXCSPC,
                      GhostCSPA, GhostCSPB, GhostCSPC,
                      STCSPA, STCSPB, STCSPC,
-                     ST2CSPA, ST2CSPB, ST2CSPC]:
+                     ST2CSPA, ST2CSPB, ST2CSPC, C3, C3TR, C3Ghost, C3x]:
                 args.insert(2, n)  # number of repeats
                 n = 1
         elif m is nn.BatchNorm2d:
@@ -1299,8 +1303,7 @@ def parse_model(d, ch, nc=80):  # model_dict, input_channels(3)
         nparam = sum([x.numel() for x in m_.parameters()])  # number params
         # attach index, 'from' index, type, number params
         m_.i, m_.f, m_.type, m_.np = i, f, t, nparam
-        logger.info('%3s%42s%3s%10.0f  %-40s%-30s' %
-                    (i, f, n, nparam, t, args))  # print
+        logger.info('%3s%42s%3s%10.0f  %-40s%-30s' %(i, f, n_, nparam, t, args))  # print
         save.extend(x % i for x in ([f] if isinstance(f, int) else f) if x != -1)  # append to savelist
         layers.append(m_)
         if i == 0:
@@ -1310,6 +1313,7 @@ def parse_model(d, ch, nc=80):  # model_dict, input_channels(3)
 
 
 if __name__ == '__main__':
+
     parser = argparse.ArgumentParser()
     parser.add_argument('--cfg', type=str,
                         default='yolor-csp-c.yaml', help='model.yaml')
