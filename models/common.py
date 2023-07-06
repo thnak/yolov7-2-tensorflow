@@ -312,7 +312,10 @@ class SPPCSP(nn.Module):
         self.cv5 = Conv(4 * c_, c_, 1, 1)
         self.cv6 = Conv(c_, c_, 3, 1)
         self.bn = nn.BatchNorm2d(2 * c_)
-        from mish_cuda import MishCuda as Mish
+        try:
+            from mish_cuda import MishCuda as Mish
+        except ImportError:
+            raise "please try rebuild for your self from https://github.com/thomasbrandon/mish-cuda"
         self.act = Mish()
         self.cv7 = Conv(2 * c_, c2, 1, 1)
 
