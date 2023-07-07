@@ -574,10 +574,10 @@ class Model(nn.Module):
                 try:
                     inputSampleShape = [x*32] * 2
                     _ = self.forward(torch.zeros(1, ch, *inputSampleShape))
-                    self.stride = torch.tensor([x**2])
+                    self.stride = torch.tensor([x*32])
                     break
                 except Exception as ex:
-                    self.stride = torch.tensor([x**2])
+                    self.stride = torch.tensor([x*32])
                     continue
         s = 1024  # scale it up for large shape
         inputSampleShape = [1024] * 2

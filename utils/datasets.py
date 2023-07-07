@@ -466,17 +466,58 @@ def create_dataloader_cls(path, imgsz, batch_size, stride, opt, hyp=None, augmen
     return the_dataloader, dataset
 
 
+def classify_albumentations(augment=True,
+                            size=224,
+                            scale=(0.08, 1.0),
+                            ratio=(0.75, 1.0 / 0.75),  # 0.75, 1.33
+                            hflip=0.5,
+                            vflip=0.0,
+                            jitter=0.4,
+                            mean=[0.485, 0.456, 0.406],
+                            std=[0.229, 0.224, 0.225],
+                            auto_aug=False):
+    # YOLOv5 classification Albumentations (optional, only used if package is installed)
+    prefix = colorstr('albumentations: ')
+    try:
+        import albumentations as A
+        from albumentations.pytorch import ToTensorV2
+        if augment:  # Resize and crop
+            T = [A.RandomResizedCrop(height=size, width=size, scale=scale, ratio=ratio)]
+            if auto_aug:
+                logger.info(f'{prefix}auto augmentations are currently not supported')
+            else:
+                if hflip > 0:
+                    T += [A.HorizontalFlip(p=hflip)]
+                if vflip > 0:
+                    T += [A.VerticalFlip(p=vflip)]
+                if jitter > 0:
+                    color_jitter = (float(jitter),) * 3  # repeat value for brightness, contrast, satuaration, 0 hue
+                    T += [A.ColorJitter(*color_jitter, 0)]
+        else:  # Use fixed crop for eval set (reproducibility)
+            T = [A.SmallestMaxSize(max_size=size), A.CenterCrop(height=size, width=size)]
+        # T += [A.Normalize(mean=mean, std=std)]
+        T += [ToTensorV2()]  # Normalize and convert to Tensor
+        logger.info(prefix + ', '.join(f'{x}'.replace('always_apply=False, ', '') for x in T if x.p))
+        return A.Compose(T)
+
+    except ImportError:  # package not installed, skip
+        logger.warning(f'{prefix}⚠️ not found, install with `pip install albumentations` (recommended)')
+    except Exception as e:
+        logger.info(f'{prefix}{e}')
+
+
 class LoadSampleAndTarget(torchvision.datasets.ImageFolder):
     version = 0.1
     image_8bit = True
     minimum_size = 100
     std = np.array([0.229, 0.224, 0.225])
     mean = np.array([0.485, 0.456, 0.406])
+    IMG_EXTENSIONS = (".jpg", ".jpeg", ".png", ".ppm", ".bmp", ".pgm", ".tif", ".tiff", ".webp")
 
     def __init__(self, root, augment, imgsz, cache=False):
         super().__init__(root=root)
         self.samples = [list(x) + [Path(x[0]).with_suffix('.npy'), None] for x in self.samples]  # file, index, npy, im
-        self.transform = self.classify_albumentations(True, imgsz)
+        self.transform = classify_albumentations(True, imgsz)
         self.pin_memory = False
 
     def __len__(self):
@@ -488,60 +529,6 @@ class LoadSampleAndTarget(torchvision.datasets.ImageFolder):
         img = img[:, :, ::-1]  # BGR to RGB, to CHW
         img = self.transform(image=img)["image"]
         return img, j
-
-    def load(self, index):
-        img, im_path, npy = self.data[index]["img"], self.data[index]["im_path"], self.data[index]["npy"]
-        target = self.data[index]["target"]
-        if img is not None:
-            return img, target
-
-        elif npy.exists():
-            return np.load(npy.as_posix()), target
-
-        else:
-            img = cv2.imread(im_path.as_posix())
-            # img = cv2.resize(img, self.imgsz)
-            return img, target
-
-    def classify_albumentations(self,
-                                augment=True,
-                                size=224,
-                                scale=(0.08, 1.0),
-                                ratio=(0.75, 1.0 / 0.75),  # 0.75, 1.33
-                                hflip=0.5,
-                                vflip=0.0,
-                                jitter=0.4,
-                                mean=[0.485, 0.456, 0.406],
-                                std=[0.229, 0.224, 0.225],
-                                auto_aug=False):
-        # YOLOv5 classification Albumentations (optional, only used if package is installed)
-        prefix = colorstr('albumentations: ')
-        try:
-            import albumentations as A
-            from albumentations.pytorch import ToTensorV2
-            if augment:  # Resize and crop
-                T = [A.RandomResizedCrop(height=size, width=size, scale=scale, ratio=ratio)]
-                if auto_aug:
-                    # TODO: implement AugMix, AutoAug & RandAug in albumentation
-                    logger.info(f'{prefix}auto augmentations are currently not supported')
-                else:
-                    if hflip > 0:
-                        T += [A.HorizontalFlip(p=hflip)]
-                    if vflip > 0:
-                        T += [A.VerticalFlip(p=vflip)]
-                    if jitter > 0:
-                        color_jitter = (float(jitter),) * 3  # repeat value for brightness, contrast, satuaration, 0 hue
-                        T += [A.ColorJitter(*color_jitter, 0)]
-            else:  # Use fixed crop for eval set (reproducibility)
-                T = [A.SmallestMaxSize(max_size=size), A.CenterCrop(height=size, width=size)]
-            T += [A.Normalize(mean=mean, std=std), ToTensorV2()]  # Normalize and convert to Tensor
-            logger.info(prefix + ', '.join(f'{x}'.replace('always_apply=False, ', '') for x in T if x.p))
-            return A.Compose(T)
-
-        except ImportError:  # package not installed, skip
-            logger.warning(f'{prefix}⚠️ not found, install with `pip install albumentations` (recommended)')
-        except Exception as e:
-            logger.info(f'{prefix}{e}')
 
 
 class LoadImagesAndLabels(Dataset):  # for training/testing

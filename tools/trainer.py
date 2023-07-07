@@ -169,7 +169,7 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None):
     # Image sizes
     gs = int(model.stride.max())  # grid size (max stride)
     # verify imgsz are gs-multiples
-    imgsz, imgsz_test = [check_img_size(size, gs) for size in opt.imgsz]
+    imgsz, imgsz_test = [gs, gs]
     model.model_version = model_version
     model.total_image = total_image
     model.input_shape = [3, imgsz, imgsz] if isinstance(imgsz, int) else [3, *imgsz]
@@ -307,17 +307,14 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None):
     # scale to image size and layers
     hyp['obj'] *= (imgsz / 640) ** 2 * 3. / nl
     hyp['label_smoothing'] = opt.label_smoothing
-    model.nc = nc  # attach number of classes to model
     model.hyp = hyp  # attach hyperparameters to model
     model.gr = 1.0  # iou loss ratio (obj_loss = 1.0 or iou)
-    model.names = names
-
+    model.names = dataloader.dataset.classes
+    model.nc = len(model.names)
+    if model.nc != len(names):
+        logger.warn(f"Dataset got {model.names} classes, but {len(names)} classes was given from {opt.data}")
     # Start training
     t0 = time_synchronized()
-    # number of warmup iterations, max(3 epochs, 1k iterations)
-    nw = max(round(hyp['warmup_epochs'] * nb), 1000)
-    maps = np.zeros(nc)  # mAP per class
-    # P, R, mAP@.5, mAP@.5-.95, val_loss(box, obj, cls)
     results_ = (0, 0, 0, 0, 0, 0, 0)
     scheduler.last_epoch = start_epoch - 1  # do not move
 
@@ -520,14 +517,14 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None):
                     output_path = str(f)
                     output_path = output_path.replace('best.pt',
                                                       'deploy_best.pt')
-                    # try:
-                    if opt.evolve <= 1:
-                        Re_parameterization(inputWeightPath=str(f),
-                                            outputWeightPath=output_path,
-                                            device=map_device)
-                    # except Exception as ex:
-                    #     prefix = colorstr('reparamater: ')
-                    #     logging.error(f'{prefix}{ex}')
+                    try:
+                        if opt.evolve <= 1:
+                            Re_parameterization(inputWeightPath=str(f),
+                                                outputWeightPath=output_path,
+                                                device=map_device)
+                    except Exception as ex:
+                        prefix = colorstr('reparamater: ')
+                        logger.error(f'{prefix}{ex}')
         if opt.bucket:
             os.system(f'gsutil cp {final} gs://{opt.bucket}/weights')  # upload
         if wandb_logger.wandb and opt.evolve <= 1:  # Log the stripped model
@@ -1153,14 +1150,14 @@ def train(hyp, opt, tb_writer=None,
                     output_path = str(f)
                     output_path = output_path.replace('best.pt',
                                                       'deploy_best.pt')
-                    # try:
-                    if opt.evolve <= 1:
-                        Re_parameterization(inputWeightPath=str(f),
-                                            outputWeightPath=output_path,
-                                            device=map_device)
-                    # except Exception as ex:
-                    #     prefix = colorstr('reparamater: ')
-                    #     logging.error(f'{prefix}{ex}')
+                    try:
+                        if opt.evolve <= 1:
+                            Re_parameterization(inputWeightPath=str(f),
+                                                outputWeightPath=output_path,
+                                                device=map_device)
+                    except Exception as ex:
+                        prefix = colorstr('reparamater: ')
+                        logger.error(f'{prefix}{ex}')
         if opt.bucket:
             os.system(f'gsutil cp {final} gs://{opt.bucket}/weights')  # upload
         if wandb_logger.wandb and opt.evolve <= 1:  # Log the stripped model
