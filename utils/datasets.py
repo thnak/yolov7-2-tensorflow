@@ -495,7 +495,7 @@ def classify_albumentations(augment=True,
                     T += [A.ColorJitter(*color_jitter, 0)]
         else:  # Use fixed crop for eval set (reproducibility)
             T = [A.SmallestMaxSize(max_size=size), A.CenterCrop(height=size, width=size)]
-        # T += [A.Normalize(mean=mean, std=std)]
+        T += [A.Normalize(mean=mean, std=std)]
         T += [ToTensorV2()]  # Normalize and convert to Tensor
         logger.info(prefix + ', '.join(f'{x}'.replace('always_apply=False, ', '') for x in T if x.p))
         return A.Compose(T)
