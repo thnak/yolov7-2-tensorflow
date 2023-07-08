@@ -14,7 +14,7 @@ from utils.datasets import create_dataloader
 from utils.general import coco80_to_coco91_class, check_dataset, check_file, check_img_size, box_iou, \
     non_max_suppression, scale_coords, xyxy2xywh, xywh2xyxy, set_logging, increment_path, colorstr, \
     TQDM_BAR_FORMAT
-from utils.metrics import ap_per_class, ConfusionMatrix
+from utils.metrics import ap_per_class, ConfusionMatrix, ConfuseMatrix_cls
 from utils.plots import plot_images, output_to_target, plot_study_txt
 from utils.torch_utils import select_device, time_synchronized, TracedModel
 
@@ -40,15 +40,11 @@ def cls_test(data,
              wandb_logger=None,
              compute_loss=None,
              trace=False,
-             is_coco=False,
-             v5_metric=False,
              project=None,
              name=None,
              task=None,
              exist_ok=None,
-             device=None,
-             max_nms=30000,
-             max_det=300, pbar=None):
+             device=None, epoch=0):
     training = model is not None
     if training:  # called by train.py
         device = next(model.parameters()).device  # get model device
@@ -61,15 +57,17 @@ def cls_test(data,
     preds, targets, loss = [], [], 0
     n = len(dataloader)
     bar = tqdm(dataloader, f"{' ':>69}", total=n, bar_format=TQDM_BAR_FORMAT)
+    confusionMatrix = ConfuseMatrix_cls(nc=model.nc, conf=conf_thres)
     for i, (imgs, labels) in enumerate(bar):
         with torch.autocast(enabled=device.type == "cuda", device_type="cuda"):
             imgs, labels = imgs.to(device), labels.to(device)
             pred = model(imgs)
+            confusionMatrix.add(pred, labels)
             preds.append(pred.argsort(1, descending=True)[:, :5])
             targets.append(labels)
             if compute_loss:
                 loss += compute_loss(pred, labels)
-
+    confusionMatrix.plot(model.names, savedName=save_dir/f"confuseMatrix_{epoch+1}.jpg")
     loss /= n
     preds, targets = torch.cat(preds), torch.cat(targets)
     correct = (targets[:, None] == preds).float()
@@ -356,7 +354,7 @@ def test(data,
             eval_.accumulate()
             eval_.summarize()
             map_, map50 = eval_.stats[:2]  # update results (mAP@0.5:0.95, mAP@0.5)
-        except Exception as e:
+        except ImportError as e:
             print(f'pycocotools unable to run: {e}')
 
     # Return results

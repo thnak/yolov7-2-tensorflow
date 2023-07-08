@@ -352,7 +352,6 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None):
             with autocast(enabled=device.type in ['cuda', 'cpu'],
                           device_type='cuda' if device.type == 'cuda' else 'cpu',
                           dtype=torch.float16 if cuda else torch.bfloat16):
-
                 pred = model(imgs)  # forward
                 loss = compute_loss(pred, targets)
 
@@ -375,7 +374,6 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None):
                     torch.cuda.memory_reserved(device=device) / 1E9 if torch.cuda.is_available() else 0)  # (GB)
 
                 pbar.desc = f"{f'{epoch + 1}/{epochs}':>11}{mem:>11}{tloss:>11.6g}" + ' ' * 36
-
         # Scheduler
         lr = [xx['lr'] for xx in optimizer.param_groups]  # for tensorboard
         scheduler.step()
@@ -395,6 +393,7 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None):
                                                    batch_size=batch_size * 2,
                                                    imgsz=imgsz_test,
                                                    model=ema.ema,
+                                                   conf_thres=0.5,
                                                    single_cls=opt.single_cls,
                                                    dataloader=val_dataloader,
                                                    save_dir=save_dir,
@@ -402,8 +401,7 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None):
                                                    plots=plots and final_epoch,
                                                    wandb_logger=wandb_logger,
                                                    compute_loss=compute_loss_val,
-                                                   is_coco=is_coco,
-                                                   v5_metric=opt.v5_metric)
+                                                   epoch=epoch)
                 fi = top1
             if best_fitness < fi:
                 best_fitness = fi
@@ -958,7 +956,7 @@ def train(hyp, opt, tb_writer=None,
                     torch.cuda.memory_reserved(device=device) / 1E9 if torch.cuda.is_available() else 0)  # (GB)
 
                 s = ('%11s' * 2 + '%11.4g' * (2 + len(mloss))) % (
-                f'{epoch}/{epochs - 1}', mem, *mloss, targets.shape[0], imgs.shape[-1])
+                    f'{epoch}/{epochs - 1}', mem, *mloss, targets.shape[0], imgs.shape[-1])
                 pbar.set_description(s)
 
                 # Plot

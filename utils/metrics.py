@@ -2,6 +2,8 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+from sklearn import metrics
+
 from . import general
 
 
@@ -108,6 +110,7 @@ def compute_ap(recall, precision, v5_metric=False):
 
 class ConfusionMatrix:
     """Updated version of https://github.com/kaanakan/object_detection_confusion_matrix"""
+
     def __init__(self, nc, conf=0.25, iou_thres=0.45):
         self.matrix = np.zeros((nc + 1, nc + 1))
         self.nc = nc  # number of classes
@@ -179,6 +182,39 @@ class ConfusionMatrix:
     def print(self):
         for i in range(self.nc + 1):
             print(' '.join(map(str, self.matrix[i])))
+
+
+class ConfuseMatrix_cls:
+    plot_color = plt.cm.Blues
+
+    def __init__(self, nc=10, conf=0.5):
+        datas = {'preds': [], "labels": []}
+        self.datas = datas
+        self.conf = conf
+        self.nc = nc
+
+    def add(self, pred: torch.Tensor, label: torch.Tensor):
+        """add a new prediction to confuse matrix"""
+        pred = pred.detach().cpu().numpy()
+        label = label.cpu().numpy()
+        for p, l in zip(pred, label):
+            label_ = np.zeros_like(p).tolist()
+            label_[l] = 1
+            p = np.where(p >= self.conf, 1, 0).tolist()
+            self.datas["preds"].extend(p)
+            self.datas['labels'].extend(label_)
+
+    def plot(self, names=None, savedName="cls-confusionMatrix.jpg"):
+        datas, labels = self.datas["preds"], self.datas['labels']
+        plot_named = []
+        if isinstance(names, dict):
+            for k, v in names.items():
+                plot_named.append(v)
+        else:
+            plot_named = [x for x in range(self.nc)]
+        cm_metrics = metrics.ConfusionMatrixDisplay.from_predictions(datas, labels, labels=plot_named,
+                                                                     cmap=self.plot_color, normalize='true')
+        cm_metrics.figure_.savefig(savedName if isinstance(savedName ,str) else savedName.as_posix())
 
 
 # Plots ----------------------------------------------------------------------------------------------------------------
