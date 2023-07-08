@@ -27,24 +27,20 @@ UPSAMPLEMODE = ['nearest', 'linear', 'bilinear', 'bicubic']
 
 
 class Classify(nn.Module):
-    def __init__(self, nc=80, anchors=(), ch=(), inplace=True):  # detection layer
+    def __init__(self, nc=80, ch=(), inplace=True):  # detection layer
         super(Classify, self).__init__()
         self.nc = nc  # number of classes
-        no = nc + 5  # number of outputs per anchor
-        self.nl = len(anchors)  # number of detection layers
-        na = len(anchors[0]) // 2  # number of anchors
-        self.na = na
         list_conv = []
-        # connect = 4 * no * na
+        rate = 1.25
         for x in ch:
-            a = nn.Sequential(nn.Conv2d(x, 2 * x, 1, 1, bias=False),
-                              nn.BatchNorm2d(2 * x),
+            a = nn.Sequential(nn.Conv2d(x, int(rate * x), 1, 1, bias=False),
+                              nn.BatchNorm2d(int(rate*x)),
                               nn.SiLU(),
                               nn.AdaptiveAvgPool2d(1),
                               nn.Flatten(1))
             list_conv.append(a)
         self.m = nn.ModuleList(list_conv)  # output conv
-        self.linear = nn.Linear(sum([x * 2 for x in ch]), nc)
+        self.linear = nn.Linear(sum([int(rate*x) for x in ch]), nc)
         self.inplace = inplace
 
     def forward(self, x):
@@ -569,16 +565,7 @@ class Model(nn.Module):
         m.inplace = self.inplace
         self.is_Classify = isinstance(m, Classify)
         if self.is_Classify:
-            strides = [x for x in range(7, 17)]
-            for x in strides:
-                try:
-                    inputSampleShape = [x*32] * 2
-                    _ = self.forward(torch.zeros(1, ch, *inputSampleShape))
-                    self.stride = torch.tensor([x*32])
-                    break
-                except Exception as ex:
-                    self.stride = torch.tensor([x*32])
-                    continue
+            self.stride = torch.tensor([32])
         s = 1024  # scale it up for large shape
         inputSampleShape = [1024] * 2
         if isinstance(m, (Detect, IDetect)):

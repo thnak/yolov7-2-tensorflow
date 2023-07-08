@@ -302,7 +302,7 @@ head:
     [ 136, 1, Conv, [ 960, 3, 1, None, 1, 1,  nn.LeakyReLU(0.1) ] ],
     [ 112, 1, Conv, [ 1280, 3, 1, None, 1, 1,  nn.LeakyReLU(0.1) ] ],
 
-    [ [ 257,258,259,260,261,262,263,264 ], 1, Classify, [ nc, anchors ] ],   # Detect(P3, P4, P5, P6)
+    [ [ 257,258,259,260,261,262,263,264 ], 1, Classify, [ nc ] ],   # Detect(P3, P4, P5, P6)
   ]
 
 head_deploy:
@@ -469,5 +469,5 @@ head_deploy:
     [ 233, 1, Conv, [ 960, 3, 1, None, 1, 1,  nn.LeakyReLU(0.1) ] ],
     [ 256, 1, Conv, [ 1280, 3, 1, None, 1, 1,  nn.LeakyReLU(0.1) ] ],
 
-    [ [ 257,258,259,260 ], 1, Detect, [ nc, anchors ] ],   # Detect(P3, P4, P5, P6)
+    [ [ 257,258,259,260 ], 1, Detect, [ nc ] ],   # Detect(P3, P4, P5, P6)
   ]

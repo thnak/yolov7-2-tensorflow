@@ -109,6 +109,7 @@ def test(data,
          max_det=300):
     # Initialize/load model and set device
     training = model is not None
+    weights = weights.as_posix() if  isinstance(weights, Path) else weights
     if training:  # called by train.py
         device = next(model.parameters()).device  # get model device
         map_device = 'cpu' if device.type == 'privateuseone' else device

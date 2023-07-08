@@ -429,15 +429,12 @@ def img2label_paths(img_paths):
     return ['txt'.join(x.replace(sa, sb, 1).rsplit(x.split('.')[-1], 1)) for x in img_paths]
 
 
-def create_dataloader_cls(path, imgsz, batch_size, stride, opt, hyp=None, augment=False, cache='', pad=0.0, rect=False,
-                          rank=-1, world_size=1, workers=8, image_weights=False, quad=False, single_channel=False,
-                          prefix='', shuffle=True, seed=0, names=None):
+def create_dataloader_cls(dataset, batch_size,
+                          rank=-1, world_size=1, workers=8,
+                          prefix='', shuffle=True, seed=0):
     # Make sure only the first process in DDP process the dataset first, and the following others can use the cache
-    if rect and shuffle:
-        print(f'{prefix}WARNING ⚠️ --rect is incompatible with DataLoader shuffle, setting shuffle=False')
-        shuffle = False
-    with torch_distributed_zero_first(rank):
-        dataset = LoadSampleAndTarget(root=path, imgsz=imgsz, augment=True)
+    # with torch_distributed_zero_first(rank):
+    #     dataset = LoadSampleAndTarget(root=path, augment=True)
 
     batch_size = min(batch_size, len(dataset))
     nd_dml = None
@@ -463,22 +460,56 @@ def create_dataloader_cls(path, imgsz, batch_size, stride, opt, hyp=None, augmen
                                         worker_init_fn=seed_worker,
                                         generator=generator)
 
-    return the_dataloader, dataset
+    return the_dataloader
 
 
-def classify_albumentations(augment=True,
-                            size=224,
-                            scale=(0.08, 1.0),
-                            ratio=(0.75, 1.0 / 0.75),  # 0.75, 1.33
-                            hflip=0.5,
-                            vflip=0.0,
-                            jitter=0.4,
-                            mean=[0.485, 0.456, 0.406],
-                            std=[0.229, 0.224, 0.225],
-                            auto_aug=False):
-    # YOLOv5 classification Albumentations (optional, only used if package is installed)
-    prefix = colorstr('albumentations: ')
-    try:
+class LoadSampleAndTarget(torchvision.datasets.ImageFolder):
+    version = 0.1
+    image_8bit = True
+    minimum_size = 100
+    std = np.array([0.229, 0.224, 0.225])
+    mean = np.array([0.485, 0.456, 0.406])
+    IMG_EXTENSIONS = (".jpg", ".jpeg", ".png", ".ppm", ".bmp", ".pgm", ".tif", ".tiff", ".webp")
+
+    def __init__(self, root, augment, cache=False):
+        super().__init__(root=root)
+        self.samples = [list(x) + [Path(x[0]).with_suffix('.npy'), None] for x in self.samples]  # file, index, npy, im
+        self.pin_memory = False
+        self.imgsz = 224
+        self.augment = True,
+        self.size = 224
+        self.scale = (0.08, 1.0)
+        self.ratio = (0.75, 1.0 / 0.75)  # 0.75, 1.33
+        self.hflip = 0.5
+        self.vflip = 0.0
+        self.jitter = 0.4
+        self.mean = [0.485, 0.456, 0.406]
+        self.std = [0.229, 0.224, 0.225]
+        self.auto_aug = False
+        self.transform = self.classify_albumentations()
+
+    def __len__(self):
+        return len(self.samples)
+
+    def __getitem__(self, index):
+        f, j, fn, im = self.samples[index]  # filename, index, filename.with_suffix('.npy'), image
+        img = cv2.imread(f)  # BGR
+        img = img[:, :, ::-1]  # BGR to RGB, to CHW
+        img = self.transform(image=img)["image"]
+        return img, j
+
+    def classify_albumentations(self):
+        """YOLOv5 classification Albumentations (optional, only used if package is installed)"""
+        prefix = colorstr('albumentations: ')
+        augment = self.augment
+        size = self.imgsz
+        scale = self.scale
+        ratio = self.ratio
+        auto_aug = self.auto_aug
+        hflip = self.hflip
+        vflip = self.vflip
+        jitter = self.jitter
+        std, mean = self.std, self.mean
         import albumentations as A
         from albumentations.pytorch import ToTensorV2
         if augment:  # Resize and crop
@@ -500,35 +531,7 @@ def classify_albumentations(augment=True,
         logger.info(prefix + ', '.join(f'{x}'.replace('always_apply=False, ', '') for x in T if x.p))
         return A.Compose(T)
 
-    except ImportError:  # package not installed, skip
-        logger.warning(f'{prefix}⚠️ not found, install with `pip install albumentations` (recommended)')
-    except Exception as e:
         logger.info(f'{prefix}{e}')
-
-
-class LoadSampleAndTarget(torchvision.datasets.ImageFolder):
-    version = 0.1
-    image_8bit = True
-    minimum_size = 100
-    std = np.array([0.229, 0.224, 0.225])
-    mean = np.array([0.485, 0.456, 0.406])
-    IMG_EXTENSIONS = (".jpg", ".jpeg", ".png", ".ppm", ".bmp", ".pgm", ".tif", ".tiff", ".webp")
-
-    def __init__(self, root, augment, imgsz, cache=False):
-        super().__init__(root=root)
-        self.samples = [list(x) + [Path(x[0]).with_suffix('.npy'), None] for x in self.samples]  # file, index, npy, im
-        self.transform = classify_albumentations(True, imgsz)
-        self.pin_memory = False
-
-    def __len__(self):
-        return len(self.samples)
-
-    def __getitem__(self, index):
-        f, j, fn, im = self.samples[index]  # filename, index, filename.with_suffix('.npy'), image
-        img = cv2.imread(f)  # BGR
-        img = img[:, :, ::-1]  # BGR to RGB, to CHW
-        img = self.transform(image=img)["image"]
-        return img, j
 
 
 class LoadImagesAndLabels(Dataset):  # for training/testing

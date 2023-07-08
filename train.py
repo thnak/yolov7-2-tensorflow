@@ -51,7 +51,6 @@ if __name__ == '__main__':
     parser.add_argument('--sync-bn', action='store_true', help='use SyncBatchNorm, only available in DDP mode')
     parser.add_argument('--local_rank', type=int, default=-1, help='DDP parameter, do not modify')
     parser.add_argument('--workers', type=int, default=512, help='maximum number of dataloader workers')
-    parser.add_argument('--project', default='runs/train', help='save to project/name')
     parser.add_argument('--name', default='exp', help='save to project/name')
     parser.add_argument('--exist-ok', action='store_true', help='existing project/name ok, do not increment')
     parser.add_argument('--quad', action='store_true', help='quad dataloader')
@@ -91,9 +90,11 @@ if __name__ == '__main__':
         # extend to 2 sizes (train, test)
         opt.imgsz.extend([opt.imgsz[-1]] * (2 - len(opt.imgsz)))
         opt.name = 'evolve' if opt.evolve > 1 else opt.name
-        opt.save_dir = increment_path(Path(
-            opt.project) / opt.name, exist_ok=opt.exist_ok | opt.evolve > 1)  # increment run
-
+        with open(opt.cfg, 'r') as fi:
+            data = fi.read()
+        project = "runs/train-cls" if "Classify" in data else "runs/train"
+        opt.save_dir = increment_path(Path(project) / opt.name, exist_ok=opt.exist_ok | opt.evolve > 1)  # increment run
+        opt.project = project
     # DDP mode
     opt.total_batch_size = opt.batch_size
     if opt.local_rank != -1:
@@ -120,14 +121,13 @@ if __name__ == '__main__':
 
                 tb_writer = SummaryWriter(opt.save_dir)  # Tensorboard
                 tensorboard_lauch = threading.Thread(
-                    target=lambda: os.system(f'tensorboard --bind_all --logdir {opt.project}'), daemon=True).start()
+                    target=lambda: os.system(f'tensorboard --bind_all --logdir {project}'), daemon=True).start()
                 logger.info(
                     f"{prefix}Starting...")
             except Exception as ex:
                 tb_writer = None
                 logger.warning(f'{prefix}Init error, {ex}')
-        with open(opt.cfg, 'r') as fi:
-            data = fi.read()
+
         if "Classify" in data:
             train_cls(hyp, opt, tb_writer=tb_writer, logger=logger)
         else:

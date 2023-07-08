@@ -53,6 +53,10 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None):
     best = wdir / 'best.pt'
     results_file = save_dir / 'results_.txt'
     results_file_csv = save_dir / 'results_.csv'
+    model_version = 0
+    total_image = [0]
+    start_epoch, best_fitness = 0, 0.0
+    model_version = 1
     with open(save_dir / 'hyp.yaml', 'w') as f:
         yaml.dump(hyp, f, sort_keys=False)
     with open(save_dir / 'opt.yaml', 'w') as f:
@@ -65,8 +69,8 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None):
     # Directories
 
     tag_results = ('Epochs', 'VRAMs', "t_loss", "v_loss", "top1", "top5")
-    if not os.path.exists(str(results_file_csv)):
-        with open(results_file_csv, 'w') as f:
+    if not results_file_csv.exists():
+        with open(results_file_csv.as_posix(), 'w') as f:
             csv_writer = csv.writer(f)
             aa = tag_results + ('P', 'R', 'mAP@.5',
                                 'mAP@.5:.95', 'xx/lr0', 'xx/lr1', 'xx/lr2')
@@ -94,18 +98,19 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None):
         data_dict = wandb_logger.data_dict
         if wandb_logger.wandb:
             weights, epochs, hyp = opt.weights, opt.epochs, opt.hyp
-    data_dict['nc'] = len(data_dict['names'])
-    nc = 1 if opt.single_cls else int(data_dict['nc'])  # number of classes
-    names = ['item'] if opt.single_cls and len(data_dict['names']) != 1 else data_dict['names']  # class names
-    assert len(names) == nc, '%g names found for nc=%g dataset in %s' % (
-        len(names), nc, opt.data)  # check
+
+    from utils.datasets import LoadSampleAndTarget
+    with torch_distributed_zero_first(rank):
+        train_path, val_path, test_path = parse_path(data_dict=data_dict)
+        dataset = LoadSampleAndTarget(root=train_path, augment=True)
+        val_dataset = LoadSampleAndTarget(root=val_path, augment=True) if train_path != val_path else dataset
+
+    total_image.append(len(dataset))
+    nb = len(dataset)  # number of batches
+    names = dataset.classes
+    nc = len(names)
     # Model
     pretrained = weights.endswith('.pt')
-    model_version = 0
-    nodes, nodes2 = 0, 0
-    total_image = [0]
-    start_epoch, best_fitness = 0, 0.0
-    model_version = 1
     if pretrained:
         with torch_distributed_zero_first(rank):
             attempt_download(weights)  # download if not found locally
@@ -151,10 +156,6 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None):
                       nc=nc,
                       anchors=hyp.get('anchors')).to(device)  # create
 
-    with torch_distributed_zero_first(rank):
-        check_dataset(data_dict)  # check
-    train_path, val_path, test_path = parse_path(data_dict=data_dict)
-
     # Freeze
     freeze = [f'model.{x}.' for x in (freeze if len(freeze) > 1 else range(
         freeze[0]))]  # parameter names to freeze (full or partial)
@@ -168,14 +169,48 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None):
     nbs = 64  # nominal batch size
     # Image sizes
     gs = int(model.stride.max())  # grid size (max stride)
-    # verify imgsz are gs-multiples
-    imgsz, imgsz_test = [gs, gs]
+    imgsz, imgsz_test = [check_img_size(x, gs) for x in opt.imgsz]
+    for _ in range(3):
+        try:
+            imgsz, imgsz_test = [check_img_size(x, gs) for x in opt.imgsz]
+            dataset.imgsz = imgsz
+            model.input_shape = [3, imgsz, imgsz] if isinstance(imgsz, int) else [3, *imgsz]
+            y = model(torch.zeros([1, *model.input_shape], device=device))
+        except:
+            gs += gs
+            model.stride = torch.tensor([gs], device=device)
+            logger.warn(f"trying to get larger input shape")
+
+    val_dataset.imgsz = imgsz_test
     model.model_version = model_version
     model.total_image = total_image
-    model.input_shape = [3, imgsz, imgsz] if isinstance(imgsz, int) else [3, *imgsz]
     model.best_fitness = best_fitness
     model.info(verbose=True, img_size=[3, imgsz, imgsz] if isinstance(imgsz, int) else [3, *imgsz])
     logger.info('')
+
+    with torch_distributed_zero_first(rank):
+        if data_loader['dataloader'] is None:
+            dataloader = create_dataloader_cls(dataset=dataset, batch_size=batch_size,
+                                               world_size=opt.world_size,
+                                               workers=opt.workers,
+                                               shuffle=False if opt.rect else True,
+                                               seed=opt.seed,
+                                               prefix=colorstr('train: '))
+            data_loader["dataloader"] = dataloader
+        else:
+            dataloader = data_loader["dataloader"]
+
+        if rank in [-1, 0]:
+            if data_loader['val_dataloader'] is None:
+                val_dataloader = create_dataloader_cls(dataset=val_dataset,
+                                                       batch_size=batch_size * 2,
+                                                       shuffle=False if opt.rect else True,
+                                                       world_size=opt.world_size,
+                                                       workers=opt.workers, prefix=colorstr('val: '))
+                data_loader["val_dataloader"] = val_dataloader
+            else:
+                val_dataloader = data_loader['val_dataloader']
+
     # accumulate loss before optimizing
     accumulate = max(round(nbs / total_batch_size), 1)
     hyp['weight_decay'] *= total_batch_size * accumulate / nbs  # scale weight_decay
@@ -216,10 +251,7 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None):
             logger.info('%s has been trained for %g epochs. Fine-tuning for %g additional epochs.' %
                         (weights, ckpt['epoch'], epochs))
             epochs += ckpt['epoch']  # finetune additional epochs
-        del ckpt, state_dict, nodes, freeze
-
-    # number of detection layers (used for scaling hyp['obj'])
-    nl = model.model[-1].nl
+        del ckpt, state_dict, freeze
 
     # DP mode
     if cuda and rank == -1 and torch.cuda.device_count() > 1:
@@ -229,72 +261,9 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None):
     if opt.sync_bn and cuda and rank != -1:
         model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model).to(device)
         logger.info('Using SyncBatchNorm()')
-    opt.cache_images = [opt.cache_images[0]] * 2 if len(opt.cache_images) < 2 else [x for x in opt.cache_images]
-    # Trainloader
-    if data_loader['dataloader'] is None:
-        dataloader, dataset = create_dataloader_cls(train_path, imgsz, batch_size, gs, opt,
-                                                    hyp=hyp, augment=opt.augment,
-                                                    cache=opt.cache_images[0],
-                                                    rect=opt.rect, rank=rank,
-                                                    world_size=opt.world_size,
-                                                    workers=opt.workers,
-                                                    shuffle=False if opt.rect else True,
-                                                    seed=opt.seed,
-                                                    image_weights=opt.image_weights,
-                                                    quad=opt.quad, names=names,
-                                                    prefix=colorstr('train: '))
 
-        data_loader['dataloader'], data_loader['dataset'] = dataloader, dataset
-    else:
-        dataloader, dataset = data_loader['dataloader'], data_loader['dataset']
-
-    total_image.append(len(dataset))
-    nb = len(dataloader)  # number of batches
-
-    # Process 0
-    if rank in [-1, 0]:
-        if data_loader['val_dataloader'] is None:
-            if train_path == val_path:
-                val_dataloader = dataloader
-                logger.info(colorstr('val: ') + "inherit from train")
-            else:
-                val_dataloader = create_dataloader_cls(val_path,
-                                                       imgsz_test,
-                                                       batch_size * 2, gs, opt,
-                                                       hyp=hyp,
-                                                       cache=opt.cache_images[1] if (
-                                                               opt.cache_images[1] and not opt.notest) else 'no',
-                                                       rect=opt.rect,
-                                                       shuffle=False if opt.rect else True,
-                                                       rank=-1,
-                                                       world_size=opt.world_size,
-                                                       workers=opt.workers, names=names,
-                                                       pad=0.5, prefix=colorstr('val: '))[0]
-            data_loader['val_dataloader'] = val_dataloader
-        else:
-            val_dataloader = data_loader['val_dataloader']
-
-        if test_path != val_path and os.path.exists(test_path):
-            if data_loader['test_dataloader'] is None:
-                test_dataloader = create_dataloader_cls(test_path,
-                                                        imgsz_test,
-                                                        batch_size * 2, gs, opt,
-                                                        hyp=hyp,
-                                                        cache='no',
-                                                        rect=opt.rect,
-                                                        shuffle=False if opt.rect else True,
-                                                        rank=-1, names=names,
-                                                        world_size=opt.world_size,
-                                                        workers=opt.workers,
-                                                        pad=0.5, prefix=colorstr('test: '))[0]
-                data_loader['test_dataloader'] = test_dataloader
-            else:
-                test_dataloader = data_loader['test_dataloader']
-        else:
-            logger.info(colorstr("val: ") + 'val and test is the same things or test path does not exists!')
-
-        if not opt.resume:
-            model.half().float() if device.type == 'xla' else model.to(device).half().float()
+    if not opt.resume:
+        model.half().float() if device.type == 'xla' else model.to(device).half().float()
 
     # DDP mode
     if cuda and rank != -1:
@@ -302,17 +271,10 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None):
         model = DDP(model, device_ids=[opt.local_rank], output_device=opt.local_rank,
                     find_unused_parameters=any(isinstance(layer, nn.MultiheadAttention) for layer in model.modules()))
     # Model parameters
-    hyp['box'] *= 3. / nl  # scale to layers
-    hyp['cls'] *= nc / 80. * 3. / nl  # scale to classes and layers
-    # scale to image size and layers
-    hyp['obj'] *= (imgsz / 640) ** 2 * 3. / nl
     hyp['label_smoothing'] = opt.label_smoothing
     model.hyp = hyp  # attach hyperparameters to model
-    model.gr = 1.0  # iou loss ratio (obj_loss = 1.0 or iou)
-    model.names = dataloader.dataset.classes
-    model.nc = len(model.names)
-    if model.nc != len(names):
-        logger.warn(f"Dataset got {model.names} classes, but {len(names)} classes was given from {opt.data}")
+    model.names = names
+    model.nc = nc
     # Start training
     t0 = time_synchronized()
     results_ = (0, 0, 0, 0, 0, 0, 0)
@@ -347,7 +309,6 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None):
         for i, (imgs, targets) in pbar:
             targets = targets.to(device)
             imgs = imgs.to(device=device, non_blocking=True)
-
             # Forward
             with autocast(enabled=device.type in ['cuda', 'cpu'],
                           device_type='cuda' if device.type == 'cuda' else 'cpu',
@@ -448,64 +409,33 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None):
     prefix = colorstr('best fitness: ')
     logger.info(f'{prefix}{best_fitness}')
     if rank in [-1, 0]:
-        # Plots
-        if plots:
-            plot_results(save_dir=save_dir)  # save as results_.png
-            if wandb_logger.wandb:
-                files = ['results_.png', 'confusion_matrix.png', *
-                [f'{x}_curve.png' for x in ('F1', 'PR', 'P', 'R')]]
-                wandb_logger.log({"Results": [wandb_logger.wandb.Image(str(save_dir / f), caption=f) for f in files
-                                              if (save_dir / f).exists()]})
         logger.info('%g epochs completed in %.3f hours.\n' %
                     (epoch - start_epoch + 1, (time_synchronized() - t0) / 3600))
 
         if best.exists():
             prefix = colorstr('Validating')
-            logger.info(f'{prefix} model {best}.')
-            results_val = test(opt.data,
-                               batch_size=batch_size * 2,
-                               imgsz=imgsz_test,
-                               conf_thres=0.001,
-                               iou_thres=0.7,
-                               weights=best,
-                               single_cls=opt.single_cls,
-                               dataloader=val_dataloader,
-                               save_dir=save_dir,
-                               save_json=is_coco,
-                               verbose=True,
-                               plots=False,
-                               is_coco=is_coco,
-                               v5_metric=opt.v5_metric,
-                               device=opt.device,
-                               task='val',
-                               name=opt.name,
-                               project=opt.project,
-                               exist_ok=opt.exist_ok,
-                               trace=True)[0]
+            logger.info(f'{prefix} model {best.as_posix()}.')
 
             prefix = colorstr('Testing')
             if opt.evolve < 1 and test_path != val_path:
-                logger.info(f'{prefix} model {best}.')
-                results_test = test(opt.data,
-                                    batch_size=batch_size * 2,
-                                    imgsz=imgsz_test,
-                                    conf_thres=0.001,
-                                    iou_thres=0.7,
-                                    weights=best,
-                                    single_cls=opt.single_cls,
-                                    dataloader=test_dataloader,
-                                    save_dir=save_dir,
-                                    save_json=is_coco,
-                                    verbose=True,
-                                    plots=False,
-                                    is_coco=is_coco,
-                                    v5_metric=opt.v5_metric,
-                                    device=opt.device,
-                                    task='test',
-                                    name=opt.name,
-                                    project=opt.project,
-                                    exist_ok=opt.exist_ok,
-                                    trace=True)[0]
+                logger.info(f'{prefix} model {best.as_posix()}.')
+                with torch_distributed_zero_first(rank):
+                    if test_path != val_path and os.path.exists(test_path):
+                        if data_loader['test_dataloader'] is None:
+                            test_dataset = LoadSampleAndTarget(root=test_path,
+                                                               augment=True) if test_path != val_path else val_dataset
+                            test_dataloader = create_dataloader_cls(dataset=test_dataset,
+                                                                    batch_size=batch_size * 2,
+                                                                    shuffle=False if opt.rect else True,
+                                                                    world_size=opt.world_size,
+                                                                    workers=opt.workers, prefix=colorstr('val: '))
+                            data_loader["test_dataloader"] = test_dataloader
+                        else:
+                            test_dataloader = data_loader['test_dataloader']
+                    else:
+                        logger.info(
+                            colorstr("test: ") + 'val and test is the same things or test path does not exists!')
+                # testing here
 
         final = best if best.exists() else last  # final model
         for f in last, best:
@@ -563,8 +493,8 @@ def train(hyp, opt, tb_writer=None,
     # Directories
     tag_results = ('Epoch', 'GPU_mem', 'box', 'obj',
                    'cls', 'total', 'labels', 'img_size')
-    if not os.path.exists(str(results_file_csv)):
-        with open(results_file_csv, 'w') as f:
+    if not results_file_csv.exists():
+        with open(results_file_csv.as_posix(), 'w') as f:
             csv_writer = csv.writer(f)
             aa = tag_results + ('P', 'R', 'mAP@.5',
                                 'mAP@.5:.95', 'xx/lr0', 'xx/lr1', 'xx/lr2')
@@ -1004,9 +934,9 @@ def train(hyp, opt, tb_writer=None,
                                       v5_metric=opt.v5_metric)[:2]
 
                 # Write
-                with open(results_file, 'a') as f:
+                with open(results_file.as_posix(), 'a') as f:
                     f.write(s + '%10.4g' * 7 % results_ + '\n')
-                with open(results_file_csv, 'a') as f:
+                with open(results_file_csv.as_posix(), 'a') as f:
                     csv_writer = csv.writer(f)
                     aa = []
                     for xx in s.split(' '):
@@ -1016,7 +946,7 @@ def train(hyp, opt, tb_writer=None,
 
                 if len(opt.name) and opt.bucket:
                     os.system('gsutil cp %s gs://%s/results_/results_%s.txt' %
-                              (results_file, opt.bucket, opt.name))
+                              (results_file.as_posix(), opt.bucket, opt.name))
 
                 # Log
                 tags = ['train/box_loss', 'train/obj_loss', 'train/cls_loss',  # train loss
@@ -1094,7 +1024,7 @@ def train(hyp, opt, tb_writer=None,
 
         if best.exists():
             prefix = colorstr('Validating')
-            logger.info(f'{prefix} model {best}.')
+            logger.info(f'{prefix} model {best.as_posix()}.')
             results_val = test(opt.data,
                                batch_size=batch_size * 2,
                                imgsz=imgsz_test,
@@ -1118,7 +1048,7 @@ def train(hyp, opt, tb_writer=None,
 
             prefix = colorstr('Testing')
             if opt.evolve < 1 and test_path != val_path:
-                logger.info(f'{prefix} model {best}.')
+                logger.info(f'{prefix} model {best.as_posix()}.')
                 results_test = test(opt.data,
                                     batch_size=batch_size * 2,
                                     imgsz=imgsz_test,
