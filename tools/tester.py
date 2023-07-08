@@ -176,7 +176,7 @@ def test(data,
     p, r, f1, mp, mr, map50, map_, t0, t1 = 0., 0., 0., 0., 0., 0., 0., 0., 0.
     loss = torch.zeros(3, device=device)
     jdict, stats, ap, ap_class, wandb_images = [], [], [], [], []
-    pbar = tqdm(dataloader, desc=s, mininterval=0.05, maxinterval=1, unit='batch', bar_format=TQDM_BAR_FORMAT)
+    pbar = tqdm(dataloader, desc=s, unit='batch', bar_format=TQDM_BAR_FORMAT)
     for batch_i, (img, targets, paths, shapes) in enumerate(pbar):
         img = img.to(device, non_blocking=True)
         img = img.half() if half else img.float()  # uint8 to fp16/32

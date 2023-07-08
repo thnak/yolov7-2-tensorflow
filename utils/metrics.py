@@ -1,3 +1,4 @@
+import random
 from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
@@ -195,14 +196,11 @@ class ConfuseMatrix_cls:
 
     def add(self, pred: torch.Tensor, label: torch.Tensor):
         """add a new prediction to confuse matrix"""
-        pred = pred.detach().cpu().numpy()
-        label = label.cpu().numpy()
-        for p, l in zip(pred, label):
-            label_ = np.zeros_like(p).tolist()
-            label_[l] = 1
-            p = np.where(p >= self.conf, 1, 0).tolist()
-            self.datas["preds"].extend(p)
-            self.datas['labels'].extend(label_)
+        val, indi = pred.topk(k=1)
+        labels = label.cpu().numpy()
+        for p, l in zip(indi.cpu().numpy(), labels):
+            self.datas["preds"].append(p[0])
+            self.datas['labels'].append(l)
 
     def plot(self, names=None, savedName="cls-confusionMatrix.jpg"):
         datas, labels = self.datas["preds"], self.datas['labels']

@@ -298,10 +298,10 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None):
         tloss, vloss, fitness = 0.0, 0.0, 0.0  # train loss, val loss, fitness
         if rank != -1:
             dataloader.sampler.set_epoch(epoch)
-        pbar = enumerate(dataloader)
         logger.info(('\n' + '%11s' * len(tag_results)) % tag_results)
+        pbar = enumerate(dataloader)
         if rank in [-1, 0]:
-            pbar = tqdm(pbar, total=nb, mininterval=1, maxinterval=1, unit='batch',
+            pbar = tqdm(pbar, total=len(dataloader), unit='batch',
                         bar_format=TQDM_BAR_FORMAT)  # progress bar
 
         # batch -------------------------------------------------------------
@@ -817,7 +817,7 @@ def train(hyp, opt, tb_writer=None,
         pbar = enumerate(dataloader)
         logger.info(('\n' + '%11s' * len(tag_results)) % tag_results)
         if rank in [-1, 0]:
-            pbar = tqdm(pbar, total=nb, mininterval=1, maxinterval=1, unit='batch',
+            pbar = tqdm(pbar, total=len(dataloader), unit='batch',
                         bar_format=TQDM_BAR_FORMAT)  # progress bar
 
         # batch -------------------------------------------------------------

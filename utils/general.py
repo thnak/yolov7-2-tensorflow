@@ -200,17 +200,24 @@ def check_imshow():
         return False
 
 
-# def check_file(file):
-#     """Search for file if not found
-#         return file
-#     """
-#     if Path(file).is_file() or file == '':
-#         return file
-#     else:
-#         files = glob.glob('./**/' + file, recursive=True)  # find file
-#         assert len(files), f'File Not Found: {file}'  # assert file was found
-#         assert len(files) == 1, f"Multiple files match '{file}', specify exact path: {files}"  # assert unique
-#         return files[0]  # return file
+def cls_split(train, val, rate=0.2):
+    train = Path(train)
+    val = Path(val)
+    all_train = [x for x in train.iterdir() if x.iterdir()]
+    for x in all_train:
+        cls_train_name = x.stem
+        cls_val_name = val / cls_train_name
+        cls_val_name.mkdir(exist_ok=True)
+        items_train = [item for item in x.iterdir() if item.is_file()]
+        items_val = random.sample(items_train, k=int(len(items_train) * rate))
+        for item in items_val:
+            name = item.name
+            save_dir = cls_val_name / name
+        with open(item.as_posix(), "rb") as fi:
+            data = fi.read()
+            with open(save_dir.as_posix(), "wb") as fo:
+                fo.write(data)
+
 
 
 def check_dataset(dict_):

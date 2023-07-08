@@ -432,16 +432,12 @@ def img2label_paths(img_paths):
 def create_dataloader_cls(dataset, batch_size,
                           rank=-1, world_size=1, workers=8,
                           prefix='', shuffle=True, seed=0):
-    # Make sure only the first process in DDP process the dataset first, and the following others can use the cache
-    # with torch_distributed_zero_first(rank):
-    #     dataset = LoadSampleAndTarget(root=path, augment=True)
-
     batch_size = min(batch_size, len(dataset))
     nd_dml = None
     try:
         import torch_directml
         nd_dml = torch_directml.device_count()
-    except Exception:
+    except ImportError:
         pass
     nd = nd_dml if nd_dml else torch.cuda.device_count()
     nw = min(
@@ -530,8 +526,6 @@ class LoadSampleAndTarget(torchvision.datasets.ImageFolder):
         T += [ToTensorV2()]  # Normalize and convert to Tensor
         logger.info(prefix + ', '.join(f'{x}'.replace('always_apply=False, ', '') for x in T if x.p))
         return A.Compose(T)
-
-        logger.info(f'{prefix}{e}')
 
 
 class LoadImagesAndLabels(Dataset):  # for training/testing
