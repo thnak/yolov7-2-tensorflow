@@ -82,6 +82,8 @@ if __name__ == '__main__':
             opt = argparse.Namespace(**yaml.load(f, Loader=yaml.SafeLoader))  # replace
         opt.cfg, opt.weights, opt.resume, opt.batch_size, opt.global_rank, opt.local_rank = '', ckpt, True, opt.total_batch_size, opt.global_rank, opt.local_rank  # reinstate
         logger.info('Resuming training from %s' % ckpt)
+        data = str(torch.load(ckpt, map_location="cpu")["model"].yaml)
+
     else:
         opt.data, opt.cfg, opt.hyp = check_file(opt.data), check_file(
             opt.cfg), check_file(opt.hyp)  # check files

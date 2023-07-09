@@ -488,9 +488,11 @@ class LoadSampleAndTarget(torchvision.datasets.ImageFolder):
         self.cached = 0
         if cache:
             pbar = tqdm(range(0, total_caching), total=total_caching)
+            gb = 0
             for x in pbar:
                 self.samples[x][3] = self.loadImage(x)[0]
-                pbar.set_description(f"{prefix} Caching... ")
+                gb += self.samples[x][3].nbytes
+                pbar.set_description(f"{prefix}Caching... {gb2mb(gb)}")
 
     def __len__(self):
         return len(self.samples)
@@ -520,13 +522,14 @@ class LoadSampleAndTarget(torchvision.datasets.ImageFolder):
 
     def caching(self, prefix="", safety_margin=1.5):
         total = len(self.samples)
-        nbytes = np.zeros(self.imgsz, dtype=np.uint8).nbytes
-        total_nbytes = total * nbytes * safety_margin
+        nbytes = np.zeros((self.imgsz, self.imgsz, 3), dtype=np.uint8).nbytes
+        total_nbytes = nbytes * safety_margin
         mem = psutil.virtual_memory()
         free = mem.available
         mem_2_caching = int(free / total_nbytes)
         mem_2_caching = min(mem_2_caching, total)
-        logger.info(f"{prefix}Total {mem_2_caching} images can be cache in memory with total {gb2mb(total_nbytes)}")
+        logger.info(f"{prefix}Total {mem_2_caching} in {total} images can "
+                    f"be cache in memory with total {gb2mb(total_nbytes * mem_2_caching)}")
         return mem_2_caching
 
 

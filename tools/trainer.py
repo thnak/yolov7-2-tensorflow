@@ -822,11 +822,11 @@ def train(hyp, opt, tb_writer=None,
 
         # batch -------------------------------------------------------------
         optimizer.zero_grad(set_to_none=True)
-        for i, (imgs, targets, paths, _) in pbar:
+        for i, (images, targets, paths, _) in pbar:
             del _
             # number integrated batches (since train start)
             ni = i + nb * epoch
-            imgs = imgs.to(device=device, non_blocking=True,
+            images = images.to(device=device, non_blocking=True,
                            dtype=torch.float32) / 255.0  # uint8 to float32, 0-255 to 0.0-1.0
 
             # Warmup
@@ -845,11 +845,11 @@ def train(hyp, opt, tb_writer=None,
             # Multi-scale
             if opt.multi_scale:
                 sz = random.randrange(int(imgsz * 0.5), int(imgsz * 1.5) + gs) // gs * gs  # size
-                sf = sz / max(imgs.shape[2:])  # scale factor
+                sf = sz / max(images.shape[2:])  # scale factor
                 if sf != 1:
                     # new shape (stretched to gs-multiple)
-                    ns = [math.ceil(x * sf / gs) * gs for x in imgs.shape[2:]]
-                    imgs = functional.interpolate(imgs, size=ns,
+                    ns = [math.ceil(x * sf / gs) * gs for x in images.shape[2:]]
+                    images = functional.interpolate(images, size=ns,
                                                   mode='bilinear',
                                                   align_corners=False,
                                                   antialias=False)
@@ -859,8 +859,8 @@ def train(hyp, opt, tb_writer=None,
                           device_type='cuda' if device.type == 'cuda' else 'cpu',
                           dtype=torch.float16 if cuda else torch.bfloat16):
 
-                pred = model(imgs)  # forward
-                loss, loss_items = compute_loss(pred, targets, imgs)  # loss scaled by batch_size
+                pred = model(images)  # forward
+                loss, loss_items = compute_loss(pred, targets, images)  # loss scaled by batch_size
                 if rank != -1:
                     loss *= opt.world_size  # gradient averaged between devices in DDP mode
                 if opt.quad:
@@ -886,7 +886,7 @@ def train(hyp, opt, tb_writer=None,
                     torch.cuda.memory_reserved(device=device) / 1E9 if torch.cuda.is_available() else 0)  # (GB)
 
                 s = ('%11s' * 2 + '%11.4g' * (2 + len(mloss))) % (
-                    f'{epoch}/{epochs - 1}', mem, *mloss, targets.shape[0], imgs.shape[-1])
+                    f'{epoch}/{epochs - 1}', mem, *mloss, targets.shape[0], images.shape[-1])
                 pbar.set_description(s)
 
                 # Plot
@@ -894,16 +894,16 @@ def train(hyp, opt, tb_writer=None,
                     f = save_dir / f'train_batch{ni}.jpg'  # filename
                     if tb_writer:
                         tb_writer.add_image(str(f), np.moveaxis(plot_images(
-                            images=imgs, targets=targets, paths=paths, fname=f, names=names), -1, 0), ni)
+                            images=images, targets=targets, paths=paths, fname=f, names=names), -1, 0), ni)
                     Thread(target=plot_images, args=(
-                        imgs,
+                        images,
                         targets,
                         paths, f), daemon=True).start()
                 elif plots and ni == 10 and wandb_logger.wandb:
                     wandb_logger.log({"Mosaics": [wandb_logger.wandb.Image(str(x), caption=x.name) for x in
                                                   save_dir.glob('train*.jpg') if x.exists()]})
-        input_shape = list(imgs.shape[1:]) if isinstance(imgs.shape[1:], torch.Size) else imgs.shape[1:]
-        del imgs, targets, paths
+        input_shape = list(images.shape[1:]) if isinstance(images.shape[1:], torch.Size) else images.shape[1:]
+        del images, targets, paths
         # Scheduler
         lr = [xx['lr'] for xx in optimizer.param_groups]  # for tensorboard
         scheduler.step()
