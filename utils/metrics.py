@@ -213,11 +213,14 @@ class ConfuseMatrix_cls:
             plot_named = [x for x in range(self.nc)]
         fig, ax = plt.subplots(figsize=(10, 10), dpi=300)
         metrics.ConfusionMatrixDisplay.from_predictions(datas, labels, ax=ax,
-                                                        cmap=self.plot_color, normalize='true')
+                                                        cmap=self.plot_color,
+                                                        normalize='true')
         ax.xaxis.set_ticklabels(plot_named)
         ax.yaxis.set_ticklabels(plot_named)
         ax.set_title(title)
-        return plt.gcf()
+        for x in ax.get_xticklabels():
+            x.set_rotation(45)
+        return fig
 
 
 # Plots ----------------------------------------------------------------------------------------------------------------

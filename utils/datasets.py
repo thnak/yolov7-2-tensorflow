@@ -479,12 +479,11 @@ class LoadSampleAndTarget(torchvision.datasets.ImageFolder):
         self.hflip = 0.5
         self.vflip = 0.0
         self.jitter = 0.4
-        self.mean = [0.485, 0.456, 0.406]
-        self.std = [0.229, 0.224, 0.225]
+        total_caching = self.caching(prefix=prefix)
+        self.calculatingMeanSTD(total_caching, prefix)
         self.auto_aug = False
         self.prefix = prefix
         self.transform = self.classify_albumentations()
-        total_caching = self.caching(prefix=prefix)
         self.cached = 0
         if cache:
             pbar = tqdm(range(0, total_caching), total=total_caching)
@@ -494,16 +493,48 @@ class LoadSampleAndTarget(torchvision.datasets.ImageFolder):
                 gb += self.samples[x][3].nbytes
                 pbar.set_description(f"{prefix}Caching... {gb2mb(gb)}")
 
+    def calculatingMeanSTD(self, max_number, prefix):
+        """calculating mean, std"""
+        task = []
+        imgsz = (self.imgsz // 2, self.imgsz // 2)
+        total_img = max(100, max_number)
+        logger.info(f"{prefix}Calculating mean, std for {total_img} images")
+        for x in range(total_img):
+            img = self.loadImage(x)[0]
+            img = cv2.resize(img, imgsz, interpolation=cv2.INTER_NEAREST)
+            img = img[:, :, ::-1].astype(np.float32)  # BGR to RGB
+            img /= 255.
+            img = torch.from_numpy(img)
+            img = torch.unsqueeze(img, dim=0)
+            img = torch.permute(img, [0, 3, 1, 2])
+            task.append(img.float())
+        task = torch.concatenate(task, dim=0)
+        mean = torch.mean(task, dim=(0, 2, 3))
+        std = torch.std(task, dim=(0, 2, 3))
+        self.mean = mean.cpu().numpy().tolist()
+        self.std = std.cpu().numpy().tolist()
+        logger.info(f"{prefix}Using mean: {self.mean}, std: {self.std} for this dataset.")
+
+    def dataset_analysis(self):
+        dick = {}
+        for x in range(len(self.classes)):
+            dick[x] = 0
+        for x in range(len(self.samples)):
+            img, label = self.loadImage(x)
+            dick[label] += 1
+        return dick, self.classes
+
     def __len__(self):
         return len(self.samples)
 
     def __getitem__(self, index):
         img, j = self.loadImage(index)
-        img = img[:, :, ::-1]  # BGR to RGB, to CHW
+        img = img[:, :, ::-1]  # BGR to RGB
         img = self.transform(image=img)["image"]
         return img, j
 
     def loadImage(self, index):
+        """Load image and label"""
         f, j, fn, im = self.samples[index]  # filename, index, filename.with_suffix('.npy'), image
         if im is None:
             if fn.exists():
@@ -531,7 +562,6 @@ class LoadSampleAndTarget(torchvision.datasets.ImageFolder):
         logger.info(f"{prefix}Total {mem_2_caching} in {total} images can "
                     f"be cache in memory with total {gb2mb(total_nbytes * mem_2_caching)}")
         return mem_2_caching
-
 
     def classify_albumentations(self):
         """YOLOv5 classification Albumentations (optional, only used if package is installed)"""
@@ -819,8 +849,6 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                 return img, (h0, w0), img.shape[:2]
         else:
             return self.imgs[index], self.img_hw0[index], self.img_hw[index]
-
-
 
     def __len__(self):
         """Return number of valid image include background"""

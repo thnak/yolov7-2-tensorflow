@@ -27,7 +27,7 @@ from utils.general import colorstr, init_seeds, check_dataset, check_img_size, o
 from utils.google_utils import attempt_download
 from utils.loss import SmartLoss
 from utils.metrics import fitness
-from utils.plots import plot_images, plot_results
+from utils.plots import plot_images, plot_results, plot_dataset
 from utils.re_parameteration import Re_parameterization
 from utils.torch_utils import select_device, torch_distributed_zero_first, intersect_dicts, smart_optimizer, ModelEMA, \
     time_synchronized, is_parallel, save_model
@@ -105,11 +105,19 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None):
         dataset = LoadSampleAndTarget(root=train_path, augment=True, prefix=colorstr('train: '))
         val_dataset = LoadSampleAndTarget(root=val_path, augment=True,
                                           prefix=colorstr('val: ')) if train_path != val_path else dataset
+        if tb_writer:
+            data_, names = dataset.dataset_analysis()
+            tb_writer.add_figure("Train dataset", plot_dataset(data_, names, "Total samples per class in Train"))
+            if val_path != train_path:
+                data_, names = val_dataset.dataset_analysis()
+                tb_writer.add_figure("Val dataset", plot_dataset(data_, names, "Total samples per class in Val"))
+            del data_, names
 
     total_image.append(len(dataset))
     nb = len(dataset)  # number of batches
     names = dataset.classes
     nc = len(names)
+    input_channel = hyp.get('ch', 3)
     # Model
     pretrained = weights.endswith('.pt')
     if pretrained:
@@ -118,7 +126,7 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None):
         ckpt = torch.load(weights, map_location=map_device)  # load checkpoint
         pretrained_model = ckpt['model']
         model = Model(opt.cfg or pretrained_model.yaml,
-                      ch=hyp.get('ch', 3),
+                      ch=input_channel,
                       nc=nc,
                       anchors=hyp.get('anchors')).to(device)  # create
 
@@ -153,7 +161,7 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None):
         assert model.is_Classify, f"Please paste the cls model cfg here"
     else:
         model = Model(opt.cfg,
-                      ch=hyp.get('ch', 3),
+                      ch=input_channel,
                       nc=nc,
                       anchors=hyp.get('anchors')).to(device)  # create
 
@@ -174,7 +182,7 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None):
     for _ in range(3):
         try:
             imgsz, imgsz_test = [check_img_size(x, gs) for x in opt.imgsz]
-            model.input_shape = [3, imgsz, imgsz] if isinstance(imgsz, int) else [3, *imgsz]
+            model.input_shape = [input_channel, imgsz, imgsz] if isinstance(imgsz, int) else [input_channel, *imgsz]
             y = model(torch.zeros([1, *model.input_shape], device=device))
         except:
             gs += gs
@@ -186,8 +194,10 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None):
     model.model_version = model_version
     model.total_image = total_image
     model.best_fitness = best_fitness
-    model.info(verbose=True, img_size=[3, imgsz, imgsz] if isinstance(imgsz, int) else [3, *imgsz])
+    model.info(verbose=True, img_size=[input_channel, imgsz, imgsz] if isinstance(imgsz, int) else [3, *imgsz])
     logger.info('')
+    if tb_writer:
+        tb_writer.add_graph(model, torch.zeros([1, input_channel, imgsz, imgsz], device=device))
 
     with torch_distributed_zero_first(rank):
         if data_loader['dataloader'] is None:
@@ -550,13 +560,14 @@ def train(hyp, opt, tb_writer=None,
     total_image = [0]
     start_epoch, best_fitness = 0, 0.0
     model_version = 1
+    input_channel = hyp.get('ch', 3)
     if pretrained:
         with torch_distributed_zero_first(rank):
             attempt_download(weights)  # download if not found locally
         ckpt = torch.load(weights, map_location=map_device)  # load checkpoint
         pretrained_model = ckpt['model']
         model = Model(opt.cfg or pretrained_model.yaml,
-                      ch=hyp.get('ch', 3),
+                      ch=input_channel,
                       nc=nc,
                       anchors=hyp.get('anchors')).to(device)  # create
 
@@ -591,7 +602,7 @@ def train(hyp, opt, tb_writer=None,
         assert nodes == nodes2, f'Please paste the same model cfg branch like P5vsP5 or P6vsP6'
     else:
         model = Model(opt.cfg,
-                      ch=hyp.get('ch', 3),
+                      ch=input_channel,
                       nc=nc,
                       anchors=hyp.get('anchors')).to(device)  # create
 
@@ -624,8 +635,10 @@ def train(hyp, opt, tb_writer=None,
     model.total_image = total_image
     model.input_shape = [3, imgsz, imgsz] if isinstance(imgsz, int) else [3, *imgsz]
     model.best_fitness = best_fitness
-    model.info(verbose=True, img_size=[3, imgsz, imgsz] if isinstance(imgsz, int) else [3, *imgsz])
+    model.info(verbose=True, img_size=[input_channel, imgsz, imgsz] if isinstance(imgsz, int) else [input_channel, *imgsz])
     logger.info('')
+    if tb_writer:
+        tb_writer.add_graph(model, torch.zeros([1, input_channel, imgsz, imgsz], device=device))
     # accumulate loss before optimizing
     accumulate = max(round(nbs / total_batch_size), 1)
     hyp['weight_decay'] *= total_batch_size * accumulate / nbs  # scale weight_decay

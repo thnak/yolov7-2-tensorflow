@@ -453,6 +453,18 @@ def plot_results(start=0, stop=0, bucket='', id=(), labels=(), save_dir=''):
     fig.savefig(Path(save_dir) / 'results.png', dpi=300)
 
 
+def plot_dataset(data: dict, names: list, title="dataset"):
+    fig, ax = plt.subplots(figsize=(len(names), 10))
+    nums = []
+    for k, v in data.items():
+        nums.append(v)
+    ax.bar(names, nums)
+    for x in ax.get_xticklabels():
+        x.set_rotation(45)
+    ax.set_title(title)
+    return fig
+
+
 def output_to_keypoint(output):
     """Convert model output to target format [batch_id, class_id, x, y, w, h, conf]"""
     targets = []
