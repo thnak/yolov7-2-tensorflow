@@ -201,7 +201,7 @@ class ConfuseMatrix_cls:
             self.datas["preds"].append(p[0])
             self.datas['labels'].append(l)
 
-    def plot(self, names=None, savedName="cls-confusionMatrix.jpg", title=""):
+    def plot(self, names=None, title=""):
         datas, labels = self.datas["preds"], self.datas['labels']
         plot_named = []
         if isinstance(names, dict):
@@ -211,15 +211,12 @@ class ConfuseMatrix_cls:
             plot_named = [x for x in names]
         else:
             plot_named = [x for x in range(self.nc)]
-        fig, ax = plt.subplots(figsize=(10, 10))
-        cm_metrics = metrics.ConfusionMatrixDisplay.from_predictions(datas, labels, ax=ax,
-                                                                     cmap=self.plot_color, normalize='true')
+        fig, ax = plt.subplots(figsize=(10, 10), dpi=300)
+        metrics.ConfusionMatrixDisplay.from_predictions(datas, labels, ax=ax,
+                                                        cmap=self.plot_color, normalize='true')
         ax.xaxis.set_ticklabels(plot_named)
         ax.yaxis.set_ticklabels(plot_named)
         ax.set_title(title)
-        savedName = Path(savedName) if isinstance(savedName, str) else savedName
-        savedName = savedName.with_suffix(".jpg")
-        # plt.savefig(savedName.as_posix(), dpi=300, format='jpg')
         return plt.gcf()
 
 

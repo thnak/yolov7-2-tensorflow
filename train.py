@@ -97,9 +97,10 @@ if __name__ == '__main__':
         opt.name = 'evolve' if opt.evolve > 1 else opt.name
         with open(opt.cfg, 'r') as fi:
             data = fi.read()
-        project = "runs/train-cls" if "Classify" in data else "runs/train"
-        opt.save_dir = increment_path(Path(project) / opt.name, exist_ok=opt.exist_ok | opt.evolve > 1)  # increment run
-        opt.project = project
+    project = "runs/train-cls" if "Classify" in data else "runs/train"
+    if not opt.resume:
+      opt.save_dir = increment_path(Path(project) / opt.name, exist_ok=opt.exist_ok | opt.evolve > 1)  # increment run
+    opt.project = project
     # DDP mode
     opt.total_batch_size = opt.batch_size
     if opt.local_rank != -1:

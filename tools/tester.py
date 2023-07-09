@@ -67,7 +67,7 @@ def cls_test(data,
             targets.append(labels)
             if compute_loss:
                 loss += compute_loss(pred, labels)
-    fig = confusionMatrix.plot(dataloader.dataset.classes, savedName=save_dir/f"confuseMatrix_{epoch+1}.svg")
+    fig = confusionMatrix.plot(dataloader.dataset.classes, title=f"Confusion Matrix {epoch}")
     loss /= n
     preds, targets = torch.cat(preds), torch.cat(targets)
     correct = (targets[:, None] == preds).float()
