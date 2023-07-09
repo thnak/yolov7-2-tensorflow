@@ -102,8 +102,8 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None):
     from utils.datasets import LoadSampleAndTarget
     with torch_distributed_zero_first(rank):
         train_path, val_path, test_path = parse_path(data_dict=data_dict)
-        dataset = LoadSampleAndTarget(root=train_path, augment=True)
-        val_dataset = LoadSampleAndTarget(root=val_path, augment=True) if train_path != val_path else dataset
+        dataset = LoadSampleAndTarget(root=train_path, augment=True, prefix=colorstr('train: '))
+        val_dataset = LoadSampleAndTarget(root=val_path, augment=True, prefix=colorstr('val: ')) if train_path != val_path else dataset
 
     total_image.append(len(dataset))
     nb = len(dataset)  # number of batches
@@ -306,14 +306,14 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None):
 
         # batch -------------------------------------------------------------
         optimizer.zero_grad(set_to_none=True)
-        for i, (imgs, targets) in pbar:
+        for i, (images, targets) in pbar:
             targets = targets.to(device)
-            imgs = imgs.to(device=device, non_blocking=True)
+            images = images.to(device=device, non_blocking=True)
             # Forward
             with autocast(enabled=device.type in ['cuda', 'cpu'],
                           device_type='cuda' if device.type == 'cuda' else 'cpu',
                           dtype=torch.float16 if cuda else torch.bfloat16):
-                pred = model(imgs)  # forward
+                pred = model(images)  # forward
                 loss = compute_loss(pred, targets)
 
             # Backward
@@ -368,7 +368,7 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None):
                 best_fitness = fi
             # Save model
             if (not opt.nosave) or (final_epoch and opt.evolve < 1):  # if save
-                input_shape = list(imgs.shape[1:]) if isinstance(imgs.shape[1:], torch.Size) else imgs.shape[1:]
+                input_shape = list(images.shape[1:]) if isinstance(images.shape[1:], torch.Size) else images.shape[1:]
                 model.input_shape = input_shape
                 if rank in [-1, 0]:
                     ema.update_attr(model,

@@ -467,12 +467,12 @@ class LoadSampleAndTarget(torchvision.datasets.ImageFolder):
     mean = np.array([0.485, 0.456, 0.406])
     IMG_EXTENSIONS = (".jpg", ".jpeg", ".png", ".ppm", ".bmp", ".pgm", ".tif", ".tiff", ".webp")
 
-    def __init__(self, root, augment, cache=False):
+    def __init__(self, root, augment=True, cache=True, prefix=""):
         super().__init__(root=root)
         self.samples = [list(x) + [Path(x[0]).with_suffix('.npy'), None] for x in self.samples]  # file, index, npy, im
         self.pin_memory = False
         self.imgsz = 224
-        self.augment = True,
+        self.augment = augment,
         self.size = 224
         self.scale = (0.08, 1.0)
         self.ratio = (0.75, 1.0 / 0.75)  # 0.75, 1.33
@@ -482,21 +482,57 @@ class LoadSampleAndTarget(torchvision.datasets.ImageFolder):
         self.mean = [0.485, 0.456, 0.406]
         self.std = [0.229, 0.224, 0.225]
         self.auto_aug = False
+        self.prefix = prefix
         self.transform = self.classify_albumentations()
+        total_caching = self.caching(prefix=prefix)
+        self.cached = 0
+        if cache:
+            pbar = tqdm(range(0, total_caching), total=total_caching)
+            for x in pbar:
+                self.samples[x][3] = self.loadImage(x)[0]
+                pbar.set_description(f"{prefix} Caching... ")
 
     def __len__(self):
         return len(self.samples)
 
     def __getitem__(self, index):
-        f, j, fn, im = self.samples[index]  # filename, index, filename.with_suffix('.npy'), image
-        img = cv2.imread(f)  # BGR
+        img, j = self.loadImage(index)
         img = img[:, :, ::-1]  # BGR to RGB, to CHW
         img = self.transform(image=img)["image"]
         return img, j
 
+    def loadImage(self, index):
+        f, j, fn, im = self.samples[index]  # filename, index, filename.with_suffix('.npy'), image
+        if im is None:
+            if fn.exists():
+                img = np.load(fn.as_posix())
+            else:
+                img = cv2.imread(f)  # BGR
+                h, w, c = img.shape
+                r = min(h, w)
+                pad_shape = self.imgsz * 1.1
+                if r > pad_shape:
+                    ratio = pad_shape / r
+                    img = cv2.resize(img, (int(pad_shape * ratio), int(pad_shape * ratio)))
+        else:
+            img = im.copy()
+        return img, j
+
+    def caching(self, prefix="", safety_margin=1.5):
+        total = len(self.samples)
+        nbytes = np.zeros(self.imgsz, dtype=np.uint8).nbytes
+        total_nbytes = total * nbytes * safety_margin
+        mem = psutil.virtual_memory()
+        free = mem.available
+        mem_2_caching = int(free / total_nbytes)
+        mem_2_caching = min(mem_2_caching, total)
+        logger.info(f"{prefix}Total {mem_2_caching} images can be cache in memory with total {gb2mb(total_nbytes)}")
+        return mem_2_caching
+
+
     def classify_albumentations(self):
         """YOLOv5 classification Albumentations (optional, only used if package is installed)"""
-        prefix = colorstr('albumentations: ')
+        prefix = self.prefix
         augment = self.augment
         size = self.imgsz
         scale = self.scale
@@ -763,23 +799,25 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         """Load image from disk if not in cached or from cached if use --cache RAM"""
         img = self.imgs[index]
         img_npy = self.img_npy[index]
-        if img is not None:
+        if img is None:
+            if img_npy.exists():
+                img = np.load(img_npy.as_posix())
+                return img, img.shape[:2], img.shape[:2]
+
+            else:
+                path = self.img_files[index]
+                img = cv2.imread(path, cv2.IMREAD_COLOR)  # ignore alpha channel
+                assert img is not None, 'Image Not Found ' + path
+                h0, w0 = img.shape[:2]
+                r = self.img_size / max(h0, w0)
+                if r != 1:
+                    interp = cv2.INTER_AREA if r < 1 else cv2.INTER_CUBIC
+                    img = cv2.resize(img, (int(w0 * r), int(h0 * r)), interpolation=interp)
+                return img, (h0, w0), img.shape[:2]
+        else:
             return self.imgs[index], self.img_hw0[index], self.img_hw[index]
 
-        elif img_npy.exists():
-            img = np.load(img_npy.as_posix())
-            return img, img.shape[:2], img.shape[:2]
 
-        else:
-            path = self.img_files[index]
-            img = cv2.imread(path, cv2.IMREAD_COLOR)  # ignore alpha channel
-            assert img is not None, 'Image Not Found ' + path
-            h0, w0 = img.shape[:2]
-            r = self.img_size / max(h0, w0)
-            if r != 1:
-                interp = cv2.INTER_AREA if r < 1 else cv2.INTER_CUBIC
-                img = cv2.resize(img, (int(w0 * r), int(h0 * r)), interpolation=interp)
-            return img, (h0, w0), img.shape[:2]
 
     def __len__(self):
         """Return number of valid image include background"""

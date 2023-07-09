@@ -216,10 +216,10 @@ class ConfuseMatrix_cls:
                                                                      cmap=self.plot_color, normalize='true')
         ax.xaxis.set_ticklabels(plot_named)
         ax.yaxis.set_ticklabels(plot_named)
-        ax.set_title(title=title)
+        ax.set_title(title)
         savedName = Path(savedName) if isinstance(savedName, str) else savedName
-        savedName = savedName.with_suffix(".svg")
-        plt.savefig(savedName.as_posix(), dpi=300, format='svg')
+        savedName = savedName.with_suffix(".jpg")
+        plt.savefig(savedName.as_posix(), dpi=300, format='jpg')
 
 
 # Plots ----------------------------------------------------------------------------------------------------------------
