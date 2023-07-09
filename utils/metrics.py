@@ -188,10 +188,9 @@ class ConfusionMatrix:
 class ConfuseMatrix_cls:
     plot_color = plt.cm.Blues
 
-    def __init__(self, nc=10, conf=0.5):
+    def __init__(self, nc=10):
         datas = {'preds': [], "labels": []}
         self.datas = datas
-        self.conf = conf
         self.nc = nc
 
     def add(self, pred: torch.Tensor, label: torch.Tensor):
@@ -202,17 +201,25 @@ class ConfuseMatrix_cls:
             self.datas["preds"].append(p[0])
             self.datas['labels'].append(l)
 
-    def plot(self, names=None, savedName="cls-confusionMatrix.jpg"):
+    def plot(self, names=None, savedName="cls-confusionMatrix.jpg", title=""):
         datas, labels = self.datas["preds"], self.datas['labels']
         plot_named = []
         if isinstance(names, dict):
             for k, v in names.items():
                 plot_named.append(v)
+        elif isinstance(names, list):
+            plot_named = [x for x in names]
         else:
             plot_named = [x for x in range(self.nc)]
-        cm_metrics = metrics.ConfusionMatrixDisplay.from_predictions(datas, labels, labels=plot_named,
+        fig, ax = plt.subplots(figsize=(10, 10))
+        cm_metrics = metrics.ConfusionMatrixDisplay.from_predictions(datas, labels, ax=ax,
                                                                      cmap=self.plot_color, normalize='true')
-        cm_metrics.figure_.savefig(savedName if isinstance(savedName ,str) else savedName.as_posix())
+        ax.xaxis.set_ticklabels(plot_named)
+        ax.yaxis.set_ticklabels(plot_named)
+        ax.set_title(title=title)
+        savedName = Path(savedName) if isinstance(savedName, str) else savedName
+        savedName = savedName.with_suffix(".svg")
+        plt.savefig(savedName.as_posix(), dpi=300, format='svg')
 
 
 # Plots ----------------------------------------------------------------------------------------------------------------

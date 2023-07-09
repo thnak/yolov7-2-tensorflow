@@ -57,7 +57,7 @@ def cls_test(data,
     preds, targets, loss = [], [], 0
     n = len(dataloader)
     bar = tqdm(dataloader, f"{' ':>69}", total=n, bar_format=TQDM_BAR_FORMAT)
-    confusionMatrix = ConfuseMatrix_cls(nc=model.nc, conf=conf_thres)
+    confusionMatrix = ConfuseMatrix_cls(nc=model.nc)
     for i, (imgs, labels) in enumerate(bar):
         with torch.autocast(enabled=device.type == "cuda", device_type="cuda"):
             imgs, labels = imgs.to(device), labels.to(device)
@@ -67,7 +67,7 @@ def cls_test(data,
             targets.append(labels)
             if compute_loss:
                 loss += compute_loss(pred, labels)
-    confusionMatrix.plot(model.names, savedName=save_dir/f"confuseMatrix_{epoch+1}.jpg")
+    confusionMatrix.plot(dataloader.dataset.classes, savedName=save_dir/f"confuseMatrix_{epoch+1}.svg")
     loss /= n
     preds, targets = torch.cat(preds), torch.cat(targets)
     correct = (targets[:, None] == preds).float()
