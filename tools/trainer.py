@@ -375,7 +375,7 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None):
                 best_fitness = fi
             if tb_writer:
                 tb_writer.add_scalar("Loss/train", tloss, epoch)
-                tb_writer.add_scalar("Lr", lr, epoch)
+                tb_writer.add_scalar("Lr", lr[-1], epoch)
                 tb_writer.add_scalar("BestFitness", best_fitness, epoch)
 
             # Save model
