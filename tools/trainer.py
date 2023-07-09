@@ -103,7 +103,8 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None):
     with torch_distributed_zero_first(rank):
         train_path, val_path, test_path = parse_path(data_dict=data_dict)
         dataset = LoadSampleAndTarget(root=train_path, augment=True, prefix=colorstr('train: '))
-        val_dataset = LoadSampleAndTarget(root=val_path, augment=True, prefix=colorstr('val: ')) if train_path != val_path else dataset
+        val_dataset = LoadSampleAndTarget(root=val_path, augment=True,
+                                          prefix=colorstr('val: ')) if train_path != val_path else dataset
 
     total_image.append(len(dataset))
     nb = len(dataset)  # number of batches
@@ -173,7 +174,6 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None):
     for _ in range(3):
         try:
             imgsz, imgsz_test = [check_img_size(x, gs) for x in opt.imgsz]
-            dataset.imgsz = imgsz
             model.input_shape = [3, imgsz, imgsz] if isinstance(imgsz, int) else [3, *imgsz]
             y = model(torch.zeros([1, *model.input_shape], device=device))
         except:
@@ -181,6 +181,7 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None):
             model.stride = torch.tensor([gs], device=device)
             logger.warn(f"trying to get larger input shape")
 
+    dataset.imgsz = imgsz
     val_dataset.imgsz = imgsz_test
     model.model_version = model_version
     model.total_image = total_image
@@ -335,6 +336,7 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None):
                     torch.cuda.memory_reserved(device=device) / 1E9 if torch.cuda.is_available() else 0)  # (GB)
 
                 pbar.desc = f"{f'{epoch + 1}/{epochs}':>11}{mem:>11}{tloss:>11.6g}" + ' ' * 36
+
         # Scheduler
         lr = [xx['lr'] for xx in optimizer.param_groups]  # for tensorboard
         scheduler.step()
@@ -350,22 +352,32 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None):
             final_epoch = epoch + 1 == epochs
             if not opt.notest or final_epoch:  # Calculate mAP
                 wandb_logger.current_epoch = epoch + 1
-                top1, top5, tested_loss = cls_test(data_dict,
-                                                   batch_size=batch_size * 2,
-                                                   imgsz=imgsz_test,
-                                                   model=ema.ema,
-                                                   conf_thres=0.5,
-                                                   single_cls=opt.single_cls,
-                                                   dataloader=val_dataloader,
-                                                   save_dir=save_dir,
-                                                   verbose=False,
-                                                   plots=plots and final_epoch,
-                                                   wandb_logger=wandb_logger,
-                                                   compute_loss=compute_loss_val,
-                                                   epoch=epoch)
+                top1, top5, tested_loss, fig = cls_test(data_dict,
+                                                        batch_size=batch_size * 2,
+                                                        imgsz=imgsz_test,
+                                                        model=ema.ema,
+                                                        conf_thres=0.5,
+                                                        single_cls=opt.single_cls,
+                                                        dataloader=val_dataloader,
+                                                        save_dir=save_dir,
+                                                        verbose=False,
+                                                        plots=plots and final_epoch,
+                                                        wandb_logger=wandb_logger,
+                                                        compute_loss=compute_loss_val,
+                                                        epoch=epoch)
+                if tb_writer:
+                    tb_writer.add_scalar("Loss/val", tested_loss, epoch)
+                    tb_writer.add_scalar("Top1 Accuracy", top1, epoch)
+                    tb_writer.add_scalar("Top5 Accuracy", top5, epoch)
+                    tb_writer.add_figure("Confusion Matrix", fig, epoch)
                 fi = top1
             if best_fitness < fi:
                 best_fitness = fi
+            if tb_writer:
+                tb_writer.add_scalar("Loss/train", tloss, epoch)
+                tb_writer.add_scalar("Lr", lr, epoch)
+                tb_writer.add_scalar("BestFitness", best_fitness, epoch)
+
             # Save model
             if (not opt.nosave) or (final_epoch and opt.evolve < 1):  # if save
                 input_shape = list(images.shape[1:]) if isinstance(images.shape[1:], torch.Size) else images.shape[1:]
@@ -827,7 +839,7 @@ def train(hyp, opt, tb_writer=None,
             # number integrated batches (since train start)
             ni = i + nb * epoch
             images = images.to(device=device, non_blocking=True,
-                           dtype=torch.float32) / 255.0  # uint8 to float32, 0-255 to 0.0-1.0
+                               dtype=torch.float32) / 255.0  # uint8 to float32, 0-255 to 0.0-1.0
 
             # Warmup
             if ni <= nw:
@@ -850,9 +862,9 @@ def train(hyp, opt, tb_writer=None,
                     # new shape (stretched to gs-multiple)
                     ns = [math.ceil(x * sf / gs) * gs for x in images.shape[2:]]
                     images = functional.interpolate(images, size=ns,
-                                                  mode='bilinear',
-                                                  align_corners=False,
-                                                  antialias=False)
+                                                    mode='bilinear',
+                                                    align_corners=False,
+                                                    antialias=False)
 
             # Forward
             with autocast(enabled=device.type in ['cuda', 'cpu'],

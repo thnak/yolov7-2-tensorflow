@@ -219,7 +219,8 @@ class ConfuseMatrix_cls:
         ax.set_title(title)
         savedName = Path(savedName) if isinstance(savedName, str) else savedName
         savedName = savedName.with_suffix(".jpg")
-        plt.savefig(savedName.as_posix(), dpi=300, format='jpg')
+        # plt.savefig(savedName.as_posix(), dpi=300, format='jpg')
+        return plt
 
 
 # Plots ----------------------------------------------------------------------------------------------------------------

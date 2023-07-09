@@ -67,14 +67,14 @@ def cls_test(data,
             targets.append(labels)
             if compute_loss:
                 loss += compute_loss(pred, labels)
-    confusionMatrix.plot(dataloader.dataset.classes, savedName=save_dir/f"confuseMatrix_{epoch+1}.svg")
+    fig = confusionMatrix.plot(dataloader.dataset.classes, savedName=save_dir/f"confuseMatrix_{epoch+1}.svg")
     loss /= n
     preds, targets = torch.cat(preds), torch.cat(targets)
     correct = (targets[:, None] == preds).float()
     acc = torch.stack((correct[:, 0], correct.max(1).values), dim=1)  # (top1, top5) accuracy
     top1, top5 = acc.mean(0).tolist()
     print(f"{' ':>33}{loss:>11.3g}{top1:>11.3g}{top5:>11.3g}")
-    return top1, top5, loss
+    return top1, top5, loss, fig
 
 
 @torch.no_grad()
