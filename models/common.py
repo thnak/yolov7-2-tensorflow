@@ -4,19 +4,12 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import warnings
-from utils.general import non_max_suppression, make_divisible, scale_coords, increment_path, xyxy2xywh, check_requirements
+from utils.general import non_max_suppression, check_requirements, autopad
 
 try:
     from timm.models.layers import DropPath, to_2tuple
 except ImportError:
     pass
-
-
-def autopad(k, p=None):  # kernel, padding
-    # Pad to 'same' shape outputs
-    if p is None:
-        p = k // 2 if isinstance(k, int) else [x // 2 for x in k]  # auto-pad
-    return p
 
 
 class MP(nn.Module):
@@ -46,10 +39,6 @@ class SP(nn.Module):
         return self.m(x)
 
 
-def ReOrg_slice(out):
-    return torch.cat([out[:, :, ::2, ::2], out[:, :, 1::2, ::2], out[:, :, ::2, 1::2], out[:, :, 1::2, 1::2]], 1)
-
-
 class ReOrg(nn.Module):
     """https://arxiv.org/pdf/2101.00745.pdf"""
 
@@ -58,7 +47,7 @@ class ReOrg(nn.Module):
 
     @staticmethod
     def forward(out):  # x(b,c,w,h) -> y(b,4c,w/2,h/2)
-        out = ReOrg_slice(out)
+        out = torch.cat([out[:, :, ::2, ::2], out[:, :, 1::2, ::2], out[:, :, ::2, 1::2], out[:, :, 1::2, 1::2]], 1)
         return out
 
 
@@ -1483,18 +1472,18 @@ class NMS(nn.Module):
         return non_max_suppression(x[0], conf_thres=self.conf, iou_thres=self.iou, classes=self.classes)
 
 
-class Classify(nn.Module):
-    """Classification head, i.e. x(b,c1,20,20) to x(b,c2)"""
-
-    def __init__(self, c1, c2, k=1, s=1, p=None, g=1):  # ch_in, ch_out, kernel, stride, padding, groups
-        super(Classify, self).__init__()
-        self.aap = nn.AdaptiveAvgPool2d(1)  # to x(b,c1,1,1)
-        self.conv = nn.Conv2d(c1, c2, k, s, autopad(k, p), groups=g)  # to x(b,c2,1,1)
-        self.flat = nn.Flatten()
-
-    def forward(self, x):
-        z = torch.cat([self.aap(y) for y in (x if isinstance(x, list) else [x])], 1)  # cat if list
-        return self.flat(self.conv(z))  # flatten to x(b,c2)
+# class Classify(nn.Module):
+#     """Classification head, i.e. x(b,c1,20,20) to x(b,c2)"""
+#
+#     def __init__(self, c1, c2, k=1, s=1, p=None, g=1):  # ch_in, ch_out, kernel, stride, padding, groups
+#         super(Classify, self).__init__()
+#         self.aap = nn.AdaptiveAvgPool2d(1)  # to x(b,c1,1,1)
+#         self.conv = nn.Conv2d(c1, c2, k, s, autopad(k, p), groups=g)  # to x(b,c2,1,1)
+#         self.flat = nn.Flatten()
+#
+#     def forward(self, x):
+#         z = torch.cat([self.aap(y) for y in (x if isinstance(x, list) else [x])], 1)  # cat if list
+#         return self.flat(self.conv(z))  # flatten to x(b,c2)
 
 
 ##### end of yolov5 ######

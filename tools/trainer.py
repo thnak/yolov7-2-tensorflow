@@ -19,34 +19,32 @@ from torch.optim.lr_scheduler import LambdaLR
 from tqdm import tqdm
 
 from models.yolo import Model
+from models.commond3D import Model3D
 from tools.tester import test, cls_test
 from utils.autoanchor import check_anchors
-from utils.datasets import create_dataloader, create_dataloader_cls
-from utils.general import colorstr, init_seeds, check_dataset, check_img_size, one_cycle, labels_to_class_weights, \
-    labels_to_image_weights, TQDM_BAR_FORMAT, strip_optimizer
+from utils.datasets import create_dataloader, create_dataloader_cls, LoadSampleAndTarget, LoadSampleforVideoClassify
+
+from utils.general import (colorstr, init_seeds, check_dataset, check_img_size, one_cycle, labels_to_class_weights,
+                           labels_to_image_weights, TQDM_BAR_FORMAT, strip_optimizer, parse_path)
 from utils.google_utils import attempt_download
 from utils.loss import SmartLoss
 from utils.metrics import fitness
 from utils.plots import plot_images, plot_results, plot_dataset
 from utils.re_parameteration import Re_parameterization
-from utils.torch_utils import select_device, torch_distributed_zero_first, intersect_dicts, smart_optimizer, ModelEMA, \
-    time_synchronized, is_parallel, save_model
+from utils.torch_utils import (select_device, torch_distributed_zero_first, intersect_dicts, smart_optimizer, ModelEMA,
+                               time_synchronized, is_parallel, save_model)
 from utils.wandb_logging.wandb_utils import WandbLogger
 
 
-def parse_path(data_dict):
-    train_path = data_dict['train']
-    assert train_path, f"Could not find train dataset"
-    val_path = data_dict.get("val", train_path)
-    test_path = data_dict.get("test", val_path)
-    return train_path, val_path, test_path
-
-
-def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None):
+def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None, use3D=False):
     if data_loader is None:
         data_loader = {'dataloader': None, 'dataset': None, 'val_dataloader': None, 'test_dataloader': None}
     save_dir, epochs, batch_size, total_batch_size, weights, rank, freeze = \
         Path(opt.save_dir), opt.epochs, opt.batch_size, opt.total_batch_size, opt.weights, opt.global_rank, opt.freeze
+    if use3D:
+        Model = Model3D
+        LoadSampleAndTarget = LoadSampleforVideoClassify
+
     wdir = save_dir / 'weights'
     wdir.mkdir(parents=True, exist_ok=True)  # make dir
     last = wdir / 'last.pt'
@@ -61,12 +59,13 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None):
         yaml.dump(hyp, f, sort_keys=False)
     with open(save_dir / 'opt.yaml', 'w') as f:
         yaml.dump(vars(opt), f, sort_keys=False)
-
+    with open(opt.cfg, "r") as f:
+        sub_sample = yaml.load(f, yaml.SafeLoader)
+        sub_sample = sub_sample.get("sub_sample", 16)
     device, git_status = select_device(opt.device, batch_size=opt.batch_size)
     opt.git_status = git_status
     logger.info(colorstr('hyperparameters: ') +
                 ', '.join(f'{k}={v}' for k, v in hyp.items()))
-    # Directories
 
     tag_results = ('Epochs', 'VRAMs', "t_loss", "v_loss", "top1", "top5")
     if not results_file_csv.exists():
@@ -82,7 +81,6 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None):
     init_seeds(2 + rank)
     with open(opt.data) as f:
         data_dict = yaml.load(f, Loader=yaml.SafeLoader)  # data dict
-    is_coco = opt.data.endswith('coco.yaml')
 
     loggers = {'wandb': None}  # loggers dict
     map_device = 'cpu' if device.type in ['privateuseone', 'xla', 'cpu'] else device
@@ -99,16 +97,19 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None):
         if wandb_logger.wandb:
             weights, epochs, hyp = opt.weights, opt.epochs, opt.hyp
 
-    from utils.datasets import LoadSampleAndTarget
     with torch_distributed_zero_first(rank):
         train_path, val_path, test_path = parse_path(data_dict=data_dict)
-        dataset = LoadSampleAndTarget(root=train_path, augment=True, prefix=colorstr('train: '))
-        val_dataset = LoadSampleAndTarget(root=val_path, augment=True,
-                                          prefix=colorstr('val: ')) if train_path != val_path else dataset
+        dataset = LoadSampleAndTarget(root=train_path.as_posix(), augment=True, prefix=colorstr('train: '))
+        val_dataset = dataset
+        if train_path.as_posix() != val_path.as_posix():
+            val_dataset = LoadSampleAndTarget(root=val_path.as_posix(), augment=True,
+                                              prefix=colorstr(
+                                                  'val: '))
+
         if tb_writer:
             data_, names = dataset.dataset_analysis()
             tb_writer.add_figure("Train dataset", plot_dataset(data_, names, "Total samples per class in Train"))
-            if val_path != train_path:
+            if val_path.as_posix() != train_path.as_posix():
                 data_, names = val_dataset.dataset_analysis()
                 tb_writer.add_figure("Val dataset", plot_dataset(data_, names, "Total samples per class in Val"))
             del data_, names
@@ -182,7 +183,11 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None):
     for _ in range(3):
         try:
             imgsz, imgsz_test = [check_img_size(x, gs) for x in opt.imgsz]
-            model.input_shape = [input_channel, imgsz, imgsz] if isinstance(imgsz, int) else [input_channel, *imgsz]
+            if use3D:
+                model.input_shape = [input_channel, sub_sample, imgsz, imgsz] if isinstance(imgsz, int) else [
+                    input_channel, sub_sample, *imgsz]
+            else:
+                model.input_shape = [input_channel, imgsz, imgsz] if isinstance(imgsz, int) else [input_channel, *imgsz]
             y = model(torch.zeros([1, *model.input_shape], device=device))
         except:
             gs += gs
@@ -194,7 +199,15 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None):
     model.model_version = model_version
     model.total_image = total_image
     model.best_fitness = best_fitness
-    model.info(verbose=True, img_size=[input_channel, imgsz, imgsz] if isinstance(imgsz, int) else [3, *imgsz])
+    if use3D:
+        model.info(verbose=True,
+                   img_size=[input_channel, sub_sample, imgsz, imgsz] if isinstance(imgsz, int) else [input_channel,
+                                                                                                      sub_sample,
+                                                                                                      *imgsz])
+    else:
+        model.info(verbose=True,
+                   img_size=[input_channel, imgsz, imgsz] if isinstance(imgsz, int) else [input_channel, *imgsz])
+
     logger.info('')
     if tb_writer:
         tb_writer.add_graph(model, torch.zeros([1, input_channel, imgsz, imgsz], device=device))
@@ -225,10 +238,13 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None):
     # accumulate loss before optimizing
     accumulate = max(round(nbs / total_batch_size), 1)
     hyp['weight_decay'] *= total_batch_size * accumulate / nbs  # scale weight_decay
-    optimizer = smart_optimizer(model, opt.optimizer,
-                                lr=hyp['lr0'],
-                                decay=hyp['weight_decay'],
-                                momentum=hyp['momentum'])
+    if use3D:
+        optimizer = torch.optim.SGD(model.parameters(), hyp['lr0'], momentum=hyp['momentum'])
+    else:
+        optimizer = smart_optimizer(model, opt.optimizer,
+                                    lr=hyp['lr0'],
+                                    decay=hyp['weight_decay'],
+                                    momentum=hyp['momentum'])
 
     if opt.linear_lr:
         lf = lambda x: (1 - x / (epochs - 1)) * (1.0 - hyp['lrf']) + hyp['lrf']  # linear
@@ -377,8 +393,8 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None):
                                                         epoch=epoch)
                 if tb_writer:
                     tb_writer.add_scalar("Loss/val", tested_loss, epoch)
-                    tb_writer.add_scalar("Top1 Accuracy", top1, epoch)
-                    tb_writer.add_scalar("Top5 Accuracy", top5, epoch)
+                    tb_writer.add_scalar("Accuracy/Top1", top1, epoch)
+                    tb_writer.add_scalar("Accuracy/Top5", top5, epoch)
                     tb_writer.add_figure("Confusion Matrix", fig, epoch)
                 fi = top1
             if best_fitness < fi:
@@ -439,13 +455,15 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None):
             logger.info(f'{prefix} model {best.as_posix()}.')
 
             prefix = colorstr('Testing')
-            if opt.evolve < 1 and test_path != val_path:
+            if opt.evolve < 1 and test_path.as_posix() != val_path.as_posix():
                 logger.info(f'{prefix} model {best.as_posix()}.')
                 with torch_distributed_zero_first(rank):
-                    if test_path != val_path and os.path.exists(test_path):
+                    if test_path.as_posix() != val_path.as_posix() and test_path.exists():
                         if data_loader['test_dataloader'] is None:
-                            test_dataset = LoadSampleAndTarget(root=test_path,
-                                                               augment=True) if test_path != val_path else val_dataset
+                            test_dataset = val_dataset
+                            if test_path.as_posix() != val_path.as_posix():
+                                test_dataset = LoadSampleAndTarget(root=test_path.as_posix(),
+                                                                   augment=True)
                             test_dataloader = create_dataloader_cls(dataset=test_dataset,
                                                                     batch_size=batch_size * 2,
                                                                     shuffle=False if opt.rect else True,
@@ -635,7 +653,8 @@ def train(hyp, opt, tb_writer=None,
     model.total_image = total_image
     model.input_shape = [3, imgsz, imgsz] if isinstance(imgsz, int) else [3, *imgsz]
     model.best_fitness = best_fitness
-    model.info(verbose=True, img_size=[input_channel, imgsz, imgsz] if isinstance(imgsz, int) else [input_channel, *imgsz])
+    model.info(verbose=True,
+               img_size=[input_channel, imgsz, imgsz] if isinstance(imgsz, int) else [input_channel, *imgsz])
     logger.info('')
     if tb_writer:
         tb_writer.add_graph(model, torch.zeros([1, input_channel, imgsz, imgsz], device=device))
@@ -720,11 +739,11 @@ def train(hyp, opt, tb_writer=None,
     # Process 0
     if rank in [-1, 0]:
         if data_loader['val_dataloader'] is None:
-            if train_path == val_path:
+            if train_path.as_posix() == val_path.as_posix():
                 val_dataloader = dataloader
                 logger.info(colorstr('val: ') + "inherit from train")
             else:
-                val_dataloader = create_dataloader(val_path,
+                val_dataloader = create_dataloader(val_path.as_posix(),
                                                    imgsz_test,
                                                    batch_size * 2, gs, opt,
                                                    hyp=hyp,
@@ -740,9 +759,9 @@ def train(hyp, opt, tb_writer=None,
         else:
             val_dataloader = data_loader['val_dataloader']
 
-        if test_path != val_path and os.path.exists(test_path):
+        if test_path.as_posix() != val_path.as_posix() and test_path.exists():
             if data_loader['test_dataloader'] is None:
-                test_dataloader = create_dataloader(test_path,
+                test_dataloader = create_dataloader(test_path.as_posix(),
                                                     imgsz_test,
                                                     batch_size * 2, gs, opt,
                                                     hyp=hyp,
@@ -1072,7 +1091,7 @@ def train(hyp, opt, tb_writer=None,
                                trace=True)[0]
 
             prefix = colorstr('Testing')
-            if opt.evolve < 1 and test_path != val_path:
+            if opt.evolve < 1 and test_path.as_posix() != val_path.as_posix():
                 logger.info(f'{prefix} model {best.as_posix()}.')
                 results_test = test(opt.data,
                                     batch_size=batch_size * 2,

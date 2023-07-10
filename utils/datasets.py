@@ -23,8 +23,8 @@ from termcolor import colored
 from torch.utils.data import DataLoader, Dataset, dataloader, distributed
 from tqdm import tqdm
 
-from utils.general import check_requirements, xyxy2xywh, xywh2xyxy, xywhn2xyxy, xyn2xy, segment2box, segments2boxes, \
-    resample_segments, clean_str, colorstr, TQDM_BAR_FORMAT, gb2mb
+from utils.general import (check_requirements, xyxy2xywh, xywh2xyxy, xywhn2xyxy, xyn2xy, segment2box, segments2boxes,
+                           resample_segments, clean_str, colorstr, TQDM_BAR_FORMAT, gb2mb, IMG_FORMATS, VID_FORMATS)
 from utils.torch_utils import torch_distributed_zero_first
 
 # from pycocotools import mask as maskUtils
@@ -33,8 +33,7 @@ from utils.torch_utils import torch_distributed_zero_first
 
 # Parameters
 HELP_URL = 'https://github.com/ultralytics/yolov5/wiki/Train-Custom-Data'
-IMG_FORMATS = ['bmp', 'jpg', 'jpeg', 'png', 'tif', 'tiff', 'dng', 'webp', 'mpo', 'pfm']  # acceptable image suffixes
-VID_FORMATS = ['asf', 'mov', 'avi', 'mp4', 'mpg', 'mpeg', 'm4v', 'wmv', 'mkv', 'gif']  # acceptable video suffixes
+
 logger = logging.getLogger(__name__)
 RANK = int(os.getenv('RANK', -1))
 TORCH_PIN_MEMORY = False
@@ -429,6 +428,8 @@ def img2label_paths(img_paths):
     return ['txt'.join(x.replace(sa, sb, 1).rsplit(x.split('.')[-1], 1)) for x in img_paths]
 
 
+# start for image classify model
+
 def create_dataloader_cls(dataset, batch_size,
                           rank=-1, world_size=1, workers=8,
                           prefix='', shuffle=True, seed=0):
@@ -447,6 +448,7 @@ def create_dataloader_cls(dataset, batch_size,
     generator.manual_seed(6148914691236517205 + seed + RANK)
     if dataset.pin_memory:
         print(f'{prefix} PyTorch {torch.__version__} with pin_memory is enable, it will use your RAM')
+    dataset.caching()
     the_dataloader = InfiniteDataLoader(dataset,
                                         batch_size=batch_size,
                                         shuffle=shuffle and sampler is None,
@@ -465,41 +467,33 @@ class LoadSampleAndTarget(torchvision.datasets.ImageFolder):
     minimum_size = 100
     std = np.array([0.229, 0.224, 0.225])
     mean = np.array([0.485, 0.456, 0.406])
-    IMG_EXTENSIONS = (".jpg", ".jpeg", ".png", ".ppm", ".bmp", ".pgm", ".tif", ".tiff", ".webp")
 
     def __init__(self, root, augment=True, cache=True, prefix=""):
         super().__init__(root=root)
         self.samples = [list(x) + [Path(x[0]).with_suffix('.npy'), None] for x in self.samples]  # file, index, npy, im
+        self.prefix = prefix
+
         self.pin_memory = False
-        self.imgsz = 224
+        self.imgsz = 224  # it will be changes when init model
         self.augment = augment,
         self.size = 224
         self.scale = (0.08, 1.0)
         self.ratio = (0.75, 1.0 / 0.75)  # 0.75, 1.33
-        self.hflip = 0.5
-        self.vflip = 0.0
+        self.hflip = 0.25
+        self.vflip = 0.25
         self.jitter = 0.4
-        total_caching = self.caching(prefix=prefix)
-        self.calculatingMeanSTD(total_caching, prefix)
+        total_caching = self.find_value_canbe_cache(prefix=prefix)
+        self.total_caching = total_caching
         self.auto_aug = False
-        self.prefix = prefix
         self.transform = self.classify_albumentations()
-        self.cached = 0
-        if cache:
-            pbar = tqdm(range(0, total_caching), total=total_caching)
-            gb = 0
-            for x in pbar:
-                self.samples[x][3] = self.loadImage(x)[0]
-                gb += self.samples[x][3].nbytes
-                pbar.set_description(f"{prefix}Caching... {gb2mb(gb)}")
+        self.cache = cache
 
     def calculatingMeanSTD(self, max_number, prefix):
         """calculating mean, std"""
         task = []
         imgsz = (self.imgsz // 2, self.imgsz // 2)
-        total_img = max(100, max_number)
-        logger.info(f"{prefix}Calculating mean, std for {total_img} images")
-        for x in range(total_img):
+        pbar = tqdm(range(max_number), total=max_number)
+        for x in pbar:
             img = self.loadImage(x)[0]
             img = cv2.resize(img, imgsz, interpolation=cv2.INTER_NEAREST)
             img = img[:, :, ::-1].astype(np.float32)  # BGR to RGB
@@ -508,12 +502,15 @@ class LoadSampleAndTarget(torchvision.datasets.ImageFolder):
             img = torch.unsqueeze(img, dim=0)
             img = torch.permute(img, [0, 3, 1, 2])
             task.append(img.float())
-        task = torch.concatenate(task, dim=0)
-        mean = torch.mean(task, dim=(0, 2, 3))
-        std = torch.std(task, dim=(0, 2, 3))
-        self.mean = mean.cpu().numpy().tolist()
-        self.std = std.cpu().numpy().tolist()
-        logger.info(f"{prefix}Using mean: {self.mean}, std: {self.std} for this dataset.")
+            pbar.set_description(f"{prefix}Collecting data to calculating mean, std...")
+            if x == max_number - 1:
+                pbar.set_description(f"{prefix}Calculating...")
+                task = torch.concatenate(task, dim=0)
+                mean = torch.mean(task, dim=(0, 2, 3))
+                std = torch.std(task, dim=(0, 2, 3))
+                self.mean = mean.cpu().numpy().tolist()
+                self.std = std.cpu().numpy().tolist()
+                pbar.set_description(f"{prefix}Using mean: {self.mean}, std: {self.std} for this dataset.")
 
     def dataset_analysis(self):
         dick = {}
@@ -542,16 +539,15 @@ class LoadSampleAndTarget(torchvision.datasets.ImageFolder):
             else:
                 img = cv2.imread(f)  # BGR
                 h, w, c = img.shape
-                r = min(h, w)
-                pad_shape = self.imgsz * 1.1
-                if r > pad_shape:
-                    ratio = pad_shape / r
-                    img = cv2.resize(img, (int(pad_shape * ratio), int(pad_shape * ratio)))
+                r = max(h, w)
+                if r > self.imgsz:
+                    ratio = self.imgsz / r
+                    img = cv2.resize(img, (int(w * ratio), int(h * ratio)))
         else:
             img = im.copy()
         return img, j
 
-    def caching(self, prefix="", safety_margin=1.5):
+    def find_value_canbe_cache(self, prefix="", safety_margin=1.5):
         total = len(self.samples)
         nbytes = np.zeros((self.imgsz, self.imgsz, 3), dtype=np.uint8).nbytes
         total_nbytes = nbytes * safety_margin
@@ -562,6 +558,18 @@ class LoadSampleAndTarget(torchvision.datasets.ImageFolder):
         logger.info(f"{prefix}Total {mem_2_caching} in {total} images can "
                     f"be cache in memory with total {gb2mb(total_nbytes * mem_2_caching)}")
         return mem_2_caching
+
+    def caching(self):
+        self.calculatingMeanSTD(self.total_caching, self.prefix)
+        if self.cache:
+            pbar = tqdm(range(0, self.total_caching), desc="%33s" % (""), total=self.total_caching)
+            gb = 0
+            for i, x in enumerate(pbar):
+                self.samples[x][3] = self.loadImage(x)[0]
+                gb += self.samples[x][3].nbytes
+                pbar.set_description(f"{self.prefix}Caching... {gb2mb(gb)}")
+                if i == self.total_caching - 1:
+                    pbar.set_description(f"{self.prefix}Cached {gb2mb(gb)}")
 
     def classify_albumentations(self):
         """YOLOv5 classification Albumentations (optional, only used if package is installed)"""
@@ -596,6 +604,117 @@ class LoadSampleAndTarget(torchvision.datasets.ImageFolder):
         logger.info(prefix + ', '.join(f'{x}'.replace('always_apply=False, ', '') for x in T if x.p))
         return A.Compose(T)
 
+
+# end for image classify model
+
+# start for video classify model
+
+class LoadSampleforVideoClassify(Dataset):
+    VID_FORMATS = ['.asf', '.mov', '.avi', '.mp4', '.mpg', '.mpeg', '.m4v', '.wmv', '.mkv',
+                   '.gif']  # acceptable video suffixes
+    mean = (0.485, 0.456, 0.406)
+    std = (0.229, 0.224, 0.225)
+
+    def __init__(self, root, augment=True, cache=True, prefix=""):
+        root = Path(root) if isinstance(root, str) else root
+        all_cls = [x for x in root.iterdir() if x.is_dir()]
+        classes = [x.stem for x in all_cls]
+        cls_name2inx = {}
+        for i, x in enumerate(classes):
+            cls_name2inx[x] = i
+        self.prefix = prefix
+        self.cls_name2inx = cls_name2inx
+        self.classes = classes
+
+        datas = []
+        dict_ = {}
+        for i, dr in enumerate(all_cls):
+            data = [x for x in dr.iterdir() if x.suffix in self.VID_FORMATS]
+            dict_[i] = len(data)
+            datas.extend(data)
+        logger.info(f"{prefix}classes {classes}, total {len(datas)}")
+        self.dict_ = dict_
+        self.samples = datas
+        self.imgsz = 224
+        self.sub_sample = 16
+        self.sampling_rate = 5
+        self.pin_memory = False
+
+    def caching(self):
+        caching_ = 0
+        data_frame = []
+        re_samples = []
+        gb = 0
+
+        pbar = tqdm(self.samples, total=len(self.samples))
+        for x in pbar:
+            parent = x.parent
+            save_dir = parent / f"sample{caching_}.npy"
+            if save_dir.exists():
+                re_samples.extend([xx for xx in parent.iterdir() if xx.suffix == ".npy"])
+                break
+            cap = cv2.VideoCapture(x.as_posix())
+            fps = int(cap.get(cv2.CAP_PROP_FPS))
+            total_fps = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            for i in range(total_fps):
+                success, frame = cap.read()
+                parent = x.parent
+                save_dir = parent / f"sample{caching_}.npy"
+                if save_dir.exists():
+                    re_samples.append(save_dir)
+                    caching_ += 1
+                    cap.release()
+                    pbar.set_description(f"{self.prefix} reload from disk {len(re_samples)}")
+                    break
+                if not success:
+                    cap.release()
+                    break
+                if i % self.sampling_rate:
+                    h, w, c = frame.shape
+                    frame = cv2.resize(frame, (self.imgsz, self.imgsz))
+                    frame = frame[:, :, ::-1]
+                    frame = np.expand_dims(frame, axis=0)
+                    frame = np.transpose(frame, (3, 0, 1, 2))  # 0HWC -> C0HW
+                    data_frame.append(frame)
+                if len(data_frame) == self.sub_sample:
+                    da = np.concatenate(data_frame, axis=1)  # 3, 16, 224, 224
+                    gb += da.nbytes
+                    caching_ += 1
+                    np.save(save_dir, da)
+                    re_samples.append(save_dir)
+                    data_frame = []
+                    pbar.set_description(f"{self.prefix} caching {len(re_samples)} files with {gb2mb(gb)} to disk")
+
+        self.samples = re_samples
+        self.transform = self.transform_()
+
+
+    def transform_(self):
+        from torchvision import transforms
+        transform = transforms.Compose(
+            [transforms.Lambda(lambd=lambda x: torch.from_numpy(x).float()),
+             transforms.Lambda(lambd=lambda x: x / 255),
+             transforms.CenterCrop(224),
+             transforms.Normalize(self.mean, self.std),
+             ]
+        )
+        return transform
+
+    def dataset_analysis(self):
+        return self.dict_, self.classes
+
+    def __len__(self):
+        return len(self.samples)
+
+    def __getitem__(self, index):
+        data = self.samples[index]
+        feed = np.load(data.as_posix())
+        feed = self.transform(feed)
+        label = self.cls_name2inx[data.parent.stem]
+        return feed, torch.tensor(label, dtype=torch.long)
+
+
+# end for video classify model
 
 class LoadImagesAndLabels(Dataset):  # for training/testing
     version = 0.1

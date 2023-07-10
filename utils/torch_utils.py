@@ -344,14 +344,14 @@ def model_info(model, verbose=False, img_size=640):
         size_in_mem = gb2mb(param_size + buffer_size)
         numpy_img = np.zeros((1, *img_size), dtype=np.uint8)
         size_in_mem2 = gb2mb(numpy_img.nbytes)
-        fs = f'{flops} Gflops\n'  # 640x640 GFLOPS
+        fs = f'{flops} GFlops\n'
         fs += f'               Model size (in memory): {size_in_mem} (FP32)\n'
         fs += f'               Anchor Free: {model.is_anchorFree if hasattr(model, "is_anchorFree") else False}\n'
         fs += f'               Classify: {model.is_Classify if hasattr(model, "is_Classify") else False}\n'
         fs += f'               Version: {model.model_version if hasattr(model, "model_version") else "0"}\n'
         fs += f'               Best fitness: {model.best_fitness if hasattr(model, "best_fitness") else "-1.0"}\n'
         fs += f'               Dataset: {str(model.total_image[-1])+" images" if hasattr(model, "total_image") else "[]"}\n'
-        fs += f'               Input shape: {model.input_shape if hasattr(model, "input_shape") else img.shape.tolist()[1:]}\n'
+        fs += f'               Input shape: {model.input_shape if hasattr(model, "input_shape") else [1, *img_size]}\n'
         fs += f'               Image size (in memory): {size_in_mem2} (UInt8)\n'
         fs += f'               Stride: {[int(x) for x in model.stride.tolist()]}\n'
         fs += f'               Number of class: {len(model.names)}\n'
@@ -547,7 +547,7 @@ class TracedModel(nn.Module):
         return out
 
 
-def save_model(ckpt=None, last=None, best=None, best_fitness=None, fi=None, epoch=0, epochs=0, wdir=None, wandb_logger=None, opt=None):
+def save_model(ckpt=None, last=None, best=None, best_fitness=None, fi=None, epoch=0, epochs=0, wdir=None, wandb_logger=None, opt=None, final_epoch=0):
     if ckpt is not None:
         ckpt['model'] = deepcopy(ckpt['model']).eval().cpu()
         torch.save(ckpt, last)

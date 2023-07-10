@@ -135,7 +135,7 @@ if __name__ == '__main__':
                 logger.warning(f'{prefix}Init error, {ex}')
 
         if "Classify" in data:
-            train_cls(hyp, opt, tb_writer=tb_writer, logger=logger)
+            train_cls(hyp, opt, tb_writer=tb_writer, logger=logger, use3D="Classify3D" in data)
         else:
             train(hyp, opt, tb_writer=tb_writer, logger=logger)
     # Evolve hyperparameters (optional)

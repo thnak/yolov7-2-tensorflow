@@ -29,7 +29,10 @@ pd.options.display.max_columns = 10
 # cv2.setNumThreads(0)  # prevent OpenCV from multithreading (incompatible with PyTorch DataLoader)
 # os.environ['NUMEXPR_MAX_THREADS'] = str(os.cpu_count())  # NumExpr max threads
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
-
+IMG_FORMATS = ['bmp', 'jpg', 'jpeg', 'png', 'tif', 'tiff', 'dng', 'webp', 'mpo', 'pfm']  # acceptable image suffixes
+VID_FORMATS = ['asf', 'mov', 'avi', 'mp4', 'mpg', 'mpeg', 'm4v', 'wmv', 'mkv', 'gif']  # acceptable video suffixes
+IMG_EXTENSIONS = (".jpg", ".jpeg", ".png", ".ppm", ".bmp", ".pgm", ".tif", ".tiff", ".webp")
+IMG_FORMATS.extend(IMG_EXTENSIONS)
 FILE = Path(__file__).resolve()
 ROOT = FILE.parents[1]  # YOLOv5 root directory
 TQDM_BAR_FORMAT = '{l_bar}{bar:10}{r_bar}'  # tqdm bar format
@@ -198,26 +201,6 @@ def check_imshow():
     except Exception as e:
         print(f'WARNING: Environment does not support cv2.imshow() or PIL Image.show() image displays\n{e}')
         return False
-
-
-def cls_split(train, val, rate=0.2):
-    train = Path(train)
-    val = Path(val)
-    all_train = [x for x in train.iterdir() if x.iterdir()]
-    for x in all_train:
-        cls_train_name = x.stem
-        cls_val_name = val / cls_train_name
-        cls_val_name.mkdir(exist_ok=True)
-        items_train = [item for item in x.iterdir() if item.is_file()]
-        items_val = random.sample(items_train, k=int(len(items_train) * rate))
-        for item in items_val:
-            name = item.name
-            save_dir = cls_val_name / name
-        with open(item.as_posix(), "rb") as fi:
-            data = fi.read()
-            with open(save_dir.as_posix(), "wb") as fo:
-                fo.write(data)
-
 
 
 def check_dataset(dict_):
@@ -1140,3 +1123,77 @@ def sliding_windows(image, stepSize, windowsSize):
         for y in range(0, image.shape[1], stepSize):
             x_x = [x, x + windowsSize[0]]
             yield x, y, image[x:x + windowsSize[0], y:y + windowsSize[1]]
+
+
+def cls_split(train, rate=[0.8, 0.2, 0.2]):
+    """make validation dataset"""
+    train = Path(train)
+    parent = train.parent
+    val = parent / "val"
+    test = parent / "test"
+    val.mkdir(exist_ok=True)
+    test.mkdir(exist_ok=True)
+    if all([train.exists(), val.exists(), test.exists()]):
+        return train, val, test
+
+    train_rate, val_rate, test_rate = rate
+    assert train_rate >= val_rate <= 1, "train_rate >= val_rate <= 1"
+    assert sum([train_rate, val_rate]) == 1, "train rate and test rate must be equal to 1"
+    all_train = [x for x in train.iterdir() if x.is_dir()]  # get name dirs
+
+    for x in all_train:
+        cls_train_name = x.stem
+        cls_val_name = val / cls_train_name
+        cls_val_name.mkdir(exist_ok=True)
+        cls_test_name = test / cls_train_name
+        cls_test_name.mkdir(exist_ok=True)
+
+        items_train = [item for item in x.iterdir() if item.is_file() and item.suffix.lower() in IMG_FORMATS]
+
+        if test_rate > 0:
+            items_test = random.sample(items_train, k=int(len(items_train) * test_rate))
+            for item in items_test:
+                items_train.remove(item)
+                name = item.name
+                save_dir = cls_test_name / name
+                with open(item.as_posix(), "rb") as fi:
+                    data = fi.read()
+                with open(save_dir.as_posix(), "wb") as fo:
+                    fo.write(data)
+                item.unlink(missing_ok=True)
+
+        items_val = random.sample(items_train, k=int(len(items_train) * val_rate))
+        for item in items_val:
+            save_dir = cls_val_name / item.name
+            with open(item.as_posix(), "rb") as fi:
+                data = fi.read()
+            with open(save_dir.as_posix(), "wb") as fo:
+                fo.write(data)
+    return train, val, test
+
+
+def parse_path(data_dict: dict):
+    """get train, val, test dataset from yaml"""
+    train_path = Path(data_dict['train'])
+    assert train_path.exists(), f"Could not find train dataset"
+    val_path = Path(data_dict.get("val", "None"))
+    test_path = Path(data_dict.get("test", "None"))
+    if all([val_path.exists(), test_path.exists()]):
+        return train_path, val_path, test_path
+    elif not all([val_path.exists(), test_path.exists()]):
+        if val_path.exists() and not test_path.exists():
+            bruhh = [0, 0.2]
+        else:
+            bruhh = [0.2, 0]
+        train_path, val_path, test_path = cls_split(train_path.as_posix(), [0.8, *bruhh])
+        return train_path, val_path, test_path
+
+
+def autopad(k, p=None):  # kernel, padding
+    """Pad to 'same' shape outputs"""
+    if p is None:
+        p = k // 2 if isinstance(k, int) else [x // 2 for x in k]  # auto-pad
+    return p
+
+
+UPSAMPLEMODE = ['nearest', 'linear', 'bilinear', 'bicubic']

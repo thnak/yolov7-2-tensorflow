@@ -10,7 +10,7 @@ from tqdm import tqdm
 from models.common import *
 from models.experimental import *
 from utils.autoanchor import check_anchor_order
-from utils.general import check_file, set_logging, colorstr
+from utils.general import check_file, set_logging, colorstr, make_divisible, UPSAMPLEMODE
 from utils.general import check_requirements
 from utils.torch_utils import time_synchronized, fuse_conv_and_bn, model_info, scale_img, initialize_weights, \
     select_device
@@ -23,24 +23,27 @@ try:
 except ImportError:
     thop = None
 
-UPSAMPLEMODE = ['nearest', 'linear', 'bilinear', 'bicubic']
-
 
 class Classify(nn.Module):
     def __init__(self, nc=80, ch=(), inplace=True):  # detection layer
         super(Classify, self).__init__()
         self.nc = nc  # number of classes
         list_conv = []
-        rate = 1.25
+        def calc(x, nc):
+            return int(((x + nc) // 2) * 1.28)
+
         for x in ch:
-            a = nn.Sequential(nn.Conv2d(x, int(rate * x), 1, 1, bias=False),
-                              nn.BatchNorm2d(int(rate*x)),
+            a = nn.Sequential(nn.Conv2d(x, calc(x, nc),
+                                        kernel_size=1,
+                                        stride=2,
+                                        bias=False),
+                              nn.BatchNorm2d(calc(x, nc)),
                               nn.SiLU(),
                               nn.AdaptiveAvgPool2d(1),
                               nn.Flatten(1))
             list_conv.append(a)
         self.m = nn.ModuleList(list_conv)  # output conv
-        self.linear = nn.Linear(sum([int(rate*x) for x in ch]), nc)
+        self.linear = nn.Linear(sum([calc(x, nc) for x in ch]), nc)
         self.inplace = inplace
 
     def forward(self, x):

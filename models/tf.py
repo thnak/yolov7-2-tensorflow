@@ -1,21 +1,11 @@
-import argparse
-import sys
-from copy import deepcopy
-from pathlib import Path
-import numpy as np
 import tensorflow as tf
-import torch
-import torch.nn as nn
 from tensorflow import keras
 from keras.layers import Layer
-import logging
 import inspect
 from typing import Optional
-from models.common import *
-from models.experimental import MixConv2d, attempt_load
 from models.yolo import *
 from utils.activations import SiLU, Hardswish
-from utils.general import make_divisible, colorstr
+from utils.general import make_divisible, colorstr, autopad, UPSAMPLEMODE
 
 FILE = Path(__file__).resolve()
 ROOT = FILE.parents[1]  # YOLOv5 root directory
