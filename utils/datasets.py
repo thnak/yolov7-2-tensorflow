@@ -465,8 +465,8 @@ class LoadSampleAndTarget(torchvision.datasets.ImageFolder):
     version = 0.1
     image_8bit = True
     minimum_size = 100
-    std = np.array([0.229, 0.224, 0.225])
-    mean = np.array([0.485, 0.456, 0.406])
+    std = np.array([1., 1., 1.])
+    mean = np.array([0., 0., 0.])
 
     def __init__(self, root, augment=True, cache=True, prefix=""):
         super().__init__(root=root)
@@ -612,8 +612,8 @@ class LoadSampleAndTarget(torchvision.datasets.ImageFolder):
 class LoadSampleforVideoClassify(Dataset):
     VID_FORMATS = ['.asf', '.mov', '.avi', '.mp4', '.mpg', '.mpeg', '.m4v', '.wmv', '.mkv',
                    '.gif']  # acceptable video suffixes
-    mean = (0.485, 0.456, 0.406)
-    std = (0.229, 0.224, 0.225)
+    mean = (0., 0., 0.)
+    std = (1., 1., 1.)
 
     def __init__(self, root, augment=True, cache=True, prefix=""):
         root = Path(root) if isinstance(root, str) else root
