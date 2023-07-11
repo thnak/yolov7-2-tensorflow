@@ -29,8 +29,10 @@ pd.options.display.max_columns = 10
 # cv2.setNumThreads(0)  # prevent OpenCV from multithreading (incompatible with PyTorch DataLoader)
 # os.environ['NUMEXPR_MAX_THREADS'] = str(os.cpu_count())  # NumExpr max threads
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
-IMG_FORMATS = ['bmp', 'jpg', 'jpeg', 'png', 'tif', 'tiff', 'dng', 'webp', 'mpo', 'pfm']  # acceptable image suffixes
-VID_FORMATS = ['asf', 'mov', 'avi', 'mp4', 'mpg', 'mpeg', 'm4v', 'wmv', 'mkv', 'gif']  # acceptable video suffixes
+IMG_FORMATS = ['.bmp', '.jpg', '.jpeg', '.png', '.tif', '.tiff', '.dng', '.webp', '.mpo',
+               '.pfm']  # acceptable image suffixes
+VID_FORMATS = ['.asf', '.mov', '.avi', '.mp4', '.mpg', '.mpeg', '.m4v', '.wmv', '.mkv',
+               '.gif']  # acceptable video suffixes
 IMG_EXTENSIONS = (".jpg", ".jpeg", ".png", ".ppm", ".bmp", ".pgm", ".tif", ".tiff", ".webp")
 IMG_FORMATS.extend(IMG_EXTENSIONS)
 FILE = Path(__file__).resolve()
@@ -1133,14 +1135,21 @@ def cls_split(train, rate=[0.8, 0.2, 0.2]):
     test = parent / "test"
     val.mkdir(exist_ok=True)
     test.mkdir(exist_ok=True)
-    if all([train.exists(), val.exists(), test.exists()]):
-        return train, val, test
+    len_train = [x for x in train.iterdir() if x.is_dir()]
+    len_val = [x for x in val.iterdir() if x.is_dir()]
+    len_test = [x for x in test.iterdir() if x.is_dir()]
+    if all([len_train, len_val, len_test]):
+        len_sub_train = [i for i in (x for x in len_train) if i.is_file()]
+        len_sub_val = [i for i in (x for x in len_val) if i.is_file()]
+        len_sub_test = [i for i in (x for x in len_test) if i.is_file()]
+        if all([len(len_sub_train), len(len_sub_val), len(len_sub_test)]):
+            return train, val, test
 
     train_rate, val_rate, test_rate = rate
     assert train_rate >= val_rate <= 1, "train_rate >= val_rate <= 1"
     assert sum([train_rate, val_rate]) == 1, "train rate and test rate must be equal to 1"
     all_train = [x for x in train.iterdir() if x.is_dir()]  # get name dirs
-
+    print("spliting...........")
     for x in all_train:
         cls_train_name = x.stem
         cls_val_name = val / cls_train_name
@@ -1148,7 +1157,8 @@ def cls_split(train, rate=[0.8, 0.2, 0.2]):
         cls_test_name = test / cls_train_name
         cls_test_name.mkdir(exist_ok=True)
 
-        items_train = [item for item in x.iterdir() if item.is_file() and item.suffix.lower() in IMG_FORMATS]
+        items_train = [item for item in x.iterdir() if
+                       item.is_file() and item.suffix.lower() in IMG_FORMATS + VID_FORMATS]
 
         if test_rate > 0:
             items_test = random.sample(items_train, k=int(len(items_train) * test_rate))
@@ -1176,15 +1186,26 @@ def parse_path(data_dict: dict):
     """get train, val, test dataset from yaml"""
     train_path = Path(data_dict['train'])
     assert train_path.exists(), f"Could not find train dataset"
-    val_path = Path(data_dict.get("val", "None"))
-    test_path = Path(data_dict.get("test", "None"))
-    if all([val_path.exists(), test_path.exists()]):
+    val_path = Path(data_dict.get("val", "val"))
+    test_path = Path(data_dict.get("test", "test"))
+    val_path.mkdir(exist_ok=True)
+    test_path.mkdir(exist_ok=True)
+    len_val = len([x for x in val_path.iterdir() if x.is_dir()])
+    len_test = len([x for x in test_path.iterdir() if x.is_dir()])
+
+    if all([len_val > 0, len_test > 0]):
+        print(1)
         return train_path, val_path, test_path
-    elif not all([val_path.exists(), test_path.exists()]):
-        if val_path.exists() and not test_path.exists():
+    elif not all([len_val > 0, len_test > 0]):
+        print(2)
+        train_path, val_path, test_path = cls_split(train_path.as_posix(), [0.8, 0.2, 0.2])
+        return train_path, val_path, test_path
+    else:
+        if len_val > 0 and len_test == 0:
             bruhh = [0, 0.2]
         else:
             bruhh = [0.2, 0]
+        print(3)
         train_path, val_path, test_path = cls_split(train_path.as_posix(), [0.8, *bruhh])
         return train_path, val_path, test_path
 

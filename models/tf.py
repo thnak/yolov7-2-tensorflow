@@ -54,6 +54,7 @@ class TFRepConv(Layer):
         assert k == 3
         assert autopad(k, p) == 1
         self.act = activations(w.act) if act else tf.identity
+        deploy = hasattr(w, "rbr_reparam")
         if deploy:
             self.rbr_reparam = TFConv2d(c1, c2, k, s, autopad(k, p), bias=True, w=w.rbr_reparam)
         else:
@@ -640,7 +641,7 @@ class AgnosticNMS(Layer):
     def __init__(self):
         super(AgnosticNMS, self).__init__()
 
-    def call(self, inputs, topk_all, iou_thres, conf_thres):
+    def __call__(self, inputs, topk_all, iou_thres, conf_thres):
         # wrap map_fn to avoid TypeSpec related error https://stackoverflow.com/a/65809989/3036450
         return tf.map_fn(lambda x: self._nms(x, topk_all, iou_thres, conf_thres),
                          inputs,

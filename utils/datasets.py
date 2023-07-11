@@ -193,8 +193,8 @@ class LoadImages:
             else:
                 raise FileNotFoundError(f'{p} does not exist')
 
-        images = [x for x in files if x.split('.')[-1].lower() in IMG_FORMATS]
-        videos = [x for x in files if x.split('.')[-1].lower() in VID_FORMATS]
+        images = [x for x in files if Path(x).suffix in IMG_FORMATS]
+        videos = [x for x in files if Path(x).suffix in VID_FORMATS]
         ni, nv = len(images), len(videos)
 
         self.img_size = img_size
@@ -684,7 +684,7 @@ class LoadSampleforVideoClassify(Dataset):
                     np.save(save_dir, da)
                     re_samples.append(save_dir)
                     data_frame = []
-                    pbar.set_description(f"{self.prefix} caching {len(re_samples)} files with {gb2mb(gb)} to disk")
+                    pbar.set_description(f"{self.prefix} caching {len(re_samples)} files with {gb2mb(gb)} to disk, {da.dtype}")
 
         self.samples = re_samples
         self.transform = self.transform_()
@@ -753,7 +753,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                         # f += [p.parent / x.lstrip(os.sep) for x in t]  # local to global path (pathlib)
                 else:
                     raise Exception(f'{prefix}{p} does not exist')
-            self.img_files = sorted([x.replace('/', os.sep) for x in f if x.split('.')[-1].lower() in IMG_FORMATS])
+            self.img_files = sorted([x.replace('/', os.sep) for x in f if Path(x).suffix in IMG_FORMATS])
             assert self.img_files, f'{prefix}No images found'
         except Exception as e:
             raise Exception(f'{prefix}Error loading data from {path}: {e}\nSee {HELP_URL}')
@@ -904,7 +904,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                 shape = exif_size(im)  # image size
                 segments = []  # instance segments
                 assert shape[0] * shape[1] > self.minimum_size, f'image size {shape} < {self.minimum_size} pixels'
-                assert im.format.lower() in IMG_FORMATS, f'invalid image format {im.format} the format must be {IMG_FORMATS}'
+                assert Path(im_file).suffix in IMG_FORMATS, f'invalid image format {im.format} the format must be {IMG_FORMATS}'
                 del im
                 # verify labels
                 if os.path.isfile(lb_file):
@@ -1644,7 +1644,7 @@ def extract_boxes(path='../coco/'):
     files = list(path.rglob('*.*'))
     n = len(files)  # number of files
     for im_file in tqdm(files, total=n):
-        if im_file.suffix[1:] in IMG_FORMATS:
+        if im_file.suffix in IMG_FORMATS:
             # image
             im = cv2.imread(str(im_file))[..., ::-1]  # BGR to RGB
             h, w = im.shape[:2]
@@ -1680,7 +1680,7 @@ def autosplit(path='../coco', weights=(0.9, 0.1, 0.0), annotated_only=False):
         annotated_only:  Only use images with an annotated txt file
     """
     path = Path(path)  # images dir
-    files = sorted(x for x in path.rglob('*.*') if x.suffix[1:].lower() in IMG_FORMATS)  # image files only
+    files = sorted(x for x in path.rglob('*.*') if Path(x).suffix in IMG_FORMATS)  # image files only
     n = len(files)  # number of files
     random.seed(0)  # for reproducibility
     indices = random.choices([0, 1, 2], weights=weights, k=n)  # assign each image to a split

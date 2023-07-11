@@ -55,6 +55,8 @@ if __name__ == '__main__':
     parser.add_argument('--author', type=str, default='Nguyễn Văn Thạnh', help="author's name")
     parser.add_argument('--data', type=str, default='mydataset.yaml', help='data.yaml path')
     parser.add_argument('--trace', action='store_true', help='use torch.jit.trace')
+    parser.add_argument('--keras', action='store_true', help='use torch.jit.trace')
+
     opt = parser.parse_args()
     opt.dynamic = opt.dynamic and not opt.end2end
     opt.dynamic = False if opt.dynamic_batch else opt.dynamic
@@ -458,7 +460,7 @@ if __name__ == '__main__':
                                                       topk_all=opt.topk_all,
                                                       iou_thres=opt.iou_thres,
                                                       conf_thres=opt.conf_thres,
-                                                      keras=False, prefix=prefix)
+                                                      keras=opt.keras, prefix=prefix)
             logging.info(f'{prefix} export success✅, saved as {outputpath}')
             filenames.append(outputpath)
         if graphDef:

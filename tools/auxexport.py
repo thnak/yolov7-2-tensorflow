@@ -104,7 +104,7 @@ def export_saved_model(model,
     tf_model = TFModel(cfg=model.yaml, model=model.cpu(), nc=len(model.names), imgsz=imgsz)
     im = tf.zeros((batch_size, *imgsz, ch))  # BHWC order for TensorFlow
     _ = tf_model(im, tf_nms, agnostic_nms, topk_per_class, topk_all, iou_thres, conf_thres)
-    inputs = tf.keras.Input(shape=(*imgsz, ch), name=f"image", batch_size=None if dynamic else batch_size)
+    inputs = tf.keras.Input(shape=(*imgsz, ch), name="image", batch_size=None if dynamic else batch_size)
     outputs = tf_model(inputs, tf_nms, agnostic_nms, topk_per_class, topk_all, iou_thres, conf_thres)
     keras_model = tf.keras.Model(inputs=inputs, outputs=outputs)
     keras_model.trainable = False
@@ -133,11 +133,11 @@ def export_tflite(keras_model, im, file, int8, data=None, nms=False, agnostic_nm
 
     print(f'\n{prefix} starting export with tensorflow {tf.__version__}...')
     batch_size, ch, *imgsz = list(im.shape)  # BCHW
-    f = str(file).replace('.pt', '-fp32.tflite')
+    f = str(file).replace('.pt', '-fp16.tflite')
 
     converter = tf.lite.TFLiteConverter.from_keras_model(keras_model)
     converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS]
-    converter.target_spec.supported_types = [tf.float32]
+    converter.target_spec.supported_types = [tf.float16]
     converter.optimizations = [tf.lite.Optimize.DEFAULT]
     if int8:
         from utils.datasets import LoadImages
@@ -175,19 +175,32 @@ def add_tflite_metadata(file, metadata, num_outputs):
         from tflite_support import metadata as _metadata
         from tflite_support import metadata_schema_py_generated as _metadata_fb
 
-        tmp_file = Path(file.replace('.tflite', '.txt'))
+        tmp_file = Path('/tmp/meta.txt')
 
         with open(tmp_file, 'w') as meta_f:
             meta_f.write(str(metadata))
 
         model_meta = _metadata_fb.ModelMetadataT()
+        input_meta = _metadata_fb.TensorMetadataT()
+        output_meta = _metadata_fb.TensorMetadataT()
+        output_meta.name = "output"
+        output_meta.description = "output [1,6300,85] = [xywh, conf, class0, class1, ...]"
+        input_meta.name = "image"
+        input_meta.description = "Image to predict"
+        input_meta.content = _metadata_fb.ContentT()
+        input_meta.content.contentProperties = _metadata_fb.ImagePropertiesT()
+        input_meta.content.contentProperties.colorSpace = _metadata_fb.ColorSpaceType.RGB
         label_file = _metadata_fb.AssociatedFileT()
         label_file.name = tmp_file.name
         model_meta.associatedFiles = [label_file]
+        model_meta.name = "YOLOv7"
+        model_meta.description = "YOLOv7: Trainable bag-of-freebies sets new state-of-the-art for real-time object detectors\n" \
+                                 "and this model was exported from https://github.com/thnak/yolov7-2-tensorflow"
+        model_meta.license = "https://github.com/WongKinYiu/yolov7/blob/main/LICENSE.md"
 
         subgraph = _metadata_fb.SubGraphMetadataT()
-        subgraph.inputTensorMetadata = [_metadata_fb.TensorMetadataT()]
-        subgraph.outputTensorMetadata = [_metadata_fb.TensorMetadataT()] * num_outputs
+        subgraph.inputTensorMetadata = [input_meta]
+        subgraph.outputTensorMetadata = [output_meta] * num_outputs
         model_meta.subgraphMetadata = [subgraph]
 
         b = flatbuffers.Builder(0)
@@ -196,7 +209,7 @@ def add_tflite_metadata(file, metadata, num_outputs):
 
         populator = _metadata.MetadataPopulator.with_model_file(file)
         populator.load_metadata_buffer(metadata_buf)
-        populator.load_associated_files([str(tmp_file)])
+        populator.load_associated_files([tmp_file.as_posix()])
         populator.populate()
         tmp_file.unlink()
 
