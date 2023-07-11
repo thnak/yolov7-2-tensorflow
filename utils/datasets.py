@@ -22,7 +22,7 @@ from PIL import Image, ExifTags
 from termcolor import colored
 from torch.utils.data import DataLoader, Dataset, dataloader, distributed
 from tqdm import tqdm
-
+from torchvision import transforms
 from utils.general import (check_requirements, xyxy2xywh, xywh2xyxy, xywhn2xyxy, xyn2xy, segment2box, segments2boxes,
                            resample_segments, clean_str, colorstr, TQDM_BAR_FORMAT, gb2mb, IMG_FORMATS, VID_FORMATS)
 from utils.torch_utils import torch_distributed_zero_first
@@ -639,8 +639,11 @@ class LoadSampleforVideoClassify(Dataset):
         self.sub_sample = 16
         self.sampling_rate = 5
         self.pin_memory = False
+        self.croper = None
 
     def caching(self):
+        croper = transforms.Compose([transforms.Lambda(lambda x: torch.from_numpy(x)),
+                                     transforms.Resize(size=224), ])
         caching_ = 0
         data_frame = []
         re_samples = []
@@ -652,7 +655,7 @@ class LoadSampleforVideoClassify(Dataset):
             save_dir = parent / f"sample{caching_}.npy"
             if save_dir.exists():
                 re_samples.extend([xx for xx in parent.iterdir() if xx.suffix == ".npy"])
-                break
+                continue
             cap = cv2.VideoCapture(x.as_posix())
             fps = int(cap.get(cv2.CAP_PROP_FPS))
             total_fps = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -670,14 +673,12 @@ class LoadSampleforVideoClassify(Dataset):
                     cap.release()
                     break
                 if i % self.sampling_rate:
-                    h, w, c = frame.shape
-                    frame = cv2.resize(frame, (self.imgsz, self.imgsz))
-                    frame = frame[:, :, ::-1]
-                    frame = np.expand_dims(frame, axis=0)
-                    frame = np.transpose(frame, (3, 0, 1, 2))  # 0HWC -> C0HW
+                    frame = frame[:, :, ::-1].transpose([2, 0, 1])
+                    frame = croper(frame.copy()).cpu().numpy()  # -> center crop -> CHW
+                    frame = np.expand_dims(frame, axis=0) # -> NCHW
                     data_frame.append(frame)
                 if len(data_frame) == self.sub_sample:
-                    da = np.concatenate(data_frame, axis=1)  # 3, 16, 224, 224
+                    da = np.concatenate(data_frame, axis=0)  # 16, 3, 224, 224
                     gb += da.nbytes
                     caching_ += 1
                     np.save(save_dir, da)
@@ -688,15 +689,16 @@ class LoadSampleforVideoClassify(Dataset):
         self.samples = re_samples
         self.transform = self.transform_()
 
-
     def transform_(self):
-        from torchvision import transforms
         transform = transforms.Compose(
-            [transforms.Lambda(lambd=lambda x: torch.from_numpy(x).float()),
-             transforms.Lambda(lambd=lambda x: x / 255),
-             transforms.CenterCrop(224),
-             transforms.Normalize(self.mean, self.std),
-             ]
+            [
+                transforms.Lambda(lambd=lambda x: torch.from_numpy(x).float()),
+                transforms.Lambda(lambd=lambda x: x / 255),
+                transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
+                transforms.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1),
+                transforms.RandomAffine(degrees=(30, 70), translate=(0.1, 0.3), scale=(0.5, 0.75)),
+                transforms.Lambda(lambd=lambda x: torch.permute(x, (1, 0, 2, 3))),
+            ]
         )
         return transform
 

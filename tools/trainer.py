@@ -108,10 +108,10 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None, use3D=Fal
 
         if tb_writer:
             data_, names = dataset.dataset_analysis()
-            tb_writer.add_figure("Train dataset", plot_dataset(data_, names, "Total samples per class in Train"))
+            tb_writer.add_figure("Datasets/train", plot_dataset(data_, names, "Total samples per class in Train"))
             if val_path.as_posix() != train_path.as_posix():
                 data_, names = val_dataset.dataset_analysis()
-                tb_writer.add_figure("Val dataset", plot_dataset(data_, names, "Total samples per class in Val"))
+                tb_writer.add_figure("Datasets/val", plot_dataset(data_, names, "Total samples per class in Val"))
             del data_, names
 
     total_image.append(len(dataset))
@@ -210,7 +210,11 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None, use3D=Fal
 
     logger.info('')
     if tb_writer:
-        tb_writer.add_graph(model, torch.zeros([1, input_channel, imgsz, imgsz], device=device))
+        if use3D:
+            tb_writer.add_graph(model, torch.zeros([1,input_channel, sub_sample, imgsz, imgsz], device=device))
+        else:
+            tb_writer.add_graph(model, torch.zeros([1, input_channel, imgsz, imgsz], device=device))
+
 
     with torch_distributed_zero_first(rank):
         if data_loader['dataloader'] is None:
