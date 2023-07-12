@@ -122,7 +122,7 @@ def parse_model(d, ch, nc=80):  # model_dict, input_channels(3)
     layers, save, c2 = [], [], ch[-1]  # layers, savelist, ch out
 
     # from, number, module, args
-    for i, (f, n, m, args) in enumerate(d['backbone'] + d['head']):
+    for i, (f, n, m, args) in enumerate(d.get('backbone', []) + d.get('head', [])):
         m = eval(m) if isinstance(m, str) else m  # eval strings
         for j, a in enumerate(args):
             try:
@@ -323,7 +323,7 @@ if __name__ == '__main__':
     model.eval()
     img = torch.rand(1, 3, 4, 224, 224).to(device)
     macs, x = thop.profile(model, inputs=(img,))
-    print(f"MACs: {macs/1E9:,}")
+    print(f"MACs: {macs/1E9:,} GMACs")
     # y = model(img, profile=True)
     # print(y.shape)
 

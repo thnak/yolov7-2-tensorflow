@@ -120,21 +120,23 @@ def smart_optimizer(model, name='Adam', lr=0.001, momentum=0.9, decay=1e-5):
             if hasattr(v.rbr_dense, 'vector'):
                 pg0.append(v.rbr_dense.vector)
 
+    is_3D = "Classify3D" in str(model.yaml)
+
     if name == 'Adam':
-        optimizer = torch.optim.Adam(pg0, lr=lr, betas=(momentum, 0.999))  # adjust beta1 to momentum
+        optimizer = torch.optim.Adam(pg0 if not is_3D else model.parameters(), lr=lr, betas=(momentum, 0.999))  # adjust beta1 to momentum
     elif name == 'AdamW':
-        optimizer = torch.optim.AdamW(pg0, lr=lr, betas=(momentum, 0.999), weight_decay=0.0)
+        optimizer = torch.optim.AdamW(pg0 if not is_3D else model.parameters(), lr=lr, betas=(momentum, 0.999), weight_decay=0.0)
     elif name == 'RMSProp':
-        optimizer = torch.optim.RMSprop(pg0, lr=lr, momentum=momentum)
+        optimizer = torch.optim.RMSprop(pg0 if not is_3D else model.parameters(), lr=lr, momentum=momentum)
     elif name == 'SGD':
-        optimizer = torch.optim.SGD(pg0, lr=lr, momentum=momentum, nesterov=True)
+        optimizer = torch.optim.SGD(pg0 if not is_3D else model.parameters(), lr=lr, momentum=momentum, nesterov=True)
     elif name == 'Lion':
-        optimizer = Lion(pg0, lr=lr, betas=(momentum, 0.999))
+        optimizer = Lion(pg0 if not is_3D else model.parameters(), lr=lr, betas=(momentum, 0.999))
     else:
         raise NotImplementedError(f'Optimizer {name} not implemented.')
-
-    optimizer.add_param_group({'params': pg1, 'weight_decay': decay})
-    optimizer.add_param_group({'params': pg2})  # add pg2 (biases)
+    if not is_3D:
+        optimizer.add_param_group({'params': pg1, 'weight_decay': decay})
+        optimizer.add_param_group({'params': pg2})  # add pg2 (biases)
     logger.info(f"{colorstr('optimizer:')} {type(optimizer).__name__}(lr={lr}) with parameter groups "
                 f"{len(g[1])} weight(decay=0.0), {len(g[0])} weight(decay={decay}), {len(g[2])} bias")
     return optimizer

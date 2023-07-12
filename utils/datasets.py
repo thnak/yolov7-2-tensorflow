@@ -449,7 +449,7 @@ def create_dataloader_cls(dataset, batch_size,
     generator.manual_seed(6148914691236517205 + seed + RANK)
     if dataset.pin_memory:
         print(f'{prefix} PyTorch {torch.__version__} with pin_memory is enable, it will use your RAM')
-    dataset.caching()
+    dataset.prepare()
     the_dataloader = InfiniteDataLoader(dataset,
                                         batch_size=batch_size,
                                         shuffle=shuffle and sampler is None,
@@ -486,11 +486,11 @@ class LoadSampleAndTarget(torchvision.datasets.ImageFolder):
         total_caching = self.find_value_canbe_cache(prefix=prefix)
         self.total_caching = total_caching
         self.auto_aug = False
-        self.transform = self.classify_albumentations()
+        self.transform = None
         self.cache = cache
 
     def calculatingMeanSTD(self, max_number, prefix):
-        """calculating mean, std"""
+        """calculate mean, std"""
         task = []
         imgsz = (self.imgsz // 2, self.imgsz // 2)
         pbar = tqdm(range(max_number), total=max_number)
@@ -501,9 +501,9 @@ class LoadSampleAndTarget(torchvision.datasets.ImageFolder):
             img /= 255.
             img = torch.from_numpy(img)
             img = torch.unsqueeze(img, dim=0)
-            img = torch.permute(img, [0, 3, 1, 2])
+            img = torch.permute(img, [0, 3, 1, 2])  # -> BCHW
             task.append(img.float())
-            pbar.set_description(f"{prefix}Collecting data to calculating mean, std...")
+            pbar.set_description(f"{prefix}Collecting data to calculate mean, std...")
             if x == max_number - 1:
                 pbar.set_description(f"{prefix}Calculating...")
                 task = torch.concatenate(task, dim=0)
@@ -560,7 +560,7 @@ class LoadSampleAndTarget(torchvision.datasets.ImageFolder):
                     f"be cache in memory with total {gb2mb(total_nbytes * mem_2_caching)}")
         return mem_2_caching
 
-    def caching(self):
+    def prepare(self):
         self.calculatingMeanSTD(self.total_caching, self.prefix)
         if self.cache:
             pbar = tqdm(range(0, self.total_caching), desc="%33s" % (""), total=self.total_caching)
@@ -571,9 +571,9 @@ class LoadSampleAndTarget(torchvision.datasets.ImageFolder):
                 pbar.set_description(f"{self.prefix}Caching... {gb2mb(gb)}")
                 if i == self.total_caching - 1:
                     pbar.set_description(f"{self.prefix}Cached {gb2mb(gb)}")
+        self.transform = self.classify_albumentations()
 
     def classify_albumentations(self):
-        """YOLOv5 classification Albumentations (optional, only used if package is installed)"""
         prefix = self.prefix
         augment = self.augment
         size = self.imgsz
@@ -615,6 +615,7 @@ class LoadSampleforVideoClassify(Dataset):
                    '.gif']  # acceptable video suffixes
     mean = (0., 0., 0.)
     std = (1., 1., 1.)
+    use_BGR = False
 
     def __init__(self, root, augment=True, cache=True, prefix=""):
         self.transfom = None
@@ -632,25 +633,64 @@ class LoadSampleforVideoClassify(Dataset):
 
         self.imgsz = 224
         self.clip_len = 16
-        self.sampling_rate = 5
+        self.step = 5
         self.pin_memory = False
         self.croper = None
-        torchvision.set_video_backend("video_reader")
+        try:
+            torchvision.set_video_backend("cuda" if torch.cuda.is_available() else "video_reader")
+        except:
+            torchvision.set_video_backend("video_reader")
 
-    def caching(self):
+    def prepare(self):
+        """prepare dataset"""
+        assert self.clip_len % self.step == 0, f"divide of clip_len and step must be equal " \
+                                               f"by 0, got clip_len: {self.clip_len} and step: {self.step}"
+        self.calculateMeanStd()
+
+        self.clip_len = self.clip_len * self.step
         self.transfom = transforms.Compose([
             transforms.Resize((self.imgsz, self.imgsz)),
             transforms.ConvertImageDtype(torch.float32),
             transforms.Lambda(lambd=lambda x: x / 255.),
             transforms.Normalize(mean=self.mean, std=self.std),
         ])
-        logger.info(f"{self.prefix} total {len(self.samples)} sample with {len(self.classes)} classes")
+        logger.info(
+            f"{self.prefix} total {len(self.samples)} sample with {len(self.classes)} classes, "
+            f"frame length: {self.clip_len}, step frame: {self.step}")
 
     def dataset_analysis(self):
         dict_ = {target: 0 for sample, target in self.samples}
         for x, i in self.samples:
             dict_[i] += 1
         return dict_, self.classes
+
+    def calculateMeanStd(self):
+        means = []
+        stds = []
+        pbar = tqdm(self.samples, total=len(self.samples))
+        for i, (path, _) in enumerate(pbar):
+            vid = torchvision.io.VideoReader(path, "video")
+            metadata = vid.get_metadata()
+            video_frames = []  # video frame buffer
+            # Seek and return frames
+            max_seek = metadata["video"]['duration'][0] - (self.clip_len / metadata["video"]['fps'][0])
+            start = random.uniform(0., max_seek)
+            for frame in itertools.islice(vid.seek(start), self.clip_len):
+                video_frames.append(frame['data'])
+            video = torch.stack(video_frames, 0)
+            video = video.float()
+            video /= 255.
+            mean = torch.mean(video, dim=(0, 2, 3))
+            std = torch.std(video, dim=(0, 2, 3))
+            means.append(torch.unsqueeze(mean, 0))
+            stds.append(torch.unsqueeze(std, 0))
+            pbar.set_description(f"{self.prefix}Collecting data to calculate mean, std...")
+            if i == len(self.samples) - 1:
+                pbar.set_description(f"{self.prefix}Calculating...")
+                self.mean = torch.mean(torch.concatenate(means, dim=0), dim=0).cpu().numpy().tolist()
+                self.std = torch.std(torch.concatenate(stds, dim=0), dim=0).cpu().numpy().tolist()
+                pbar.set_description(f"{self.prefix}Using mean: {self.mean}, std: {self.std} for this dataset.")
+                pbar.close()
 
     def __len__(self):
         return len(self.samples)
@@ -663,11 +703,13 @@ class LoadSampleforVideoClassify(Dataset):
         # Seek and return frames
         max_seek = metadata["video"]['duration'][0] - (self.clip_len / metadata["video"]['fps'][0])
         start = random.uniform(0., max_seek)
-        for frame in itertools.islice(vid.seek(start), self.clip_len):
-            video_frames.append(self.transfom(frame['data']))
+        for i, frame in enumerate(itertools.islice(vid.seek(start), self.clip_len)):
+            if i % self.step == 0:
+                video_frames.append(self.transfom(frame['data']))
         video = torch.stack(video_frames, 0)
+        # video = video[::self.step, ...]  # time spliting
         video = self.transfom(video)
-        video = torch.permute(video, dims=[1, 0, 2, 3])  # -> CNHW
+        video = torch.permute(video, dims=[1, 0, 2, 3])  # NCHW -> CNHW
         return video, target
 
 

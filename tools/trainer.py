@@ -19,10 +19,9 @@ from torch.optim.lr_scheduler import LambdaLR
 from tqdm import tqdm
 
 from models.yolo import Model
-from models.commond3D import Model3D
 from tools.tester import test, cls_test
 from utils.autoanchor import check_anchors
-from utils.datasets import create_dataloader, create_dataloader_cls, LoadSampleAndTarget, LoadSampleforVideoClassify
+from utils.datasets import create_dataloader, create_dataloader_cls
 
 from utils.general import (colorstr, init_seeds, check_dataset, check_img_size, one_cycle, labels_to_class_weights,
                            labels_to_image_weights, TQDM_BAR_FORMAT, strip_optimizer, parse_path)
@@ -42,8 +41,10 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None, use3D=Fal
     save_dir, epochs, batch_size, total_batch_size, weights, rank, freeze = \
         Path(opt.save_dir), opt.epochs, opt.batch_size, opt.total_batch_size, opt.weights, opt.global_rank, opt.freeze
     if use3D:
-        Model = Model3D
-        LoadSampleAndTarget = LoadSampleforVideoClassify
+        from models.commond3D import Model3D as Model
+        from utils.datasets import LoadSampleforVideoClassify as LoadSampleAndTarget
+    else:
+        from utils.datasets import LoadSampleAndTarget
 
     wdir = save_dir / 'weights'
     wdir.mkdir(parents=True, exist_ok=True)  # make dir
@@ -60,8 +61,9 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None, use3D=Fal
     with open(save_dir / 'opt.yaml', 'w') as f:
         yaml.dump(vars(opt), f, sort_keys=False)
     with open(opt.cfg, "r") as f:
-        sub_sample = yaml.load(f, yaml.SafeLoader)
-        sub_sample = sub_sample.get("sub_sample", 16)
+        model3d_config = yaml.load(f, yaml.SafeLoader)
+        clip_len = model3d_config.get("sub_sample", 16)
+        step = model3d_config.get("step", 3)
     device, git_status = select_device(opt.device, batch_size=opt.batch_size)
     opt.git_status = git_status
     logger.info(colorstr('hyperparameters: ') +
@@ -184,11 +186,14 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None, use3D=Fal
         try:
             imgsz, imgsz_test = [check_img_size(x, gs) for x in opt.imgsz]
             if use3D:
-                model.input_shape = [input_channel, sub_sample, imgsz, imgsz] if isinstance(imgsz, int) else [
-                    input_channel, sub_sample, *imgsz]
+                dataset.step = val_dataset.step = step
+                dataset.clip_len = val_dataset.clip_len = clip_len
+                model.input_shape = [input_channel, clip_len, imgsz, imgsz] if isinstance(imgsz, int) else [
+                    input_channel, clip_len, *imgsz]
             else:
                 model.input_shape = [input_channel, imgsz, imgsz] if isinstance(imgsz, int) else [input_channel, *imgsz]
             y = model(torch.zeros([1, *model.input_shape], device=device))
+            del y
         except:
             gs += gs
             model.stride = torch.tensor([gs], device=device)
@@ -201,9 +206,9 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None, use3D=Fal
     model.best_fitness = best_fitness
     if use3D:
         model.info(verbose=True,
-                   img_size=[input_channel, sub_sample, imgsz, imgsz] if isinstance(imgsz, int) else [input_channel,
-                                                                                                      sub_sample,
-                                                                                                      *imgsz])
+                   img_size=[input_channel, clip_len, imgsz, imgsz] if isinstance(imgsz, int) else [input_channel,
+                                                                                                    clip_len,
+                                                                                                    *imgsz])
     else:
         model.info(verbose=True,
                    img_size=[input_channel, imgsz, imgsz] if isinstance(imgsz, int) else [input_channel, *imgsz])
@@ -211,10 +216,9 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None, use3D=Fal
     logger.info('')
     if tb_writer:
         if use3D:
-            tb_writer.add_graph(model, torch.zeros([1,input_channel, sub_sample, imgsz, imgsz], device=device))
+            tb_writer.add_graph(model, torch.zeros([1, input_channel, clip_len, imgsz, imgsz], device=device))
         else:
             tb_writer.add_graph(model, torch.zeros([1, input_channel, imgsz, imgsz], device=device))
-
 
     with torch_distributed_zero_first(rank):
         if data_loader['dataloader'] is None:
@@ -242,13 +246,10 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None, use3D=Fal
     # accumulate loss before optimizing
     accumulate = max(round(nbs / total_batch_size), 1)
     hyp['weight_decay'] *= total_batch_size * accumulate / nbs  # scale weight_decay
-    if use3D:
-        optimizer = torch.optim.SGD(model.parameters(), hyp['lr0'], momentum=hyp['momentum'])
-    else:
-        optimizer = smart_optimizer(model, opt.optimizer,
-                                    lr=hyp['lr0'],
-                                    decay=hyp['weight_decay'],
-                                    momentum=hyp['momentum'])
+    optimizer = smart_optimizer(model, opt.optimizer,
+                                lr=hyp['lr0'],
+                                decay=hyp['weight_decay'],
+                                momentum=hyp['momentum'])
 
     if opt.linear_lr:
         lf = lambda x: (1 - x / (epochs - 1)) * (1.0 - hyp['lrf']) + hyp['lrf']  # linear
@@ -326,7 +327,7 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None, use3D=Fal
     # epoch ------------------------------------------------------------------
     for epoch in range(start_epoch, epochs):
         model.to(device).train(mode=True)
-        tloss, vloss, fitness = 0.0, 0.0, 0.0  # train loss, val loss, fitness
+        tloss, vloss, best_fitness = 0.0, 0.0, 0.0  # train loss, val loss, fitness
         if rank != -1:
             dataloader.sampler.set_epoch(epoch)
         logger.info(('\n' + '%11s' * len(tag_results)) % tag_results)
@@ -382,21 +383,20 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None, use3D=Fal
             final_epoch = epoch + 1 == epochs
             if not opt.notest or final_epoch:  # Calculate mAP
                 wandb_logger.current_epoch = epoch + 1
-                top1, top5, tested_loss, fig = cls_test(data_dict,
-                                                        batch_size=batch_size * 2,
-                                                        imgsz=imgsz_test,
-                                                        model=ema.ema,
-                                                        conf_thres=0.5,
-                                                        single_cls=opt.single_cls,
-                                                        dataloader=val_dataloader,
-                                                        save_dir=save_dir,
-                                                        verbose=False,
-                                                        plots=plots and final_epoch,
-                                                        wandb_logger=wandb_logger,
-                                                        compute_loss=compute_loss_val,
-                                                        epoch=epoch)
+                top1, top5, vloss, fig = cls_test(data_dict,
+                                                  batch_size=batch_size * 2,
+                                                  imgsz=imgsz_test,
+                                                  model=ema.ema,
+                                                  conf_thres=0.5,
+                                                  single_cls=opt.single_cls,
+                                                  dataloader=val_dataloader,
+                                                  save_dir=save_dir,
+                                                  verbose=False,
+                                                  plots=plots and final_epoch,
+                                                  wandb_logger=wandb_logger,
+                                                  compute_loss=compute_loss_val,
+                                                  epoch=epoch)
                 if tb_writer:
-                    tb_writer.add_scalar("Loss/val", tested_loss, epoch)
                     tb_writer.add_scalar("Accuracy/Top1", top1, epoch)
                     tb_writer.add_scalar("Accuracy/Top5", top5, epoch)
                     tb_writer.add_figure("Confusion Matrix", fig, epoch)
@@ -405,6 +405,7 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None, use3D=Fal
                 best_fitness = fi
             if tb_writer:
                 tb_writer.add_scalar("Loss/train", tloss, epoch)
+                tb_writer.add_scalar("Loss/val", vloss, epoch)
                 tb_writer.add_scalar("Lr", lr[-1], epoch)
                 tb_writer.add_scalar("BestFitness", best_fitness, epoch)
 
