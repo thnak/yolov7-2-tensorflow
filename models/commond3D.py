@@ -19,16 +19,18 @@ logger = logging.getLogger(__name__)
 class Conv3D(nn.Module):
     """Standard convolution"""
 
-    def __init__(self, c1, c2, k=1, s=1, p=None, g=1, d=1, act=True,
+    def __init__(self, c1, c2, k=(1, 1, 1), s=(1, 1, 1), p=(None, None, None), g=(1,), d=(1,), act=True,
                  dropout=0):
         super(Conv3D, self).__init__()
-        pad = autopad(k, p)
-        self.conv = nn.Conv3d(c1, c2,
-                              kernel_size=(1, k, k),
-                              stride=(1, s, s),
-                              padding=(0, pad, pad),
-                              groups=g, dilation=(1, d, d),
-                              bias=False)
+        pad = (autopad(k_, p_) for k_, p_ in zip(k, p))
+        # self.conv = nn.Conv3d(c1, c2,
+        #                       kernel_size=k,
+        #                       stride=s,
+        #                       padding=pad,
+        #                       groups=g if isinstance(g, int) else g[0],
+        #                       dilation=d,
+        #                       bias=False)
+        self.conv = Conv2Plus1D(c1, c2, k=k, s=s, p=p, g=g, d=d,act=act, dropout=dropout)
         self.bn = nn.BatchNorm3d(c2)
         self.drop = nn.Dropout(p=dropout)
         self.act = nn.SiLU() if act is True else (act if isinstance(act, nn.Module) else nn.Identity())
@@ -38,6 +40,31 @@ class Conv3D(nn.Module):
 
     def fuseforward(self, x):
         return self.act(self.conv(x))
+
+
+class Conv2Plus1D(nn.Module):
+    def __init__(self, c1, c2, k=(1, 1, 1), s=(1, 1, 1), p=(None, None, None), g=(1,), d=(1,), act=True,
+                 dropout=0):
+        super(Conv2Plus1D, self).__init__()
+        pad = (autopad(k_, p_) for k_, p_ in zip((1, k[1], k[2]), p))
+        pad2 = (autopad(k_, p_) for k_, p_ in zip((k[0], 1, 1), p))
+        self.conv = nn.Sequential(nn.Conv3d(c1, c2,
+                                            kernel_size=(1, k[1], k[2]),
+                                            stride=1,
+                                            padding=pad,
+                                            groups=g if isinstance(g, int) else g[0],
+                                            dilation=d,
+                                            bias=True),
+                                  nn.Conv3d(c2, c2,
+                                            kernel_size=(k[0], 1, 1),
+                                            stride=s,
+                                            padding=pad2,
+                                            groups=g if isinstance(g, int) else g[0],
+                                            dilation=d,
+                                            bias=True))
+
+    def forward(self, x):
+        return self.conv(x)
 
 
 class MP3D(nn.Module):
@@ -131,12 +158,18 @@ def parse_model(d, ch, nc=80):  # model_dict, input_channels(3)
                 logger.error(f'def parse: {ex}')
 
         n = n_ = max(round(n * gd), 1) if n > 1 else n  # depth gain
-        if m in [Conv3D]:
+        if m in [Conv3D, Conv2Plus1D]:
             c1, c2 = ch[f], args[0]
             if c2 != no:
                 c2 = make_divisible(c2 * gw, 8)
 
             args = [c1, c2, *args[1:]]
+
+            for x in range(2, 7):
+                args[x] = tuple(args[x]) if isinstance(args[x], list) else args[x]
+                args[x] = args[x] * 3 if len(args[x]) == 1 else args[x]
+            args[4] = (None, None, None) if "None" in args[4] else args[4]
+
 
         elif m is nn.BatchNorm3d:
             args = [ch[f]]
@@ -233,13 +266,16 @@ class Model3D(nn.Module):
 
     def forward_once(self, x, profile=False):
         y, dt = [], []  # outputs
-
         for m in self.model:
             if m.f != -1:  # if not from previou layer
                 x = y[m.f] if isinstance(m.f, int) else [
                     x if j == -1 else y[j] for j in m.f]  # from earlier layers
-
-            x = m(x)  # run
+            try:
+                x = m(x)  # run
+            except Exception as ex:
+                logger.info(
+                    f"{ex}\nnode: {m}\nshape: {[xx.shape for xx in x] if isinstance(x, list) else x.shape}\nidx: {m.i}")
+                exit()
             y.append(x if m.i in self.save else None)  # save output
 
         if profile:
@@ -323,7 +359,7 @@ if __name__ == '__main__':
     model.eval()
     img = torch.rand(1, 3, 4, 224, 224).to(device)
     macs, x = thop.profile(model, inputs=(img,))
-    print(f"MACs: {macs/1E9:,} GMACs")
+    print(f"MACs: {macs / 1E9:,} GMACs")
     # y = model(img, profile=True)
     # print(y.shape)
 
