@@ -3,7 +3,6 @@ import logging
 import math
 import os
 import platform
-import random
 import re
 import sys
 import urllib
@@ -33,10 +32,12 @@ IMG_FORMATS = ['.bmp', '.jpg', '.jpeg', '.png', '.tif', '.tiff', '.dng', '.webp'
                '.pfm']  # acceptable image suffixes
 VID_FORMATS = ['.asf', '.mov', '.avi', '.mp4', '.mpg', '.mpeg', '.m4v', '.wmv', '.mkv',
                '.gif']  # acceptable video suffixes
-IMG_EXTENSIONS = (".jpg", ".jpeg", ".png", ".ppm", ".bmp", ".pgm", ".tif", ".tiff", ".webp")
+IMG_EXTENSIONS = (".jpg", ".jpeg", ".png", ".ppm", ".bmp", ".pgm", ".tif", ".tiff", ".webp")  # from torchvision
 IMG_FORMATS.extend(IMG_EXTENSIONS)
+UPSAMPLEMODE = ['nearest', 'linear', 'bilinear', 'bicubic']
+
 FILE = Path(__file__).resolve()
-ROOT = FILE.parents[1]  # YOLOv5 root directory
+ROOT = FILE.parents[1]  # YOLOv7 root directory
 TQDM_BAR_FORMAT = '{l_bar}{bar:10}{r_bar}'  # tqdm bar format
 ONNX_OPSET = [x for x in range(11, 19)]
 ONNX_OPSET_TARGET = ONNX_OPSET
@@ -1135,14 +1136,18 @@ def cls_split(train, rate=[0.8, 0.2, 0.2]):
     test = parent / "test"
     val.mkdir(exist_ok=True)
     test.mkdir(exist_ok=True)
-    len_train = [x for x in train.iterdir() if x.is_dir()]
-    len_val = [x for x in val.iterdir() if x.is_dir()]
-    len_test = [x for x in test.iterdir() if x.is_dir()]
-    if all([len_train, len_val, len_test]):
-        len_sub_train = [i for i in (x for x in len_train) if i.is_file()]
-        len_sub_val = [i for i in (x for x in len_val) if i.is_file()]
-        len_sub_test = [i for i in (x for x in len_test) if i.is_file()]
-        if all([len(len_sub_train), len(len_sub_val), len(len_sub_test)]):
+
+    len_sub_train, val_samples, test_samples = [], [], []
+
+    train_classes = [x for x in train.iterdir() if x.is_dir()]
+    val_classes = [x for x in val.iterdir() if x.is_dir()]
+    test_classes = [x for x in test.iterdir() if x.is_dir()]
+    if all([train_classes, val_classes, test_classes]):
+        len_sub_train = [i for i in (x for x in train_classes) if i.is_file()]
+        val_samples = [i for i in (x for x in val_classes) if i.is_file()]
+        test_samples = [i for i in (x for x in test_classes) if i.is_file()]
+        if all([len(len_sub_train), len(val_samples), len(test_samples)]):
+            print(f"Found dataset: train: {len_sub_train}, val: {val_samples}, test: {test_samples}")
             return train, val, test
 
     train_rate, val_rate, test_rate = rate
@@ -1160,7 +1165,7 @@ def cls_split(train, rate=[0.8, 0.2, 0.2]):
         items_train = [item for item in x.iterdir() if
                        item.is_file() and item.suffix.lower() in IMG_FORMATS + VID_FORMATS]
 
-        if test_rate > 0:
+        if test_rate > 0 and len(test_samples) <= 0:
             items_test = random.sample(items_train, k=int(len(items_train) * test_rate))
             for item in items_test:
                 items_train.remove(item)
@@ -1171,25 +1176,26 @@ def cls_split(train, rate=[0.8, 0.2, 0.2]):
                 with open(save_dir.as_posix(), "wb") as fo:
                     fo.write(data)
                 item.unlink(missing_ok=True)
-
-        items_val = random.sample(items_train, k=int(len(items_train) * val_rate))
-        for item in items_val:
-            save_dir = cls_val_name / item.name
-            with open(item.as_posix(), "rb") as fi:
-                data = fi.read()
-            with open(save_dir.as_posix(), "wb") as fo:
-                fo.write(data)
+        if len(val_samples) == 0:
+            items_val = random.sample(items_train, k=int(len(items_train) * val_rate))
+            for item in items_val:
+                save_dir = cls_val_name / item.name
+                with open(item.as_posix(), "rb") as fi:
+                    data = fi.read()
+                with open(save_dir.as_posix(), "wb") as fo:
+                    fo.write(data)
     return train, val, test
 
 
-def parse_path(data_dict: dict):
+def parse_path(data_dict: dict, split_rate=[.8, .2, .2]):
     """get train, val, test dataset from yaml"""
     train_path = Path(data_dict['train'])
     assert train_path.exists(), f"Could not find train dataset"
-    val_path = Path(data_dict.get("val", "val"))
-    test_path = Path(data_dict.get("test", "test"))
+    val_path = Path(data_dict.get("val", (train_path.parent / "val").as_posix()))
+    test_path = Path(data_dict.get("test", (train_path.parent / "test").as_posix()))
     val_path.mkdir(exist_ok=True)
     test_path.mkdir(exist_ok=True)
+    # find class
     len_val = len([x for x in val_path.iterdir() if x.is_dir()])
     len_test = len([x for x in test_path.iterdir() if x.is_dir()])
 
@@ -1198,14 +1204,14 @@ def parse_path(data_dict: dict):
         return train_path, val_path, test_path
     elif not all([len_val > 0, len_test > 0]):
         print(2)
-        train_path, val_path, test_path = cls_split(train_path.as_posix(), [0.8, 0.2, 0.2])
+        train_path, val_path, test_path = cls_split(train_path.as_posix(), split_rate)
         return train_path, val_path, test_path
     else:
-        if len_val > 0 and len_test == 0:
-            bruhh = [0, 0.2]
-        else:
-            bruhh = [0.2, 0]
         print(3)
+        if len_val > 0 and len_test == 0:
+            bruhh = split_rate[1:]
+        else:
+            bruhh = split_rate[1:]
         train_path, val_path, test_path = cls_split(train_path.as_posix(), [0.8, *bruhh])
         return train_path, val_path, test_path
 
@@ -1215,6 +1221,3 @@ def autopad(k, p=None):  # kernel, padding
     if p is None:
         p = k // 2 if isinstance(k, int) else [x // 2 for x in k]  # auto-pad
     return p
-
-
-UPSAMPLEMODE = ['nearest', 'linear', 'bilinear', 'bicubic']

@@ -454,6 +454,7 @@ def plot_results(start=0, stop=0, bucket='', id=(), labels=(), save_dir=''):
 
 
 def plot_dataset(data: dict, names: list, title="dataset"):
+    """plot number of sample per class"""
     fig, ax = plt.subplots(figsize=(len(names), 10))
     nums = []
     for k, v in data.items():

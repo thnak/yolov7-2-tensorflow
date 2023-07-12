@@ -1,5 +1,6 @@
 import contextlib
 import glob
+import itertools
 import logging
 import math
 import os
@@ -616,104 +617,58 @@ class LoadSampleforVideoClassify(Dataset):
     std = (1., 1., 1.)
 
     def __init__(self, root, augment=True, cache=True, prefix=""):
+        self.transfom = None
         root = Path(root) if isinstance(root, str) else root
-        all_cls = [x for x in root.iterdir() if x.is_dir()]
-        classes = [x.stem for x in all_cls]
-        cls_name2inx = {}
-        for i, x in enumerate(classes):
-            cls_name2inx[x] = i
         self.prefix = prefix
-        self.cls_name2inx = cls_name2inx
+        from torchvision.datasets.folder import make_dataset
+        classes = [x.name for x in root.iterdir() if x.is_dir()]
+        classes.sort()
+        class_to_indx = {class_name: i for i, class_name in enumerate(classes)}
         self.classes = classes
+        self.class_to_indx = class_to_indx
+        self.samples = make_dataset(directory=root.as_posix(),
+                                    class_to_idx=class_to_indx,
+                                    extensions=tuple(VID_FORMATS))
 
-        datas = []
-        dict_ = {}
-        for i, dr in enumerate(all_cls):
-            data = [x for x in dr.iterdir() if x.suffix in self.VID_FORMATS]
-            dict_[i] = len(data)
-            datas.extend(data)
-        logger.info(f"{prefix}classes {classes}, total {len(datas)}")
-        self.dict_ = dict_
-        self.samples = datas
         self.imgsz = 224
-        self.sub_sample = 16
+        self.clip_len = 16
         self.sampling_rate = 5
         self.pin_memory = False
         self.croper = None
+        torchvision.set_video_backend("video_reader")
 
     def caching(self):
-        croper = transforms.Compose([transforms.Lambda(lambda x: torch.from_numpy(x)),
-                                     transforms.Resize(size=224), ])
-        caching_ = 0
-        data_frame = []
-        re_samples = []
-        gb = 0
-
-        pbar = tqdm(self.samples, total=len(self.samples))
-        for x in pbar:
-            parent = x.parent
-            save_dir = parent / f"sample{caching_}.npy"
-            if save_dir.exists():
-                re_samples.extend([xx for xx in parent.iterdir() if xx.suffix == ".npy"])
-                continue
-            cap = cv2.VideoCapture(x.as_posix())
-            fps = int(cap.get(cv2.CAP_PROP_FPS))
-            total_fps = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-            for i in range(total_fps):
-                success, frame = cap.read()
-                parent = x.parent
-                save_dir = parent / f"sample{caching_}.npy"
-                if save_dir.exists():
-                    re_samples.append(save_dir)
-                    caching_ += 1
-                    cap.release()
-                    pbar.set_description(f"{self.prefix} reload from disk {len(re_samples)}")
-                    break
-                if not success:
-                    cap.release()
-                    break
-                if i % self.sampling_rate:
-                    frame = frame[:, :, ::-1].transpose([2, 0, 1])
-                    frame = croper(frame.copy()).cpu().numpy()  # -> center crop -> CHW
-                    frame = np.expand_dims(frame, axis=0) # -> NCHW
-                    data_frame.append(frame)
-                if len(data_frame) == self.sub_sample:
-                    da = np.concatenate(data_frame, axis=0)  # 16, 3, 224, 224
-                    gb += da.nbytes
-                    caching_ += 1
-                    np.save(save_dir, da)
-                    re_samples.append(save_dir)
-                    data_frame = []
-                    pbar.set_description(f"{self.prefix} caching {len(re_samples)} files with {gb2mb(gb)} to disk, {da.dtype}")
-
-        self.samples = re_samples
-        self.transform = self.transform_()
-
-    def transform_(self):
-        transform = transforms.Compose(
-            [
-                transforms.Lambda(lambd=lambda x: torch.from_numpy(x).float()),
-                transforms.Lambda(lambd=lambda x: x / 255),
-                transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
-                transforms.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1),
-                transforms.RandomAffine(degrees=(30, 70), translate=(0.1, 0.3), scale=(0.5, 0.75)),
-                transforms.Lambda(lambd=lambda x: torch.permute(x, (1, 0, 2, 3))),
-            ]
-        )
-        return transform
+        self.transfom = transforms.Compose([
+            transforms.Resize((self.imgsz, self.imgsz)),
+            transforms.ConvertImageDtype(torch.float32),
+            transforms.Lambda(lambd=lambda x: x / 255.),
+            transforms.Normalize(mean=self.mean, std=self.std),
+        ])
+        logger.info(f"{self.prefix} total {len(self.samples)} sample with {len(self.classes)} classes")
 
     def dataset_analysis(self):
-        return self.dict_, self.classes
+        dict_ = {target: 0 for sample, target in self.samples}
+        for x, i in self.samples:
+            dict_[i] += 1
+        return dict_, self.classes
 
     def __len__(self):
         return len(self.samples)
 
     def __getitem__(self, index):
-        data = self.samples[index]
-        feed = np.load(data.as_posix())
-        feed = self.transform(feed)
-        label = self.cls_name2inx[data.parent.stem]
-        return feed, torch.tensor(label, dtype=torch.long)
+        path, target = self.samples[index]
+        vid = torchvision.io.VideoReader(path, "video")
+        metadata = vid.get_metadata()
+        video_frames = []  # video frame buffer
+        # Seek and return frames
+        max_seek = metadata["video"]['duration'][0] - (self.clip_len / metadata["video"]['fps'][0])
+        start = random.uniform(0., max_seek)
+        for frame in itertools.islice(vid.seek(start), self.clip_len):
+            video_frames.append(self.transfom(frame['data']))
+        video = torch.stack(video_frames, 0)
+        video = self.transfom(video)
+        video = torch.permute(video, dims=[1, 0, 2, 3])  # -> CNHW
+        return video, target
 
 
 # end for video classify model
@@ -904,7 +859,8 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                 shape = exif_size(im)  # image size
                 segments = []  # instance segments
                 assert shape[0] * shape[1] > self.minimum_size, f'image size {shape} < {self.minimum_size} pixels'
-                assert Path(im_file).suffix in IMG_FORMATS, f'invalid image format {im.format} the format must be {IMG_FORMATS}'
+                assert Path(
+                    im_file).suffix in IMG_FORMATS, f'invalid image format {im.format} the format must be {IMG_FORMATS}'
                 del im
                 # verify labels
                 if os.path.isfile(lb_file):

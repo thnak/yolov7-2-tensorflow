@@ -1,7 +1,7 @@
 # parameters
 nc: 1000  # number of classes
 depth_multiple: 1.0  # model depth multiple
-width_multiple: 1.0  # layer channel multiple
+width_multiple: .25  # layer channel multiple
 p5: True
 ch: 3
 sub_sample: 16
