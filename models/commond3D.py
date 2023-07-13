@@ -23,14 +23,14 @@ class Conv3D(nn.Module):
                  dropout=0):
         super(Conv3D, self).__init__()
         pad = (autopad(k_, p_) for k_, p_ in zip(k, p))
-        # self.conv = nn.Conv3d(c1, c2,
-        #                       kernel_size=k,
-        #                       stride=s,
-        #                       padding=pad,
-        #                       groups=g if isinstance(g, int) else g[0],
-        #                       dilation=d,
-        #                       bias=False)
-        self.conv = Conv2Plus1D(c1, c2, k=k, s=s, p=p, g=g, d=d,act=act, dropout=dropout)
+        self.conv = nn.Conv3d(c1, c2,
+                              kernel_size=k,
+                              stride=s,
+                              padding=pad,
+                              groups=g if isinstance(g, int) else g[0],
+                              dilation=d,
+                              bias=False)
+        # self.conv = Conv2Plus1D(c1, c2, k=k, s=s, p=p, g=g, d=d,act=act, dropout=dropout)
         self.bn = nn.BatchNorm3d(c2)
         self.drop = nn.Dropout(p=dropout)
         self.act = nn.SiLU() if act is True else (act if isinstance(act, nn.Module) else nn.Identity())
