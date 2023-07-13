@@ -627,10 +627,10 @@ class LoadSampleforVideoClassify(Dataset):
         class_to_indx = {class_name: i for i, class_name in enumerate(classes)}
         self.classes = classes
         self.class_to_indx = class_to_indx
+        assert len(class_to_indx) > 0, f"dataset not found from {root.as_posix()}"
         self.samples = make_dataset(directory=root.as_posix(),
                                     class_to_idx=class_to_indx,
                                     extensions=tuple(VID_FORMATS))
-
         self.imgsz = 224
         self.clip_len = 16
         self.step = 5
@@ -643,10 +643,7 @@ class LoadSampleforVideoClassify(Dataset):
 
     def prepare(self):
         """prepare dataset"""
-        assert self.clip_len % self.step == 0, f"divide of clip_len and step must be equal " \
-                                               f"by 0, got clip_len: {self.clip_len} and step: {self.step}"
         self.calculateMeanStd()
-
         self.clip_len = self.clip_len * self.step
         self.transfom = transforms.Compose([
             transforms.Resize((self.imgsz, self.imgsz)),
@@ -656,7 +653,7 @@ class LoadSampleforVideoClassify(Dataset):
         ])
         logger.info(
             f"{self.prefix} total {len(self.samples)} sample with {len(self.classes)} classes, "
-            f"frame length: {self.clip_len}, step frame: {self.step}")
+            f"frame length: {self.clip_len / self.step}, step frame: {self.step}")
 
     def dataset_analysis(self):
         dict_ = {target: 0 for sample, target in self.samples}
