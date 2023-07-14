@@ -455,7 +455,7 @@ def plot_results(start=0, stop=0, bucket='', id=(), labels=(), save_dir=''):
 
 def plot_dataset(data: dict, names: list, title="dataset"):
     """plot number of sample per class"""
-    fig, ax = plt.subplots(figsize=(len(names), 10))
+    fig, ax = plt.subplots()
     nums = []
     for k, v in data.items():
         nums.append(v)
@@ -463,6 +463,20 @@ def plot_dataset(data: dict, names: list, title="dataset"):
     for x in ax.get_xticklabels():
         x.set_rotation(45)
     ax.set_title(title)
+    return fig
+
+
+def plotSample(samples, target):
+    """plot all samples -> an fig x for per sample"""
+    frames, _, _, _ = samples.shape
+    fig = plt.figure()
+    plt.title(f"{target}")
+    row = math.sqrt(frames)
+    row = math.ceil(row)
+    for i in range(frames):
+        fig.add_subplot(row, row, i+1)
+        plt.imshow(samples[i].permute(1, 2, 0).cpu().numpy())
+        plt.axis('off')
     return fig
 
 

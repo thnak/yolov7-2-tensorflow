@@ -18,7 +18,6 @@ from torch.nn.utils import clip_grad_norm_
 from torch.optim.lr_scheduler import LambdaLR
 from tqdm import tqdm
 
-from models.yolo import Model
 from tools.tester import test, cls_test
 from utils.autoanchor import check_anchors
 from utils.datasets import create_dataloader, create_dataloader_cls
@@ -28,7 +27,7 @@ from utils.general import (colorstr, init_seeds, check_dataset, check_img_size, 
 from utils.google_utils import attempt_download
 from utils.loss import SmartLoss
 from utils.metrics import fitness
-from utils.plots import plot_images, plot_results, plot_dataset
+from utils.plots import plot_images, plot_results, plot_dataset, plotSample
 from utils.re_parameteration import Re_parameterization
 from utils.torch_utils import (select_device, torch_distributed_zero_first, intersect_dicts, smart_optimizer, ModelEMA,
                                time_synchronized, is_parallel, save_model)
@@ -45,6 +44,7 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None, use3D=Fal
         from utils.datasets import LoadSampleforVideoClassify as LoadSampleAndTarget
     else:
         from utils.datasets import LoadSampleAndTarget
+        from models.yolo import Model
 
     wdir = save_dir / 'weights'
     wdir.mkdir(parents=True, exist_ok=True)  # make dir
@@ -60,10 +60,7 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None, use3D=Fal
         yaml.dump(hyp, f, sort_keys=False)
     with open(save_dir / 'opt.yaml', 'w') as f:
         yaml.dump(vars(opt), f, sort_keys=False)
-    with open(opt.cfg, "r") as f:
-        model3d_config = yaml.load(f, yaml.SafeLoader)
-        clip_len = model3d_config.get("sub_sample", 16)
-        step = model3d_config.get("step", 3)
+
     device, git_status = select_device(opt.device, batch_size=opt.batch_size)
     opt.git_status = git_status
     logger.info(colorstr('hyperparameters: ') +
@@ -167,7 +164,14 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None, use3D=Fal
                       ch=input_channel,
                       nc=nc,
                       anchors=hyp.get('anchors')).to(device)  # create
-
+    if Path(opt.cfg).exists() and opt.cfg != "":
+        with open(opt.cfg, "r") as f:
+            model3d_config = yaml.load(f, yaml.SafeLoader)
+        clip_len = model3d_config.get("sub_sample", 16)
+        step = model3d_config.get("step", 3)
+    else:
+        clip_len = model.yaml.get("sub_sample", 16)
+        step = model.yaml.get("step", 3)
     # Freeze
     freeze = [f'model.{x}.' for x in (freeze if len(freeze) > 1 else range(
         freeze[0]))]  # parameter names to freeze (full or partial)
@@ -204,6 +208,13 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None, use3D=Fal
     model.model_version = model_version
     model.total_image = total_image
     model.best_fitness = best_fitness
+
+    if tb_writer:
+        logger.info(f"{colorstr('Train: ')}Plotting samples to Tensorboard.")
+        for x in range(10):
+            tb_writer.add_figure("Samples/train", plotSample(*dataset.loadSampleforploting()), x)
+            tb_writer.add_figure("Samples/val", plotSample(*dataset.loadSampleforploting()), x)
+
     if use3D:
         model.info(verbose=True,
                    img_size=[input_channel, clip_len, imgsz, imgsz] if isinstance(imgsz, int) else [input_channel,
@@ -515,6 +526,8 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None, use3D=Fal
 
 def train(hyp, opt, tb_writer=None,
           data_loader=None, logger=None):
+    from models.yolo import Model
+
     # Save run settings
     if data_loader is None:
         data_loader = {'dataloader': None, 'dataset': None, 'val_dataloader': None, 'test_dataloader': None}

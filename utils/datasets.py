@@ -605,6 +605,11 @@ class LoadSampleAndTarget(torchvision.datasets.ImageFolder):
         logger.info(prefix + ', '.join(f'{x}'.replace('always_apply=False, ', '') for x in T if x.p))
         return A.Compose(T)
 
+    @staticmethod
+    def collect_fn(batch):
+        images, target = zip(*batch)
+        return torch.stack(images, 0), torch.tensor(target, dtype=torch.long)
+
 
 # end for image classify model
 
@@ -635,7 +640,6 @@ class LoadSampleforVideoClassify(Dataset):
         self.clip_len = 16
         self.step = 5
         self.pin_memory = False
-        self.croper = None
         try:
             torchvision.set_video_backend("cuda" if torch.cuda.is_available() else "video_reader")
         except:
@@ -644,16 +648,22 @@ class LoadSampleforVideoClassify(Dataset):
     def prepare(self):
         """prepare dataset"""
         self.calculateMeanStd()
-        self.clip_len = self.clip_len * self.step
+        self.step = max(1, self.step)
+        self.clip_len = max(1, self.clip_len)
+        self.clip_len, self.step = int(self.clip_len), int(self.step)
+        logger.info(
+            f"{self.prefix} total {len(self.samples)} sample with {len(self.classes)} classes, "
+            f"frame length: {self.clip_len}, step frame: {self.step}")
         self.transfom = transforms.Compose([
             transforms.Resize((self.imgsz, self.imgsz)),
             transforms.ConvertImageDtype(torch.float32),
             transforms.Lambda(lambd=lambda x: x / 255.),
+            transforms.ColorJitter(brightness=(0, 0.15), contrast=(0, 0.1), saturation=(0, 0.1)),
+            transforms.RandomRotation(degrees=(90, 90)),
+            transforms.RandomPerspective(distortion_scale=0.15, p=0.15),
+            transforms.Grayscale(num_output_channels=3),
             transforms.Normalize(mean=self.mean, std=self.std),
         ])
-        logger.info(
-            f"{self.prefix} total {len(self.samples)} sample with {len(self.classes)} classes, "
-            f"frame length: {self.clip_len / self.step}, step frame: {self.step}")
 
     def dataset_analysis(self):
         dict_ = {target: 0 for sample, target in self.samples}
@@ -696,18 +706,49 @@ class LoadSampleforVideoClassify(Dataset):
         path, target = self.samples[index]
         vid = torchvision.io.VideoReader(path, "video")
         metadata = vid.get_metadata()
-        video_frames = []  # video frame buffer
         # Seek and return frames
-        max_seek = metadata["video"]['duration'][0] - (self.clip_len / metadata["video"]['fps'][0])
+        n_lenght = self.clip_len * self.step
+
+        max_seek = metadata["video"]['duration'][0] - (n_lenght / metadata["video"]['fps'][0])
         start = random.uniform(0., max_seek)
+        idx = 0
+        video = torch.zeros([self.clip_len, 3, self.imgsz, self.imgsz], dtype=torch.float32)
         for i, frame in enumerate(itertools.islice(vid.seek(start), self.clip_len)):
             if i % self.step == 0:
-                video_frames.append(self.transfom(frame['data']))
-        video = torch.stack(video_frames, 0)
-        # video = video[::self.step, ...]  # time spliting
-        video = self.transfom(video)
+                if idx != self.clip_len:
+                    video[idx, ...] = self.transfom(frame['data'])
+                    idx += 1
+                else:
+                    break
         video = torch.permute(video, dims=[1, 0, 2, 3])  # NCHW -> CNHW
         return video, target
+
+    def loadSampleforploting(self):
+        """choice a random sample to plot"""
+        path, target = random.choice(self.samples)
+        vid = torchvision.io.VideoReader(path, "video")
+        metadata = vid.get_metadata()
+        transform = transforms.Compose([transforms.Resize((self.imgsz, self.imgsz))])
+        # Seek and return frames
+        n_lenght = self.clip_len * self.step
+
+        max_seek = metadata["video"]['duration'][0] - (n_lenght / metadata["video"]['fps'][0])
+        start = random.uniform(0., max_seek)
+        idx = 0
+        video = torch.zeros([self.clip_len, 3, self.imgsz, self.imgsz], dtype=torch.uint8)
+        for i, frame in enumerate(itertools.islice(vid.seek(start), self.clip_len)):
+            if i % self.step == 0:
+                if idx != self.clip_len:
+                    video[idx, ...] = transform(frame['data'])
+                    idx += 1
+                else:
+                    break
+        return video, self.classes[target]
+
+    @staticmethod
+    def collect_fn(batch):
+        videos, target = zip(*batch)
+        return torch.stack(videos, 0), torch.tensor(target, dtype=torch.long)
 
 
 # end for video classify model

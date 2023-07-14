@@ -87,6 +87,7 @@ if __name__ == '__main__':
         logger.info('Resuming training from %s' % ckpt)
         data = str(torch.load(ckpt, map_location="cpu")["model"].yaml)
 
+
     else:
         opt.data, opt.cfg, opt.hyp = check_file(opt.data), check_file(
             opt.cfg), check_file(opt.hyp)  # check files

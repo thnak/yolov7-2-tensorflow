@@ -42,26 +42,48 @@ class Conv3D(nn.Module):
         return self.act(self.conv(x))
 
 
+class Conv3D_2P1(nn.Module):
+    """Standard convolution"""
+
+    def __init__(self, c1, c2, k=(1, 1, 1), s=(1, 1, 1), p=(None, None, None), g=(1,), d=(1,), act=True,
+                 dropout=0):
+        super(Conv3D_2P1, self).__init__()
+        pad = (autopad(k_, p_) for k_, p_ in zip(k, p))
+
+        self.conv = Conv2Plus1D(c1, c2, k=k, s=s, p=p, g=g, d=d, act=act, dropout=dropout)
+        self.bn = nn.BatchNorm3d(c2)
+        self.drop = nn.Dropout(p=dropout)
+        self.act = nn.SiLU() if act is True else (act if isinstance(act, nn.Module) else nn.Identity())
+
+    def forward(self, x):
+        return self.drop(self.act(self.bn(self.conv(x))))
+
+    def fuseforward(self, x):
+        return self.act(self.conv(x))
+
+
 class Conv2Plus1D(nn.Module):
     def __init__(self, c1, c2, k=(1, 1, 1), s=(1, 1, 1), p=(None, None, None), g=(1,), d=(1,), act=True,
                  dropout=0):
         super(Conv2Plus1D, self).__init__()
         pad = (autopad(k_, p_) for k_, p_ in zip((1, k[1], k[2]), p))
         pad2 = (autopad(k_, p_) for k_, p_ in zip((k[0], 1, 1), p))
+        g1 = g if isinstance(g, int) else g[0]
+        # g1 = g1 - 1 if c1 % 3 == 0 else g1
         self.conv = nn.Sequential(nn.Conv3d(c1, c2,
                                             kernel_size=(1, k[1], k[2]),
                                             stride=1,
                                             padding=pad,
-                                            groups=g if isinstance(g, int) else g[0],
+                                            groups=g1,
                                             dilation=d,
-                                            bias=True),
+                                            bias=False),
                                   nn.Conv3d(c2, c2,
                                             kernel_size=(k[0], 1, 1),
                                             stride=s,
                                             padding=pad2,
                                             groups=g if isinstance(g, int) else g[0],
                                             dilation=d,
-                                            bias=True))
+                                            bias=False))
 
     def forward(self, x):
         return self.conv(x)
@@ -93,7 +115,6 @@ class Classify3D(nn.Module):
         super(Classify3D, self).__init__()
         self.nc = nc  # number of classes
         list_conv = []
-        connected = int(nc * 1.28)
 
         def calc(x, nc):
             return int(((x + nc) // 2) * 1.28)
@@ -109,7 +130,9 @@ class Classify3D(nn.Module):
                               nn.Flatten(1))
             list_conv.append(a)
             self.m = nn.ModuleList(list_conv)  # output conv
-            self.linear = nn.Linear(sum([calc(x, nc) for x in ch]), nc)
+            self.linear = nn.Sequential(nn.Linear(sum([calc(x, nc) for x in ch]), nc, bias=False),
+                                        nn.BatchNorm1d(nc))
+
             self.inplace = inplace
 
     def forward(self, x):
@@ -124,6 +147,30 @@ class Classify3D(nn.Module):
     def switch_to_deploy(self):
         """add softmax activation for deploy"""
         self.linear = nn.Sequential(self.linear, nn.Softmax(1))
+
+    def fuse(self):
+        linear, bn = self.linear
+        output_channel = linear.out_features
+        w = linear.weight
+        mean = bn.running_mean
+        var_sqrt = torch.sqrt(bn.running_var + bn.eps)
+
+        beta = bn.weight
+        gamma = bn.bias
+
+        if linear.bias is not None:
+            b = linear.bias
+        else:
+            b = mean.new_zeros(mean.shape)
+
+        w = w * (beta / var_sqrt).reshape([output_channel, 1])
+        b = (b - mean) / var_sqrt * beta + gamma
+        fused_linear = nn.Linear(linear.in_features,
+                                 linear.out_features)
+
+        fused_linear.weight = nn.Parameter(w)
+        fused_linear.bias = nn.Parameter(b)
+        self.linear = fused_linear
 
 
 class ReOrg3D(nn.Module):
@@ -158,7 +205,7 @@ def parse_model(d, ch, nc=80):  # model_dict, input_channels(3)
                 logger.error(f'def parse: {ex}')
 
         n = n_ = max(round(n * gd), 1) if n > 1 else n  # depth gain
-        if m in [Conv3D, Conv2Plus1D]:
+        if m in [Conv3D, Conv2Plus1D, Conv3D_2P1]:
             c1, c2 = ch[f], args[0]
             if c2 != no:
                 c2 = make_divisible(c2 * gw, 8)
@@ -270,12 +317,7 @@ class Model3D(nn.Module):
             if m.f != -1:  # if not from previou layer
                 x = y[m.f] if isinstance(m.f, int) else [
                     x if j == -1 else y[j] for j in m.f]  # from earlier layers
-            try:
-                x = m(x)  # run
-            except Exception as ex:
-                logger.info(
-                    f"{ex}\nnode: {m}\nshape: {[xx.shape for xx in x] if isinstance(x, list) else x.shape}\nidx: {m.i}")
-                exit()
+            x = m(x)  # run
             y.append(x if m.i in self.save else None)  # save output
 
         if profile:
@@ -324,6 +366,7 @@ class Model3D(nn.Module):
         for m in pbar:
             if isinstance(m, Classify3D):
                 pbar.set_description_str(f"switching to deploy {m.__class__.__name__}")
+                m.fuse()
                 m.switch_to_deploy()
         return self
 
@@ -355,11 +398,14 @@ if __name__ == '__main__':
     device = select_device(opt.device)[0]
 
     # Create model
-    model = Model3D(opt.cfg, nc=10).to(device)
+    model = Model3D(opt.cfg, nc=13).to(device)
     model.eval()
-    img = torch.rand(1, 3, 4, 224, 224).to(device)
+    model.fuse()
+    img = torch.rand(1, 3, 16, 224, 224).to(device)
     macs, x = thop.profile(model, inputs=(img,))
-    print(f"MACs: {macs / 1E9:,} GMACs")
+    n_p = sum(x.numel() for x in model.parameters())  # number parameters
+    print(f"MACs: {macs / 1E9 * 2:,} GMACs, {n_p:,} paramaters")
+
     # y = model(img, profile=True)
     # print(y.shape)
 
