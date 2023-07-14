@@ -22,6 +22,8 @@ class Conv3D(nn.Module):
     def __init__(self, c1, c2, k=(1, 1, 1), s=(1, 1, 1), p=(None, None, None), g=(1,), d=(1,), act=True,
                  dropout=0):
         super(Conv3D, self).__init__()
+        k = (k, k, k) if isinstance(k, int) else k
+        p = (p, p, p) if isinstance(p, int) else p
         pad = (autopad(k_, p_) for k_, p_ in zip(k, p))
         self.conv = nn.Conv3d(c1, c2,
                               kernel_size=k,
@@ -117,12 +119,12 @@ class Classify3D(nn.Module):
         list_conv = []
 
         def calc(x, nc):
-            return int(((x + nc) // 2) * 1.28)
+            return int((x + nc) * 4)
 
         for x in ch:
             a = nn.Sequential(nn.Conv3d(x, calc(x, nc),
                                         kernel_size=(1, 1, 1),
-                                        stride=(1, 2, 2),
+                                        stride=(1, 1, 1),
                                         bias=False),
                               nn.BatchNorm3d(calc(x, nc)),
                               nn.SiLU(),
@@ -132,7 +134,7 @@ class Classify3D(nn.Module):
             self.m = nn.ModuleList(list_conv)  # output conv
             self.linear = nn.Sequential(nn.Linear(sum([calc(x, nc) for x in ch]), nc, bias=False),
                                         nn.BatchNorm1d(nc))
-
+            self.act = nn.Softmax(dim=1)
             self.inplace = inplace
 
     def forward(self, x):
@@ -142,11 +144,9 @@ class Classify3D(nn.Module):
             z.append(out)
         out = concatenate(z, dim=1)
         out = self.linear(out)
+        if torch.onnx.is_in_onnx_export():
+            out = self.act(out)
         return out
-
-    def switch_to_deploy(self):
-        """add softmax activation for deploy"""
-        self.linear = nn.Sequential(self.linear, nn.Softmax(1))
 
     def fuse(self):
         linear, bn = self.linear
@@ -205,7 +205,7 @@ def parse_model(d, ch, nc=80):  # model_dict, input_channels(3)
                 logger.error(f'def parse: {ex}')
 
         n = n_ = max(round(n * gd), 1) if n > 1 else n  # depth gain
-        if m in [Conv3D, Conv2Plus1D, Conv3D_2P1]:
+        if m in [Conv3D, Conv2Plus1D, Conv3D_2P1, subway, ConvPathway1, ConvPathway2]:
             c1, c2 = ch[f], args[0]
             if c2 != no:
                 c2 = make_divisible(c2 * gw, 8)
@@ -216,7 +216,6 @@ def parse_model(d, ch, nc=80):  # model_dict, input_channels(3)
                 args[x] = tuple(args[x]) if isinstance(args[x], list) else args[x]
                 args[x] = args[x] * 3 if len(args[x]) == 1 else args[x]
             args[4] = (None, None, None) if "None" in args[4] else args[4]
-
 
         elif m is nn.BatchNorm3d:
             args = [ch[f]]
@@ -246,6 +245,76 @@ def parse_model(d, ch, nc=80):  # model_dict, input_channels(3)
         ch.append(c2)
     return nn.Sequential(*layers), sorted(save)
 
+
+# start for  X3D network
+class globalsubWay(nn.Module):
+    def __init__(self, in_channels, out_channel, kernel_size=1, stride=1, pad=1, groups=1, dia=1):
+        super(globalsubWay, self).__init__()
+        self.conv = Conv3D(in_channels, out_channel, kernel_size, stride, pad, in_channels, dia, act=None)
+        self.m = nn.Sequential(nn.AdaptiveAvgPool3d(1),
+                               Conv3D(out_channel, 8, 1, 1, 0, 1, 1, act=nn.ReLU()),
+                               Conv3D(8, out_channel, 1, 1, 0, 1, 1, act=nn.Sigmoid()))
+        self.post_act = nn.SiLU()
+
+    def forward(self, x):
+        out = self.conv(x)
+        return self.post_act(out * self.m(out))
+
+
+class subway(nn.Module):
+    def __init__(self, in_channels, out_channel, kernel_size=1, stride=1, pad=1, groups=1, dia=1, act=True,
+                 dropout=0):
+        super(subway, self).__init__()
+        mid_channels = in_channels * 2
+        self.m = nn.Sequential(Conv3D(in_channels, mid_channels, kernel_size, stride, pad, groups, dia, act=nn.ReLU()),
+                               Conv3D(mid_channels, mid_channels, 3, 1, 1, mid_channels, 1, act=nn.SiLU()),
+                               Conv3D(mid_channels, out_channel, kernel_size, stride, pad, groups, dia, act=None))
+
+    def forward(self, x):
+        return x + self.m(x)
+
+
+class ConvPathway1(nn.Module):
+    def __init__(self, in_channels, out_channel, kernel_size=1, stride=1, pad=1, groups=1, dia=1, act=True,
+                 dropout=0):
+        super(ConvPathway1, self).__init__()
+        mid_channels = in_channels * 2
+        self.conv1 = Conv3D(in_channels, mid_channels, 1, 1, 0, 1, 1, act=nn.ReLU)
+        self.res = globalsubWay(mid_channels, mid_channels, 1, (1, 2, 2), 0, 1, 1)
+        self.conv3 = Conv3D(mid_channels, out_channel, 1, (1, 1, 1), 0, 1, 1, act=None)
+
+        self.conv2 = Conv3D(in_channels, out_channel, 1, (1, 2, 2), 0, 1, 1, act=None)
+        self.post_act = nn.ReLU()
+
+    def forward(self, x):
+        out1 = self.conv1(x)
+        out2 = self.conv2(x)
+        out1 = self.res(out1)
+        out1 = self.conv3(out1)
+        out = out1 + out2
+        return self.post_act(out)
+
+class ConvPathway2(nn.Module):
+    def __init__(self, in_channels, out_channel, kernel_size=1, stride=1, pad=1, groups=1, dia=1, act=True,
+                 dropout=0):
+        super(ConvPathway2, self).__init__()
+        mid_channels = in_channels * 2
+        self.conv1 = Conv3D(in_channels, mid_channels, 1, 1, 0, 1, 1, act=nn.ReLU)
+        self.res = globalsubWay(mid_channels, mid_channels, 1, 1, 0, 1, 1)
+        self.conv3 = Conv3D(mid_channels, out_channel, 1, (1, 1, 1), 0, 1, 1, act=None)
+
+        # self.conv2 = Conv3D(in_channels, out_channel, 1, (1, 2, 2), 0, 1, 1, act=None)
+        self.post_act = nn.ReLU()
+
+    def forward(self, x):
+        out1 = self.conv1(x)
+        # out2 = self.conv2(x)
+        out1 = self.res(out1)
+        out1 = self.conv3(out1)
+        out = out1 + x
+        return self.post_act(out)
+
+# stop for X3D network
 
 class Model3D(nn.Module):
     # model, input channels, number of classes
@@ -367,7 +436,6 @@ class Model3D(nn.Module):
             if isinstance(m, Classify3D):
                 pbar.set_description_str(f"switching to deploy {m.__class__.__name__}")
                 m.fuse()
-                m.switch_to_deploy()
         return self
 
     def info(self, verbose=False, img_size=640):  # print model information
@@ -387,7 +455,7 @@ class Model3D(nn.Module):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--cfg', type=str,
-                        default='yolov7_3D-cls-tiny.yaml', help='model.yaml')
+                        default='X3D_M.yaml', help='model.yaml')
     parser.add_argument('--device', default='cpu',
                         help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     parser.add_argument('--profile', action='store_true',
@@ -401,7 +469,7 @@ if __name__ == '__main__':
     model = Model3D(opt.cfg, nc=13).to(device)
     model.eval()
     model.fuse()
-    img = torch.rand(1, 3, 16, 224, 224).to(device)
+    img = torch.rand(1, 3, 16, 256, 256).to(device)
     macs, x = thop.profile(model, inputs=(img,))
     n_p = sum(x.numel() for x in model.parameters())  # number parameters
     print(f"MACs: {macs / 1E9 * 2:,} GMACs, {n_p:,} paramaters")

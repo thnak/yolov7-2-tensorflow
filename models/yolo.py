@@ -35,7 +35,7 @@ class Classify(nn.Module):
         for x in ch:
             a = nn.Sequential(nn.Conv2d(x, calc(x, nc),
                                         kernel_size=1,
-                                        stride=2,
+                                        stride=1,
                                         bias=False),
                               nn.BatchNorm2d(calc(x, nc)),
                               nn.SiLU(),

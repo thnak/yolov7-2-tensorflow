@@ -4,8 +4,8 @@ depth_multiple: 1.0  # model depth multiple
 width_multiple: 1.0  # layer channel multiple
 p5: True
 ch: 3
-sub_sample: 16
-step: 1
+sub_sample: 9
+step: 3
 # anchors
 anchors:
   - [ 29,39,  77,40,  41,80 ]  # P3/8
@@ -111,5 +111,5 @@ head:
     [ 65, 1, Conv3D_2P1, [ 256, [ 3, 3, 3 ], [ 1 ], [ None ], [ 1 ], [ 1 ],  nn.LeakyReLU(0.1) ] ],
     [ 73, 1, Conv3D_2P1, [ 512, [ 3, 3, 3 ], [ 1 ], [ None ], [ 1 ], [ 1 ],  nn.LeakyReLU(0.1) ] ],
 
-    [ [ 74, 75, 76 ], 1, Classify3D, [ nc ] ],   # Detect(P3, P4, P5)
+    [ [ 76 ], 1, Classify3D, [ nc ] ],   # Detect(P3, P4, P5)
   ]
