@@ -713,7 +713,7 @@ class LoadSampleforVideoClassify(Dataset):
         start = random.uniform(0., max_seek)
         idx = 0
         video = torch.zeros([self.clip_len, 3, self.imgsz, self.imgsz], dtype=torch.float32)
-        for i, frame in enumerate(itertools.islice(vid.seek(start), self.clip_len)):
+        for i, frame in enumerate(itertools.islice(vid.seek(start), n_lenght)):
             if i % self.step == 0:
                 if idx != self.clip_len:
                     video[idx, ...] = self.transfom(frame['data'])
@@ -736,7 +736,7 @@ class LoadSampleforVideoClassify(Dataset):
         start = random.uniform(0., max_seek)
         idx = 0
         video = torch.zeros([self.clip_len, 3, self.imgsz, self.imgsz], dtype=torch.uint8)
-        for i, frame in enumerate(itertools.islice(vid.seek(start), self.clip_len)):
+        for i, frame in enumerate(itertools.islice(vid.seek(start), n_lenght)):
             if i % self.step == 0:
                 if idx != self.clip_len:
                     video[idx, ...] = transform(frame['data'])
