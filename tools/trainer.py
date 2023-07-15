@@ -212,8 +212,8 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None, use3D=Fal
     if tb_writer and hasattr(dataset, "loadSampleforploting"):
         logger.info(f"{colorstr('Train: ')}Plotting samples to Tensorboard.")
         for x in range(10):
-            tb_writer.add_figure("Samples/train", plotSample(*dataset.loadSampleforploting()), x)
-            tb_writer.add_figure("Samples/val", plotSample(*dataset.loadSampleforploting()), x)
+            tb_writer.add_figure("Samples/train", plotSample(*dataset.loadSample()), x)
+            tb_writer.add_figure("Samples/val", plotSample(*dataset.loadSample()), x)
 
     if use3D:
         model.info(verbose=True,

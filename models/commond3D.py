@@ -224,7 +224,6 @@ def parse_model(d, ch, nc=80):  # model_dict, input_channels(3)
             args = [ch[f]]
         elif m in [Classify3D]:
             args.append([ch[x] for x in f])
-            print(args)
             if isinstance(args[2], int):  # number of anchors
                 args[2] = [list(range(args[2] * 2))] * len(f)
         elif m in [Concat]:
