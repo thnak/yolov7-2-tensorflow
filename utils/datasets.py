@@ -662,12 +662,8 @@ class LoadSampleforVideoClassify(Dataset):
             f"{self.prefix} total {len(self.samples)} sample with {len(self.classes)} classes, "
             f"frame length: {self.clip_len}, step frame: {self.step}")
         self.transform = transforms.Compose([
-            transforms.Resize((self.imgsz, self.imgsz)),
-            # transforms.ColorJitter(brightness=(0, 0.1), contrast=(0, 0.01), saturation=(0, 0.1)),
-            # transforms.RandomRotation(degrees=(90, 90)),
-            # transforms.RandomPerspective(distortion_scale=0.15, p=0.15),
-            # transforms.Grayscale(num_output_channels=3),
-            transforms.ConvertImageDtype(torch.float32),
+            transforms.Resize((self.imgsz, self.imgsz), antialias=True),
+            transforms.Lambda(lambd=lambda x: x.float() / 255.),
             transforms.Normalize(mean=self.mean, std=self.std),
         ])
 
@@ -684,12 +680,12 @@ class LoadSampleforVideoClassify(Dataset):
         psum_sq = torch.tensor([0.0, 0.0, 0.0])
         pbar = tqdm(samples, total=len(samples))
         transform = transforms.Compose(
-            [transforms.Resize((self.imgsz, self.imgsz)),
+            [transforms.Resize((self.imgsz, self.imgsz), antialias=True),
              transforms.Lambda(lambd=lambda x: x.float() / 255.),
              ])
 
         for i, (path, _) in enumerate(pbar):
-            video, _ = self.loadSampleforploting(path, transform=transform, dtype=torch.float32)
+            video, _ = self.loadSample(path, transform=transform, dtype=torch.float32)
             psum += video.sum(axis=[0, 2, 3])
             psum_sq += (video ** 2).sum(axis=[0, 2, 3])
             pbar.set_description(f"{self.prefix}Collecting data to calculate mean, std...")
@@ -708,15 +704,16 @@ class LoadSampleforVideoClassify(Dataset):
 
     def __getitem__(self, index):
         path, target = self.samples[index]
-        video = self.loadSampleforploting(path=path, transform=self.transform, dtype=torch.float32)[0]
+        video = self.loadSample(path=path, transform=self.transform, dtype=torch.float32)[0]
         video = torch.permute(video, dims=[1, 0, 2, 3])  # NCHW -> CNHW
         return video, target
 
-    def loadSampleforploting(self, path=None, transform=None, dtype=torch.uint8):
+    def loadSample(self, path=None, transform=None, dtype=torch.uint8):
         """choice a random sample to plot"""
-        if transform is None:
-            transform = transforms.Compose([transforms.Resize((self.imgsz, self.imgsz))])
         target = 0
+
+        if transform is None:
+            transform = transforms.Compose([transforms.Resize((self.imgsz, self.imgsz), antialias=True)])
         if path is None:
             path, target = random.choice(self.samples)
         vid = torchvision.io.VideoReader(path, "video")
@@ -734,6 +731,10 @@ class LoadSampleforVideoClassify(Dataset):
                 idx += 1
                 if idx >= self.clip_len:
                     break
+        video = self.randomDropChannel(video, 0.1)
+        video = self.randomDropFrame(video, 0.1)
+        video = self.vflip(video, 0.1)
+        video = self.hflip(video, 0.1)
         return video, self.classes[target]
 
     @staticmethod
@@ -741,6 +742,67 @@ class LoadSampleforVideoClassify(Dataset):
         videos, target = zip(*batch)
         return torch.stack(videos, 0), torch.tensor(target, dtype=torch.long)
 
+    @staticmethod
+    def rgb_2_gray(inputs: torch.Tensor):
+        """convert multiple rgb image to gray"""
+        gray = torch.zeros_like(inputs)
+        n_shape = len(inputs.shape)
+        if n_shape == 4:
+            for i, rgb in enumerate(inputs):
+                r, g, b = rgb[0, ...], rgb[1, ...], rgb[2, ...]
+                g = 0.2989 * r + 0.5870 * g + 0.1140 * b
+                gray[i, ...] = torch.stack([g, g, g])
+        elif n_shape == 3:
+            r, g, b = inputs[0, ...], inputs[1, ...], inputs[2, ...]
+            g = 0.2989 * r + 0.5870 * g + 0.1140 * b
+            gray = torch.stack([g, g, g])
+        else:
+            raise f"{n_shape} dimension does not support."
+        return gray
+
+    @staticmethod
+    def randomDropFrame(inputs, p=0.5):
+        if random.random() <= p:
+            n_dims = len(inputs.shape)
+            if n_dims == 4:
+                frame_idx = random.randint(0, inputs.shape[0] - 1)
+                inputs[frame_idx, ...] = 0
+            else:
+                inputs[...] = 0
+
+        return inputs
+
+    @staticmethod
+    def randomDropChannel(inputs, p=0.5):
+        if random.random() <= p:
+            channel = random.randint(0, 2)
+            n_dims = len(inputs.shape)
+            if n_dims == 4:
+                inputs[:, channel, ...] = 0
+            else:
+                inputs[channel, ...] = 0
+
+        return inputs
+
+    @staticmethod
+    def vflip(inputs: torch.Tensor, p=0.5):
+        n_dims = len(inputs.shape)
+        if random.random() <= p:
+            if n_dims == 4:
+                inputs = torch.flip(inputs, dims=[2])
+            else:
+                inputs = torch.flip(inputs, dims=[1])
+        return inputs
+
+    @staticmethod
+    def hflip(inputs: torch.Tensor, p=0.5):
+        n_dims = len(inputs.shape)
+        if random.random() <= p:
+            if n_dims == 4:
+                inputs = torch.flip(inputs, dims=[3])
+            else:
+                inputs = torch.flip(inputs, dims=[2])
+        return inputs
 
 # end for video classify model
 
@@ -1166,6 +1228,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
     def load_mosaic9(self, index):
         """loads images in a 9-mosaic"""
 
+        img9 = None
         labels9, segments9 = [], []
         s = self.img_size
         indices = [index] + random.choices(self.indices, k=8)  # 8 additional image indices
