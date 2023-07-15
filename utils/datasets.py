@@ -647,7 +647,7 @@ class LoadSampleforVideoClassify(Dataset):
 
     def prepare(self):
         """prepare dataset"""
-        self.calculateMeanStd()
+        # self.calculateMeanStd()
         self.step = max(1, self.step)
         self.clip_len = max(1, self.clip_len)
         self.clip_len, self.step = int(self.clip_len), int(self.step)

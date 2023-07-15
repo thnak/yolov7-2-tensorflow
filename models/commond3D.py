@@ -119,15 +119,15 @@ class Classify3D(nn.Module):
         list_conv = []
 
         def calc(x, nc):
-            return int((x + nc) * 4)
+            return 2048
 
         for x in ch:
             a = nn.Sequential(nn.Conv3d(x, calc(x, nc),
                                         kernel_size=(1, 1, 1),
-                                        stride=(1, 1, 1),
+                                        stride=(1, 2, 2),
                                         bias=False),
                               nn.BatchNorm3d(calc(x, nc)),
-                              nn.SiLU(),
+                              nn.ReLU(),
                               nn.AdaptiveAvgPool3d(1),
                               nn.Flatten(1))
             list_conv.append(a)
@@ -294,6 +294,7 @@ class ConvPathway1(nn.Module):
         out = out1 + out2
         return self.post_act(out)
 
+
 class ConvPathway2(nn.Module):
     def __init__(self, in_channels, out_channel, kernel_size=1, stride=1, pad=1, groups=1, dia=1, act=True,
                  dropout=0):
@@ -313,6 +314,7 @@ class ConvPathway2(nn.Module):
         out1 = self.conv3(out1)
         out = out1 + x
         return self.post_act(out)
+
 
 # stop for X3D network
 
