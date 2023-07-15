@@ -491,9 +491,11 @@ class LoadSampleAndTarget(torchvision.datasets.ImageFolder):
 
     def calculatingMeanSTD(self, max_number, prefix):
         """calculate mean, std"""
-        task = []
+        # task = []
         imgsz = (self.imgsz // 2, self.imgsz // 2)
         pbar = tqdm(range(max_number), total=max_number)
+        psum = torch.tensor([0.0, 0.0, 0.0])
+        psum_sq = torch.tensor([0.0, 0.0, 0.0])
         for x in pbar:
             img = self.loadImage(x)[0]
             img = cv2.resize(img, imgsz, interpolation=cv2.INTER_NEAREST)
@@ -502,15 +504,20 @@ class LoadSampleAndTarget(torchvision.datasets.ImageFolder):
             img = torch.from_numpy(img)
             img = torch.unsqueeze(img, dim=0)
             img = torch.permute(img, [0, 3, 1, 2])  # -> BCHW
-            task.append(img.float())
+            img = img.float()
+            psum += img.sum(axis=[0, 2, 3])
+            psum_sq += (img ** 2).sum(axis=[0, 2, 3])
+
+            # task.append(img)
             pbar.set_description(f"{prefix}Collecting data to calculate mean, std...")
-            if x == max_number - 1:
-                pbar.set_description(f"{prefix}Calculating...")
-                task = torch.concatenate(task, dim=0)
-                mean = torch.mean(task, dim=(0, 2, 3))
-                std = torch.std(task, dim=(0, 2, 3))
-                self.mean = mean.cpu().numpy().tolist()
-                self.std = std.cpu().numpy().tolist()
+            if x >= max_number - 10:
+                count = max_number * self.imgsz * self.imgsz
+                # mean and std
+                total_mean = psum / count
+                total_var = (psum_sq / count) - (total_mean ** 2)
+                total_std = torch.sqrt(total_var)
+                self.mean = total_mean.cpu().numpy().tolist()
+                self.std = total_std.cpu().numpy().tolist()
                 pbar.set_description(f"{prefix}Using mean: {self.mean}, std: {self.std} for this dataset.")
 
     def dataset_analysis(self):
@@ -561,7 +568,7 @@ class LoadSampleAndTarget(torchvision.datasets.ImageFolder):
         return mem_2_caching
 
     def prepare(self):
-        self.calculatingMeanSTD(self.total_caching, self.prefix)
+        self.calculatingMeanSTD(len(self.samples), self.prefix)
         if self.cache:
             pbar = tqdm(range(0, self.total_caching), desc="%33s" % (""), total=self.total_caching)
             gb = 0
@@ -623,7 +630,7 @@ class LoadSampleforVideoClassify(Dataset):
     use_BGR = False
 
     def __init__(self, root, augment=True, cache=True, prefix=""):
-        self.transfom = None
+        self.transform = None
         root = Path(root) if isinstance(root, str) else root
         self.prefix = prefix
         from torchvision.datasets.folder import make_dataset
@@ -647,21 +654,20 @@ class LoadSampleforVideoClassify(Dataset):
 
     def prepare(self):
         """prepare dataset"""
-        # self.calculateMeanStd()
+        self.calculateMeanStd()
         self.step = max(1, self.step)
         self.clip_len = max(1, self.clip_len)
         self.clip_len, self.step = int(self.clip_len), int(self.step)
         logger.info(
             f"{self.prefix} total {len(self.samples)} sample with {len(self.classes)} classes, "
             f"frame length: {self.clip_len}, step frame: {self.step}")
-        self.transfom = transforms.Compose([
+        self.transform = transforms.Compose([
             transforms.Resize((self.imgsz, self.imgsz)),
+            # transforms.ColorJitter(brightness=(0, 0.1), contrast=(0, 0.01), saturation=(0, 0.1)),
+            # transforms.RandomRotation(degrees=(90, 90)),
+            # transforms.RandomPerspective(distortion_scale=0.15, p=0.15),
+            # transforms.Grayscale(num_output_channels=3),
             transforms.ConvertImageDtype(torch.float32),
-            transforms.Lambda(lambd=lambda x: x / 255.),
-            transforms.ColorJitter(brightness=(0, 0.15), contrast=(0, 0.1), saturation=(0, 0.1)),
-            transforms.RandomRotation(degrees=(90, 90)),
-            transforms.RandomPerspective(distortion_scale=0.15, p=0.15),
-            transforms.Grayscale(num_output_channels=3),
             transforms.Normalize(mean=self.mean, std=self.std),
         ])
 
@@ -672,76 +678,61 @@ class LoadSampleforVideoClassify(Dataset):
         return dict_, self.classes
 
     def calculateMeanStd(self):
-        means = []
-        stds = []
-        pbar = tqdm(self.samples, total=len(self.samples))
+        """Calculate mean, std. https://kozodoi.me/blog/20210308/compute-image-stats"""
+        samples = self.samples
+        psum = torch.tensor([0.0, 0.0, 0.0])
+        psum_sq = torch.tensor([0.0, 0.0, 0.0])
+        pbar = tqdm(samples, total=len(samples))
+        transform = transforms.Compose(
+            [transforms.Resize((self.imgsz, self.imgsz)),
+             transforms.Lambda(lambd=lambda x: x.float() / 255.),
+             ])
+
         for i, (path, _) in enumerate(pbar):
-            vid = torchvision.io.VideoReader(path, "video")
-            metadata = vid.get_metadata()
-            video_frames = []  # video frame buffer
-            # Seek and return frames
-            max_seek = metadata["video"]['duration'][0] - (self.clip_len / metadata["video"]['fps'][0])
-            start = random.uniform(0., max_seek)
-            for frame in itertools.islice(vid.seek(start), self.clip_len):
-                video_frames.append(frame['data'])
-            video = torch.stack(video_frames, 0)
-            video = video.float()
-            video /= 255.
-            mean = torch.mean(video, dim=(0, 2, 3))
-            std = torch.std(video, dim=(0, 2, 3))
-            means.append(torch.unsqueeze(mean, 0))
-            stds.append(torch.unsqueeze(std, 0))
+            video, _ = self.loadSampleforploting(path, transform=transform, dtype=torch.float32)
+            psum += video.sum(axis=[0, 2, 3])
+            psum_sq += (video ** 2).sum(axis=[0, 2, 3])
             pbar.set_description(f"{self.prefix}Collecting data to calculate mean, std...")
-            if i == len(self.samples) - 1:
+            if i >= len(samples) - 10:
+                count = len(samples) * self.clip_len * self.imgsz * self.imgsz
+                total_mean = psum / count
+                total_var = (psum_sq / count) - (total_mean ** 2)
+                total_std = torch.sqrt(total_var)
+                self.mean = total_mean.cpu().numpy().tolist()
+                self.std = total_std.cpu().numpy().tolist()
                 pbar.set_description(f"{self.prefix}Calculating...")
-                self.mean = torch.mean(torch.concatenate(means, dim=0), dim=0).cpu().numpy().tolist()
-                self.std = torch.std(torch.concatenate(stds, dim=0), dim=0).cpu().numpy().tolist()
                 pbar.set_description(f"{self.prefix}Using mean: {self.mean}, std: {self.std} for this dataset.")
-                pbar.close()
 
     def __len__(self):
         return len(self.samples)
 
     def __getitem__(self, index):
         path, target = self.samples[index]
-        vid = torchvision.io.VideoReader(path, "video")
-        metadata = vid.get_metadata()
-        # Seek and return frames
-        n_lenght = self.clip_len * self.step
-
-        max_seek = metadata["video"]['duration'][0] - (n_lenght / metadata["video"]['fps'][0])
-        start = random.uniform(0., max_seek)
-        idx = 0
-        video = torch.zeros([self.clip_len, 3, self.imgsz, self.imgsz], dtype=torch.float32)
-        for i, frame in enumerate(itertools.islice(vid.seek(start), n_lenght)):
-            if i % self.step == 0:
-                if idx != self.clip_len:
-                    video[idx, ...] = self.transfom(frame['data'])
-                    idx += 1
-                else:
-                    break
+        video = self.loadSampleforploting(path=path, transform=self.transform, dtype=torch.float32)[0]
         video = torch.permute(video, dims=[1, 0, 2, 3])  # NCHW -> CNHW
         return video, target
 
-    def loadSampleforploting(self):
+    def loadSampleforploting(self, path=None, transform=None, dtype=torch.uint8):
         """choice a random sample to plot"""
-        path, target = random.choice(self.samples)
+        if transform is None:
+            transform = transforms.Compose([transforms.Resize((self.imgsz, self.imgsz))])
+        target = 0
+        if path is None:
+            path, target = random.choice(self.samples)
         vid = torchvision.io.VideoReader(path, "video")
         metadata = vid.get_metadata()
-        transform = transforms.Compose([transforms.Resize((self.imgsz, self.imgsz))])
         # Seek and return frames
         n_lenght = self.clip_len * self.step
 
         max_seek = metadata["video"]['duration'][0] - (n_lenght / metadata["video"]['fps'][0])
         start = random.uniform(0., max_seek)
         idx = 0
-        video = torch.zeros([self.clip_len, 3, self.imgsz, self.imgsz], dtype=torch.uint8)
+        video = torch.zeros([self.clip_len, 3, self.imgsz, self.imgsz], dtype=dtype)
         for i, frame in enumerate(itertools.islice(vid.seek(start), n_lenght)):
             if i % self.step == 0:
-                if idx != self.clip_len:
-                    video[idx, ...] = transform(frame['data'])
-                    idx += 1
-                else:
+                video[idx, ...] = transform(frame['data'])
+                idx += 1
+                if idx >= self.clip_len:
                     break
         return video, self.classes[target]
 

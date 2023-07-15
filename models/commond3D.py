@@ -113,28 +113,31 @@ class SP3D(nn.Module):
 
 
 class Classify3D(nn.Module):
-    def __init__(self, nc=80, ch=(), inplace=True):  # detection layer
+    def __init__(self, nc=80, dim=2048, ch=(), inplace=True):  # detection layer
         super(Classify3D, self).__init__()
         self.nc = nc  # number of classes
         list_conv = []
 
-        def calc(x, nc):
-            return 2048
+        def calc(input_channel, num_classes):
+            return int(max(input_channel, num_classes) * 2.048)
 
         for x in ch:
-            a = nn.Sequential(nn.Conv3d(x, calc(x, nc),
+            a = nn.Sequential(nn.AdaptiveAvgPool3d((1, 2, 4)),
+                              nn.Conv3d(x, dim,
                                         kernel_size=(1, 1, 1),
-                                        stride=(1, 2, 2),
+                                        stride=(1, 1, 1),
                                         bias=False),
-                              nn.BatchNorm3d(calc(x, nc)),
+                              nn.BatchNorm3d(dim),
                               nn.ReLU(),
-                              nn.AdaptiveAvgPool3d(1),
-                              nn.Flatten(1))
+                              )
             list_conv.append(a)
             self.m = nn.ModuleList(list_conv)  # output conv
-            self.linear = nn.Sequential(nn.Linear(sum([calc(x, nc) for x in ch]), nc, bias=False),
-                                        nn.BatchNorm1d(nc))
+            self.linear = nn.Sequential(nn.Linear(sum([dim for _ in ch]), nc, bias=True),
+                                        # nn.BatchNorm1d(nc)
+                                        )
             self.act = nn.Softmax(dim=1)
+            self.m2 = nn.Sequential(nn.AdaptiveAvgPool3d(1),
+                                    nn.Flatten(1))
             self.inplace = inplace
 
     def forward(self, x):
@@ -143,34 +146,36 @@ class Classify3D(nn.Module):
             out = m(x[i])  # conv
             z.append(out)
         out = concatenate(z, dim=1)
+        out = self.m2(out)
         out = self.linear(out)
         if torch.onnx.is_in_onnx_export():
             out = self.act(out)
         return out
 
     def fuse(self):
-        linear, bn = self.linear
-        output_channel = linear.out_features
-        w = linear.weight
-        mean = bn.running_mean
-        var_sqrt = torch.sqrt(bn.running_var + bn.eps)
+        if len(self.linear) > 1:
+            linear, bn = self.linear
+            output_channel = linear.out_features
+            w = linear.weight
+            mean = bn.running_mean
+            var_sqrt = torch.sqrt(bn.running_var + bn.eps)
 
-        beta = bn.weight
-        gamma = bn.bias
+            beta = bn.weight
+            gamma = bn.bias
 
-        if linear.bias is not None:
-            b = linear.bias
-        else:
-            b = mean.new_zeros(mean.shape)
+            if linear.bias is not None:
+                b = linear.bias
+            else:
+                b = mean.new_zeros(mean.shape)
 
-        w = w * (beta / var_sqrt).reshape([output_channel, 1])
-        b = (b - mean) / var_sqrt * beta + gamma
-        fused_linear = nn.Linear(linear.in_features,
-                                 linear.out_features)
+            w = w * (beta / var_sqrt).reshape([output_channel, 1])
+            b = (b - mean) / var_sqrt * beta + gamma
+            fused_linear = nn.Linear(linear.in_features,
+                                     linear.out_features)
 
-        fused_linear.weight = nn.Parameter(w)
-        fused_linear.bias = nn.Parameter(b)
-        self.linear = fused_linear
+            fused_linear.weight = nn.Parameter(w)
+            fused_linear.bias = nn.Parameter(b)
+            self.linear = fused_linear
 
 
 class ReOrg3D(nn.Module):
@@ -189,9 +194,8 @@ class ReOrg3D(nn.Module):
 def parse_model(d, ch, nc=80):  # model_dict, input_channels(3)
     logger.info('\n%3s%45s%3s%15s  %-50s%-30s' %
                 ('', 'from', 'n', 'params', 'module', 'arguments'))
-    anchors, nc, gd, gw = d['anchors'], d['nc'], d['depth_multiple'], d['width_multiple']
-    na = (len(anchors[0]) // 2) if isinstance(anchors, list) else anchors  # number of anchors
-    no = na * (nc + 5)  # number of outputs = anchors * (classes + 5)
+    nc, gd, gw = d['nc'], d['depth_multiple'], d['width_multiple']
+    DIM_C5 = d.get("DIM_C5", 2048)
 
     layers, save, c2 = [], [], ch[-1]  # layers, savelist, ch out
 
@@ -207,8 +211,7 @@ def parse_model(d, ch, nc=80):  # model_dict, input_channels(3)
         n = n_ = max(round(n * gd), 1) if n > 1 else n  # depth gain
         if m in [Conv3D, Conv2Plus1D, Conv3D_2P1, subway, ConvPathway1, ConvPathway2]:
             c1, c2 = ch[f], args[0]
-            if c2 != no:
-                c2 = make_divisible(c2 * gw, 8)
+            c2 = make_divisible(c2 * gw, 8)
 
             args = [c1, c2, *args[1:]]
 
@@ -221,8 +224,9 @@ def parse_model(d, ch, nc=80):  # model_dict, input_channels(3)
             args = [ch[f]]
         elif m in [Classify3D]:
             args.append([ch[x] for x in f])
-            if isinstance(args[1], int):  # number of anchors
-                args[1] = [list(range(args[1] * 2))] * len(f)
+            print(args)
+            if isinstance(args[2], int):  # number of anchors
+                args[2] = [list(range(args[2] * 2))] * len(f)
         elif m in [Concat]:
             c2 = sum([ch[x] for x in f])
         else:
@@ -468,7 +472,7 @@ if __name__ == '__main__':
     device = select_device(opt.device)[0]
 
     # Create model
-    model = Model3D(opt.cfg, nc=13).to(device)
+    model = Model3D(opt.cfg, nc=101).to(device)
     model.eval()
     model.fuse()
     img = torch.rand(1, 3, 16, 256, 256).to(device)

@@ -29,8 +29,9 @@ class Classify(nn.Module):
         super(Classify, self).__init__()
         self.nc = nc  # number of classes
         list_conv = []
-        def calc(x, nc):
-            return int(((x + nc) // 2) * 1.28)
+
+        def calc(input_channel, num_classes):
+            return int(max(input_channel, num_classes) * 1.28)
 
         for x in ch:
             a = nn.Sequential(nn.Conv2d(x, calc(x, nc),
@@ -43,7 +44,8 @@ class Classify(nn.Module):
                               nn.Flatten(1))
             list_conv.append(a)
         self.m = nn.ModuleList(list_conv)  # output conv
-        self.linear = nn.Linear(sum([calc(x, nc) for x in ch]), nc)
+        self.linear = nn.Linear(sum([calc(x, nc) for x in ch]), nc, bias=True)
+        self.act = nn.Softmax(1)
         self.inplace = inplace
 
     def forward(self, x):
@@ -53,11 +55,9 @@ class Classify(nn.Module):
             z.append(out)
         out = torch.concatenate(z, dim=1)
         out = self.linear(out)
+        if torch.onnx.is_in_onnx_export():
+            out = self.act(out)
         return out
-
-    def switch_to_deploy(self):
-        """add softmax activation for deploy"""
-        self.linear = nn.Sequential(self.linear, nn.Softmax(1))
 
 
 class Detect(nn.Module):
@@ -709,7 +709,6 @@ class Model(nn.Module):
                 m.forward = m.fuseforward
             elif isinstance(m, Classify):
                 pbar.set_description_str(f"switching to deploy {m.__class__.__name__}")
-                m.switch_to_deploy()
         return self
 
     def nms(self, mode=True, conf=0.25, iou=0.45, classes=None):  # add or remove NMS module
