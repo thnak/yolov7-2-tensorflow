@@ -630,9 +630,8 @@ class Model(nn.Module):
                     break
 
             if profile:
-                c = isinstance(m, (Detect, IDetect, IAuxDetect))
-                o = thop.profile(m, inputs=(x.copy() if c else x,), verbose=False)[
-                        0] / 1E9 * 2 if thop else 0  # FLOPS
+                c = isinstance(m, (Detect, IDetect, IAuxDetect, Classify))
+                o = thop.profile(m, inputs=(x.copy() if c else x,), verbose=False)[0] / 1E9 * 2 if thop else 0  # FLOPS
                 for _ in range(10):
                     m(x.copy() if c else x)
                 t = time_synchronized()
@@ -708,21 +707,24 @@ class Model(nn.Module):
                 m.fuse()
                 m.forward = m.fuseforward
             elif isinstance(m, Classify):
-                pbar.set_description_str(f"switching to deploy {m.__class__.__name__}")
+                pbar.set_description_str(f"adding Softmax to deploy {m.__class__.__name__}")
         return self
 
     def nms(self, mode=True, conf=0.25, iou=0.45, classes=None):  # add or remove NMS module
         present = type(self.model[-1]) is NMS  # last layer is NMS
-        if mode and not present:
-            print(f'Adding NMS... conf: {conf}, iou: {iou}, classes: {classes}')
-            m = NMS(conf=conf, iou=iou, classes=classes)  # module
-            m.f = -1  # from
-            m.i = self.model[-1].i + 1  # index
-            self.model.add_module(name='%s' % m.i, module=m)  # add
-            self.eval()
-        elif not mode and present:
-            print('Removing NMS... ')
-            self.model = self.model[:-1]  # remove
+        if present is not Classify:
+            if mode and not present:
+                logger.info(f'Adding NMS... conf: {conf}, iou: {iou}, classes: {classes}')
+                m = NMS(conf=conf, iou=iou, classes=classes)  # module
+                m.f = -1  # from
+                m.i = self.model[-1].i + 1  # index
+                self.model.add_module(name='%s' % m.i, module=m)  # add
+                self.eval()
+            elif not mode and present:
+                logger.info('Removing NMS... ')
+                self.model = self.model[:-1]  # remove
+        else:
+            logger.warn("Classify model does not support NMS.")
 
     def info(self, verbose=False, img_size=640):  # print model information
         return model_info(self, verbose, img_size)

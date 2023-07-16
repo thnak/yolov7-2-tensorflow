@@ -663,14 +663,19 @@ class LoadSampleforVideoClassify(Dataset):
             f"frame length: {self.clip_len}, step frame: {self.step}")
         self.transform = transforms.Compose([
             transforms.Resize((self.imgsz, self.imgsz), antialias=True),
+            transforms.Lambda(lambd=lambda x: self.rgb_2_gray(x)),
             transforms.Lambda(lambd=lambda x: x.float() / 255.),
             transforms.Normalize(mean=self.mean, std=self.std),
         ])
 
     def dataset_analysis(self):
+        """for now only return number of frame per classes"""
         dict_ = {target: 0 for sample, target in self.samples}
         for x, i in self.samples:
-            dict_[i] += 1
+            vid = torchvision.io.VideoReader(x, "video")
+            metadata = vid.get_metadata()
+            total_frames = metadata["video"]['duration'][0] * metadata["video"]['fps'][0]
+            dict_[i] += total_frames
         return dict_, self.classes
 
     def calculateMeanStd(self):
@@ -679,10 +684,9 @@ class LoadSampleforVideoClassify(Dataset):
         psum = torch.tensor([0.0, 0.0, 0.0])
         psum_sq = torch.tensor([0.0, 0.0, 0.0])
         pbar = tqdm(samples, total=len(samples))
-        transform = transforms.Compose(
-            [transforms.Resize((self.imgsz, self.imgsz), antialias=True),
-             transforms.Lambda(lambd=lambda x: x.float() / 255.),
-             ])
+        transform = transforms.Compose([transforms.Resize((self.imgsz, self.imgsz), antialias=True),
+                                        transforms.Lambda(lambd=lambda x: x.float() / 255.),
+                                        ])
 
         for i, (path, _) in enumerate(pbar):
             video, _ = self.loadSample(path, transform=transform, dtype=torch.float32)
@@ -719,13 +723,13 @@ class LoadSampleforVideoClassify(Dataset):
         vid = torchvision.io.VideoReader(path, "video")
         metadata = vid.get_metadata()
         # Seek and return frames
-        n_lenght = self.clip_len * self.step
+        n_length = self.clip_len * self.step
 
-        max_seek = metadata["video"]['duration'][0] - (n_lenght / metadata["video"]['fps'][0])
+        max_seek = metadata["video"]['duration'][0] - (n_length / metadata["video"]['fps'][0])
         start = random.uniform(0., max_seek)
         idx = 0
         video = torch.zeros([self.clip_len, 3, self.imgsz, self.imgsz], dtype=dtype)
-        for i, frame in enumerate(itertools.islice(vid.seek(start), n_lenght)):
+        for i, frame in enumerate(itertools.islice(vid.seek(start), n_length)):
             if i % self.step == 0:
                 video[idx, ...] = transform(frame['data'])
                 idx += 1
@@ -743,25 +747,26 @@ class LoadSampleforVideoClassify(Dataset):
         return torch.stack(videos, 0), torch.tensor(target, dtype=torch.long)
 
     @staticmethod
-    def rgb_2_gray(inputs: torch.Tensor):
+    def rgb_2_gray(inputs: torch.Tensor, p=0.5):
         """convert multiple rgb image to gray"""
         gray = torch.zeros_like(inputs)
         n_shape = len(inputs.shape)
-        if n_shape == 4:
-            for i, rgb in enumerate(inputs):
-                r, g, b = rgb[0, ...], rgb[1, ...], rgb[2, ...]
+        if random.random() <= p:
+            if n_shape == 4:
+                for i, rgb in enumerate(inputs):
+                    r, g, b = rgb[0, ...], rgb[1, ...], rgb[2, ...]
+                    g = 0.2989 * r + 0.5870 * g + 0.1140 * b
+                    gray[i, ...] = torch.stack([g, g, g])
+            elif n_shape == 3:
+                r, g, b = inputs[0, ...], inputs[1, ...], inputs[2, ...]
                 g = 0.2989 * r + 0.5870 * g + 0.1140 * b
-                gray[i, ...] = torch.stack([g, g, g])
-        elif n_shape == 3:
-            r, g, b = inputs[0, ...], inputs[1, ...], inputs[2, ...]
-            g = 0.2989 * r + 0.5870 * g + 0.1140 * b
-            gray = torch.stack([g, g, g])
-        else:
-            raise f"{n_shape} dimension does not support."
+                gray = torch.stack([g, g, g])
+            else:
+                raise f"{n_shape} dimension does not support."
         return gray
 
     @staticmethod
-    def randomDropFrame(inputs, p=0.5):
+    def randomDropFrame(inputs: torch.Tensor, p=0.5):
         if random.random() <= p:
             n_dims = len(inputs.shape)
             if n_dims == 4:
@@ -773,7 +778,7 @@ class LoadSampleforVideoClassify(Dataset):
         return inputs
 
     @staticmethod
-    def randomDropChannel(inputs, p=0.5):
+    def randomDropChannel(inputs: torch.Tensor, p=0.5):
         if random.random() <= p:
             channel = random.randint(0, 2)
             n_dims = len(inputs.shape)
@@ -803,6 +808,7 @@ class LoadSampleforVideoClassify(Dataset):
             else:
                 inputs = torch.flip(inputs, dims=[2])
         return inputs
+
 
 # end for video classify model
 

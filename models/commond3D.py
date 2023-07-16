@@ -9,7 +9,7 @@ import thop
 import torch
 from torch import nn, concatenate
 from utils.general import autopad, make_divisible, UPSAMPLEMODE, check_file, set_logging
-from utils.torch_utils import initialize_weights, scale_img, model_info, select_device
+from utils.torch_utils import initialize_weights, scale_img, model_info, select_device, time_synchronized
 from models.common import Concat
 from tqdm import tqdm
 
@@ -218,7 +218,10 @@ def parse_model(d, ch, nc=80):  # model_dict, input_channels(3)
             for x in range(2, 7):
                 args[x] = tuple(args[x]) if isinstance(args[x], list) else args[x]
                 args[x] = args[x] * 3 if len(args[x]) == 1 else args[x]
-            args[4] = (None, None, None) if "None" in args[4] else args[4]
+            args[4] = (None, None, None) if "None" in args[4] else args[4]  # pads
+            args[5] = args[5][0] if isinstance(args[5], tuple) else args[5]  # groups
+            if m is ConvPathway1:
+                args[2] = args[2][0] if isinstance(args[2], tuple) else args[2]
 
         elif m is nn.BatchNorm3d:
             args = [ch[f]]
@@ -268,22 +271,24 @@ class subway(nn.Module):
     def __init__(self, in_channels, out_channel, kernel_size=1, stride=1, pad=1, groups=1, dia=1, act=True,
                  dropout=0):
         super(subway, self).__init__()
-        mid_channels = in_channels * 2
+        mid_channels = int(in_channels * 2 + in_channels / 4)
         self.m = nn.Sequential(Conv3D(in_channels, mid_channels, kernel_size, stride, pad, groups, dia, act=nn.ReLU()),
                                Conv3D(mid_channels, mid_channels, 3, 1, 1, mid_channels, 1, act=nn.SiLU()),
                                Conv3D(mid_channels, out_channel, kernel_size, stride, pad, groups, dia, act=None))
+        self.post_act = nn.ReLU()
 
     def forward(self, x):
-        return x + self.m(x)
+        return self.post_act(x + self.m(x))
 
 
 class ConvPathway1(nn.Module):
     def __init__(self, in_channels, out_channel, kernel_size=1, stride=1, pad=1, groups=1, dia=1, act=True,
                  dropout=0):
         super(ConvPathway1, self).__init__()
-        mid_channels = in_channels * 2
-        self.conv1 = Conv3D(in_channels, mid_channels, 1, 1, 0, 1, 1, act=nn.ReLU)
-        self.res = globalsubWay(mid_channels, mid_channels, 1, (1, 2, 2), 0, 1, 1)
+        mid_channels = int(in_channels * 2 + in_channels / 4) * kernel_size
+
+        self.conv1 = Conv3D(in_channels, mid_channels, 1, 1, 0, 1, 1, act=nn.ReLU())
+        self.res = globalsubWay(mid_channels, mid_channels, 3, (1, 2, 2), 1, 1, 1)
         self.conv3 = Conv3D(mid_channels, out_channel, 1, (1, 1, 1), 0, 1, 1, act=None)
 
         self.conv2 = Conv3D(in_channels, out_channel, 1, (1, 2, 2), 0, 1, 1, act=None)
@@ -294,29 +299,24 @@ class ConvPathway1(nn.Module):
         out2 = self.conv2(x)
         out1 = self.res(out1)
         out1 = self.conv3(out1)
-        out = out1 + out2
-        return self.post_act(out)
+        return self.post_act(out1 + out2)
 
 
 class ConvPathway2(nn.Module):
     def __init__(self, in_channels, out_channel, kernel_size=1, stride=1, pad=1, groups=1, dia=1, act=True,
                  dropout=0):
         super(ConvPathway2, self).__init__()
-        mid_channels = in_channels * 2
-        self.conv1 = Conv3D(in_channels, mid_channels, 1, 1, 0, 1, 1, act=nn.ReLU)
-        self.res = globalsubWay(mid_channels, mid_channels, 1, 1, 0, 1, 1)
+        mid_channels = int(in_channels * 2 + in_channels / 4)
+        self.conv1 = Conv3D(in_channels, mid_channels, 1, 1, 0, 1, 1, act=nn.ReLU())
+        self.res = globalsubWay(mid_channels, mid_channels, (3, 3, 3), 1, 1, 1, 1)
         self.conv3 = Conv3D(mid_channels, out_channel, 1, (1, 1, 1), 0, 1, 1, act=None)
-
-        # self.conv2 = Conv3D(in_channels, out_channel, 1, (1, 2, 2), 0, 1, 1, act=None)
         self.post_act = nn.ReLU()
 
     def forward(self, x):
         out1 = self.conv1(x)
-        # out2 = self.conv2(x)
         out1 = self.res(out1)
         out1 = self.conv3(out1)
-        out = out1 + x
-        return self.post_act(out)
+        return self.post_act(out1 + x)
 
 
 # stop for X3D network
@@ -388,9 +388,22 @@ class Model3D(nn.Module):
     def forward_once(self, x, profile=False):
         y, dt = [], []  # outputs
         for m in self.model:
+
             if m.f != -1:  # if not from previou layer
                 x = y[m.f] if isinstance(m.f, int) else [
                     x if j == -1 else y[j] for j in m.f]  # from earlier layers
+            if profile:
+                c = isinstance(m, Classify3D)
+                o = thop.profile(m, inputs=(x.copy() if c else x,), verbose=False)[
+                        0] / 1E9 * 2 if thop else 0  # FLOPS
+                for _ in range(10):
+                    m(x.copy() if c else x)
+                t = time_synchronized()
+                for _ in range(10):
+                    m(x.copy() if c else x)
+                dt.append((time_synchronized() - t) * 100)
+                print('%10.1f%10.0f%10.1fms %-40s' % (o, m.np, dt[-1], m.type))
+
             x = m(x)  # run
             y.append(x if m.i in self.save else None)  # save output
 
@@ -479,8 +492,8 @@ if __name__ == '__main__':
     n_p = sum(x.numel() for x in model.parameters())  # number parameters
     print(f"MACs: {macs / 1E9 * 2:,} GMACs, {n_p:,} paramaters")
 
-    # y = model(img, profile=True)
-    # print(y.shape)
+    y = model(img, profile=True)
+    print(y.shape)
 
     from onnxsim import simplify
 
