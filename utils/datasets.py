@@ -655,17 +655,20 @@ class LoadSampleforVideoClassify(Dataset):
     def prepare(self):
         """prepare dataset"""
         self.calculateMeanStd()
-        self.step = max(1, self.step)
-        self.clip_len = max(1, self.clip_len)
-        self.clip_len, self.step = int(self.clip_len), int(self.step)
+        self.step = max(1, int(self.step))
+        self.clip_len = max(1, int(self.clip_len))
+
         logger.info(
-            f"{self.prefix} total {len(self.samples)} sample with {len(self.classes)} classes, "
+            f"{self.prefix} total {len(self.samples)} samples with {len(self.classes)} classes, "
             f"frame length: {self.clip_len}, step frame: {self.step}")
         self.transform = transforms.Compose([
-            transforms.Resize((self.imgsz, self.imgsz), antialias=True),
-            transforms.Lambda(lambd=lambda x: self.rgb_2_gray(x)),
-            transforms.Lambda(lambd=lambda x: x.float() / 255.),
-            transforms.Normalize(mean=self.mean, std=self.std),
+            transforms.Lambda(lambd=lambda x: self.randomDropChannel(x, 0.1)),
+            transforms.Lambda(lambd=lambda x: self.randomDropFrame(x, 0.1)),
+            transforms.Lambda(lambd=lambda x: self.hflip(x, 0.1)),
+            transforms.Lambda(lambd=lambda x: self.vflip(x, 0.1)),
+            # transforms.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1, hue=0),
+            transforms.Lambda(lambd=lambda x: self.rgb_2_gray(x, 0.1)),
+            transforms.Lambda(lambd=lambda x: self.normalize(x, self.mean, self.std))
         ])
 
     def dataset_analysis(self):
@@ -684,9 +687,8 @@ class LoadSampleforVideoClassify(Dataset):
         psum = torch.tensor([0.0, 0.0, 0.0])
         psum_sq = torch.tensor([0.0, 0.0, 0.0])
         pbar = tqdm(samples, total=len(samples))
-        transform = transforms.Compose([transforms.Resize((self.imgsz, self.imgsz), antialias=True),
-                                        transforms.Lambda(lambd=lambda x: x.float() / 255.),
-                                        ])
+        transform = transforms.Compose([
+            transforms.Lambda(lambd=lambda x: self.normalize(x, mean=self.mean, std=self.std))])
 
         for i, (path, _) in enumerate(pbar):
             video, _ = self.loadSample(path, transform=transform, dtype=torch.float32)
@@ -715,9 +717,7 @@ class LoadSampleforVideoClassify(Dataset):
     def loadSample(self, path=None, transform=None, dtype=torch.uint8):
         """choice a random sample to plot"""
         target = 0
-
-        if transform is None:
-            transform = transforms.Compose([transforms.Resize((self.imgsz, self.imgsz), antialias=True)])
+        resize_transform = transforms.Compose([transforms.Resize((self.imgsz, self.imgsz), antialias=True)])
         if path is None:
             path, target = random.choice(self.samples)
         vid = torchvision.io.VideoReader(path, "video")
@@ -731,14 +731,12 @@ class LoadSampleforVideoClassify(Dataset):
         video = torch.zeros([self.clip_len, 3, self.imgsz, self.imgsz], dtype=dtype)
         for i, frame in enumerate(itertools.islice(vid.seek(start), n_length)):
             if i % self.step == 0:
-                video[idx, ...] = transform(frame['data'])
+                video[idx, ...] = resize_transform(frame['data'])
                 idx += 1
                 if idx >= self.clip_len:
                     break
-        video = self.randomDropChannel(video, 0.1)
-        video = self.randomDropFrame(video, 0.1)
-        video = self.vflip(video, 0.1)
-        video = self.hflip(video, 0.1)
+        if transform:
+            video = transform(video)
         return video, self.classes[target]
 
     @staticmethod
@@ -747,41 +745,40 @@ class LoadSampleforVideoClassify(Dataset):
         return torch.stack(videos, 0), torch.tensor(target, dtype=torch.long)
 
     @staticmethod
-    def rgb_2_gray(inputs: torch.Tensor, p=0.5):
+    def rgb_2_gray(inputs: torch.Tensor, p=0.5) -> torch.Tensor:
         """convert multiple rgb image to gray"""
-        gray = torch.zeros_like(inputs)
-        n_shape = len(inputs.shape)
+        gray = inputs.float()
+        n_shape = inputs.dim()
         if random.random() <= p:
             if n_shape == 4:
-                for i, rgb in enumerate(inputs):
+                for i, rgb in enumerate(gray):
                     r, g, b = rgb[0, ...], rgb[1, ...], rgb[2, ...]
                     g = 0.2989 * r + 0.5870 * g + 0.1140 * b
                     gray[i, ...] = torch.stack([g, g, g])
             elif n_shape == 3:
-                r, g, b = inputs[0, ...], inputs[1, ...], inputs[2, ...]
+                r, g, b = gray[0, ...], gray[1, ...], gray[2, ...]
                 g = 0.2989 * r + 0.5870 * g + 0.1140 * b
                 gray = torch.stack([g, g, g])
             else:
                 raise f"{n_shape} dimension does not support."
-        return gray
+        return gray.round().to(torch.uint8)
 
     @staticmethod
-    def randomDropFrame(inputs: torch.Tensor, p=0.5):
+    def randomDropFrame(inputs: torch.Tensor, p=0.5) -> torch.Tensor:
         if random.random() <= p:
-            n_dims = len(inputs.shape)
+            n_dims = inputs.dim()
             if n_dims == 4:
                 frame_idx = random.randint(0, inputs.shape[0] - 1)
                 inputs[frame_idx, ...] = 0
             else:
                 inputs[...] = 0
-
         return inputs
 
     @staticmethod
-    def randomDropChannel(inputs: torch.Tensor, p=0.5):
+    def randomDropChannel(inputs: torch.Tensor, p=0.5) -> torch.Tensor:
         if random.random() <= p:
             channel = random.randint(0, 2)
-            n_dims = len(inputs.shape)
+            n_dims = inputs.dim()
             if n_dims == 4:
                 inputs[:, channel, ...] = 0
             else:
@@ -790,7 +787,7 @@ class LoadSampleforVideoClassify(Dataset):
         return inputs
 
     @staticmethod
-    def vflip(inputs: torch.Tensor, p=0.5):
+    def vflip(inputs: torch.Tensor, p=0.5) -> torch.Tensor:
         n_dims = len(inputs.shape)
         if random.random() <= p:
             if n_dims == 4:
@@ -800,13 +797,34 @@ class LoadSampleforVideoClassify(Dataset):
         return inputs
 
     @staticmethod
-    def hflip(inputs: torch.Tensor, p=0.5):
-        n_dims = len(inputs.shape)
+    def hflip(inputs: torch.Tensor, p=0.5) -> torch.Tensor:
+        n_dims = inputs.dim()
         if random.random() <= p:
             if n_dims == 4:
                 inputs = torch.flip(inputs, dims=[3])
             else:
                 inputs = torch.flip(inputs, dims=[2])
+        return inputs
+
+    @staticmethod
+    def normalize(inputs: torch.Tensor, mean: tuple, std: tuple, pixel_max_value=255.) -> torch.FloatTensor:
+        """input float tensor in NCHW or CHW format and return the same format"""
+        n_dims = inputs.dim()
+        inputs = inputs.float()
+        inputs /= pixel_max_value
+        if n_dims == 4:
+            n_dept, c, h, w = inputs.shape
+            assert c == len(mean), f"len of mean ({len(mean)}) must be equal to image channel ({c})"
+            for n in range(n_dept):
+                for x in range(c):
+                    inputs[n, x, ...] = (inputs[n, x, ...] - mean[x]) / (std[x])
+        elif n_dims == 3:
+            c, h, w = inputs.shape
+            assert c == len(mean), f"len of mean ({len(mean)}) must be equal to image channel ({c})"
+            for x in range(c):
+                inputs[x, ...] = (inputs[x, ...] - mean[x]) / (std[x])
+        else:
+            raise f"inputs tensor must be 3 or 4 dimension, got {n_dims}"
         return inputs
 
 
