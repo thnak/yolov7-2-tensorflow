@@ -12,8 +12,9 @@ from models.experimental import *
 from utils.autoanchor import check_anchor_order
 from utils.general import check_file, set_logging, colorstr, make_divisible, UPSAMPLEMODE
 from utils.general import check_requirements
-from utils.torch_utils import time_synchronized, fuse_conv_and_bn, model_info, scale_img, initialize_weights, \
-    select_device
+from utils.torch_utils import (time_synchronized, fuse_conv_and_bn, fuse_linear_and_bn, model_info, scale_img,
+                               initialize_weights,
+                               select_device)
 
 sys.path.append('./')  # to run '$ python *.py' files in subdirectories
 logger = logging.getLogger(__name__)
@@ -25,35 +26,30 @@ except ImportError:
 
 
 class Classify(nn.Module):
-    def __init__(self, nc=80, ch=(), inplace=True):  # detection layer
+    def __init__(self, nc=80, dim=2048, ch=(), inplace=True):  # detection layer
         super(Classify, self).__init__()
         self.nc = nc  # number of classes
         list_conv = []
 
-        def calc(input_channel, num_classes):
-            return int(max(input_channel, num_classes) * 1.28)
-
         for x in ch:
-            a = nn.Sequential(nn.Conv2d(x, calc(x, nc),
-                                        kernel_size=1,
-                                        stride=1,
-                                        bias=False),
-                              nn.BatchNorm2d(calc(x, nc)),
-                              nn.SiLU(),
-                              nn.AdaptiveAvgPool2d(1),
-                              nn.Flatten(1))
+            a = nn.Sequential(nn.AdaptiveAvgPool2d((2, 2)),
+                              Conv(x, dim, k=1, s=1, p=None, g=1, act=nn.ReLU))
             list_conv.append(a)
-        self.m = nn.ModuleList(list_conv)  # output conv
-        self.linear = nn.Linear(sum([calc(x, nc) for x in ch]), nc, bias=True)
+        self.m0 = nn.ModuleList(list_conv)  # output conv
+        self.m1 = nn.Sequential(nn.AdaptiveAvgPool2d(1),
+                                nn.Flatten(1))
+        self.linear = nn.Sequential(nn.Linear(sum([dim for _ in ch]), nc, bias=False),
+                                    nn.BatchNorm1d(nc))
         self.act = nn.Softmax(1)
         self.inplace = inplace
 
     def forward(self, x):
         z = []  # inference output
-        for i, m in enumerate(self.m):
+        for i, m in enumerate(self.m0):
             out = m(x[i])  # conv
             z.append(out)
         out = torch.concatenate(z, dim=1)
+        out = self.m1(out)
         out = self.linear(out)
         if torch.onnx.is_in_onnx_export():
             out = self.act(out)
@@ -531,7 +527,8 @@ class IV6Detect(nn.Module):
 
 
 class Model(nn.Module):
-    # model, input channels, number of classes
+    """Model for single frame object detection and classify"""
+
     def __init__(self, cfg='yolor-csp-c.yaml', ch=3, nc=None, anchors=None):
         super(Model, self).__init__()
         self.traced = False
@@ -553,7 +550,7 @@ class Model(nn.Module):
             logger.info(
                 f'Overriding model.yaml anchors with anchors={anchors}')
             self.yaml['anchors'] = round(anchors)  # override yaml value
-        self.model, self.save = parse_model(deepcopy(self.yaml), ch=[ch], nc=nc)  # model, savelist
+        self.model, self.save = self.parse_model(deepcopy(self.yaml), ch=[ch], nc=nc)  # model, savelist
         self.names = [str(i) for i in range(self.yaml['nc'])]  # default names
         self.best_fitness = 0.
         self.model_version = 0
@@ -691,23 +688,23 @@ class Model(nn.Module):
         print(prefix)
         pbar = tqdm(self.model.modules(), desc=f'', unit=" layer")
         for m in pbar:
+            pbar.set_description_str(f"fusing {m.__class__.__name__}")
             if isinstance(m, RepConv):
-                pbar.set_description_str(f"fusing {m.__class__.__name__}")
                 m.fuse_repvgg_block()
             elif isinstance(m, RepConv_OREPA):
-                pbar.set_description_str(f"switching to deploy {m.__class__.__name__}")
                 m.switch_to_deploy()
-            elif isinstance(m, (Conv, DWConv)) and hasattr(m, 'bn'):
-                pbar.set_description_str(f"fusing {m.__class__.__name__}")
-                m.conv = fuse_conv_and_bn(m.conv, m.bn)  # update conv
-                delattr(m, 'bn')  # remove batchnorm
-                m.forward = m.fuseforward  # update forward
+            elif isinstance(m, (Conv, DWConv)):
+                if hasattr(m, 'bn'):
+                    m.conv = fuse_conv_and_bn(m.conv, m.bn)
+                    delattr(m, 'bn')
+                    m.forward = m.fuseforward
             elif isinstance(m, (IDetect, IAuxDetect)):
-                pbar.set_description_str(f"fusing {m.__class__.__name__}")
                 m.fuse()
                 m.forward = m.fuseforward
             elif isinstance(m, Classify):
                 pbar.set_description_str(f"adding Softmax to deploy {m.__class__.__name__}")
+                if len(m.linear) > 1:
+                    m.linear = fuse_linear_and_bn(*m.linear)
         return self
 
     def nms(self, mode=True, conf=0.25, iou=0.45, classes=None):  # add or remove NMS module
@@ -738,6 +735,93 @@ class Model(nn.Module):
 
     def num_nodes(self):
         return len(self.yaml['backbone']) + len(self.yaml['head']) - 1
+
+    @staticmethod
+    def parse_model(d, ch, nc=80):  # model_dict, input_channels(3)
+        logger.info('\n%3s%45s%3s%15s  %-50s%-30s' %
+                    ('', 'from', 'n', 'params', 'module', 'arguments'))
+        anchors, nc, gd, gw = d['anchors'], d['nc'], d['depth_multiple'], d['width_multiple']
+        head_dim = d.get("head_dim", 1024)
+        na = (len(anchors[0]) // 2) if isinstance(anchors, list) else anchors  # number of anchors
+        no = na * (nc + 5)  # number of outputs = anchors * (classes + 5)
+
+        layers, save, c2 = [], [], ch[-1]  # layers, savelist, ch out
+
+        # from, number, module, args
+        for i, (f, n, m, args) in enumerate(d['backbone'] + d['head']):
+            m = eval(m) if isinstance(m, str) else m  # eval strings
+            for j, a in enumerate(args):
+                try:
+                    args[j] = a if a in UPSAMPLEMODE else (eval(a) if isinstance(a, str) else a)
+                except Exception as ex:
+                    logger.error(f'def parse: {ex}')
+
+            n = n_ = max(round(n * gd), 1) if n > 1 else n  # depth gain
+            if m in [nn.Conv2d, Conv, RobustConv, RobustConv2, DWConv, GhostConv, RepConv, RepConv_OREPA, DownC,
+                     SPP, SPPF, SPPCSP, SPPCSPC, SPPFCSPC, GhostSPPCSPC, MixConv2d, Focus, Stem, GhostStem, CrossConv,
+                     Bottleneck, BottleneckCSP, BottleneckCSPA, BottleneckCSPB, BottleneckCSPC,
+                     RepBottleneck, RepBottleneckCSPA, RepBottleneckCSPB, RepBottleneckCSPC,
+                     Res, ResCSPA, ResCSPB, ResCSPC,
+                     RepRes, RepResCSPA, RepResCSPB, RepResCSPC,
+                     ResX, ResXCSPA, ResXCSPB, ResXCSPC,
+                     RepResX, RepResXCSPA, RepResXCSPB, RepResXCSPC,
+                     Ghost, GhostCSPA, GhostCSPB, GhostCSPC,
+                     SwinTransformerBlock, STCSPA, STCSPB, STCSPC,
+                     SwinTransformer2Block, ST2CSPA, ST2CSPB, ST2CSPC, SimAM, C3, C3TR, C2f, CNeB, C3HB, C3STR, BoT3]:
+                c1, c2 = ch[f], args[0]
+                if c2 != no:  # if not output
+                    c2 = make_divisible(c2 * gw, 8)
+
+                args = [c1, *args[1:]] if m is SimAM else [c1, c2, *args[1:]]
+                if m in [DownC, SPPCSP, SPPCSPC, SPPFCSPC, GhostSPPCSPC, BottleneckCSP,
+                         BottleneckCSPA, BottleneckCSPB, BottleneckCSPC,
+                         RepBottleneckCSPA, RepBottleneckCSPB, RepBottleneckCSPC,
+                         ResCSPA, ResCSPB, ResCSPC,
+                         RepResCSPA, RepResCSPB, RepResCSPC,
+                         ResXCSPA, ResXCSPB, ResXCSPC,
+                         RepResXCSPA, RepResXCSPB, RepResXCSPC,
+                         GhostCSPA, GhostCSPB, GhostCSPC,
+                         STCSPA, STCSPB, STCSPC,
+                         ST2CSPA, ST2CSPB, ST2CSPC, C3, C3TR, C3Ghost, C3x, CNeB, C3HB, C3STR, BoT3]:
+                    args.insert(2, n)  # number of repeats
+                    n = 1
+
+            elif m is nn.BatchNorm2d:
+                args = [ch[f]]
+            elif m in [Concat, Chuncat]:
+                c2 = sum([ch[x] for x in f])
+            elif m is Shortcut:
+                c2 = ch[f[0]]
+            elif m is Foldcut:
+                c2 = ch[f] // 2
+            elif m in [Detect, IDetect, IAuxDetect, Classify]:
+                args.append([ch[x] for x in f])
+                n_ = 1 if m is not Classify else 2
+                if isinstance(args[n_], int):  # number of anchors
+                    args[n_] = [list(range(args[n_] * 2))] * len(f)
+            elif m in [IV6Detect, V6Detect]:
+                args.append([ch[x] for x in f])
+            elif m is ReOrg:
+                c2 = ch[f] * 4
+            elif m is Contract:
+                c2 = ch[f] * args[0] ** 2
+            elif m is Expand:
+                c2 = ch[f] // args[0] ** 2
+
+            else:
+                c2 = ch[f]
+            m_ = nn.Sequential(*[m(*args) for _ in range(n)]) if n > 1 else m(*args)  # module
+            t = str(m)[8:-2].replace('__main__.', '')  # module type
+            nparam = sum([x.numel() for x in m_.parameters()])  # number params
+            # index, 'from', type, number params
+            m_.i, m_.f, m_.type, m_.np = i, f, t, nparam
+            logger.info('%3s%45s%3s%15s  %-50s%-30s' % (i, f, n_, f"{nparam:,}", t, args))  # print
+            save.extend(x % i for x in ([f] if isinstance(f, int) else f) if x != -1)  # append to savelist
+            layers.append(m_)
+            if i == 0:
+                ch = []
+            ch.append(c2)
+        return nn.Sequential(*layers), sorted(save)
 
 
 class iOSModel(torch.nn.Module):
@@ -1227,91 +1311,6 @@ class TensorRT_Engine(object):
             self.cv2.putText(img, text, (c1[0], c1[1] - 2), 0, 0.4,
                              txt_color, thickness=1, lineType=self.cv2.LINE_AA)
         return img
-
-
-def parse_model(d, ch, nc=80):  # model_dict, input_channels(3)
-    logger.info('\n%3s%45s%3s%15s  %-50s%-30s' %
-                ('', 'from', 'n', 'params', 'module', 'arguments'))
-    anchors, nc, gd, gw = d['anchors'], d['nc'], d['depth_multiple'], d['width_multiple']
-    na = (len(anchors[0]) // 2) if isinstance(anchors, list) else anchors  # number of anchors
-    no = na * (nc + 5)  # number of outputs = anchors * (classes + 5)
-
-    layers, save, c2 = [], [], ch[-1]  # layers, savelist, ch out
-
-    # from, number, module, args
-    for i, (f, n, m, args) in enumerate(d['backbone'] + d['head']):
-        m = eval(m) if isinstance(m, str) else m  # eval strings
-        for j, a in enumerate(args):
-            try:
-                args[j] = a if a in UPSAMPLEMODE else (eval(a) if isinstance(a, str) else a)
-            except Exception as ex:
-                logger.error(f'def parse: {ex}')
-
-        n = n_ = max(round(n * gd), 1) if n > 1 else n  # depth gain
-        if m in [nn.Conv2d, Conv, RobustConv, RobustConv2, DWConv, GhostConv, RepConv, RepConv_OREPA, DownC,
-                 SPP, SPPF, SPPCSP, SPPCSPC, SPPFCSPC, GhostSPPCSPC, MixConv2d, Focus, Stem, GhostStem, CrossConv,
-                 Bottleneck, BottleneckCSP, BottleneckCSPA, BottleneckCSPB, BottleneckCSPC,
-                 RepBottleneck, RepBottleneckCSPA, RepBottleneckCSPB, RepBottleneckCSPC,
-                 Res, ResCSPA, ResCSPB, ResCSPC,
-                 RepRes, RepResCSPA, RepResCSPB, RepResCSPC,
-                 ResX, ResXCSPA, ResXCSPB, ResXCSPC,
-                 RepResX, RepResXCSPA, RepResXCSPB, RepResXCSPC,
-                 Ghost, GhostCSPA, GhostCSPB, GhostCSPC,
-                 SwinTransformerBlock, STCSPA, STCSPB, STCSPC,
-                 SwinTransformer2Block, ST2CSPA, ST2CSPB, ST2CSPC, SimAM, C3, C3TR, C2f, CNeB, C3HB, C3STR, BoT3]:
-            c1, c2 = ch[f], args[0]
-            if c2 != no:  # if not output
-                c2 = make_divisible(c2 * gw, 8)
-
-            args = [c1, *args[1:]] if m is SimAM else [c1, c2, *args[1:]]
-            if m in [DownC, SPPCSP, SPPCSPC, SPPFCSPC, GhostSPPCSPC, BottleneckCSP,
-                     BottleneckCSPA, BottleneckCSPB, BottleneckCSPC,
-                     RepBottleneckCSPA, RepBottleneckCSPB, RepBottleneckCSPC,
-                     ResCSPA, ResCSPB, ResCSPC,
-                     RepResCSPA, RepResCSPB, RepResCSPC,
-                     ResXCSPA, ResXCSPB, ResXCSPC,
-                     RepResXCSPA, RepResXCSPB, RepResXCSPC,
-                     GhostCSPA, GhostCSPB, GhostCSPC,
-                     STCSPA, STCSPB, STCSPC,
-                     ST2CSPA, ST2CSPB, ST2CSPC, C3, C3TR, C3Ghost, C3x, CNeB, C3HB, C3STR, BoT3]:
-                args.insert(2, n)  # number of repeats
-                n = 1
-
-        elif m is nn.BatchNorm2d:
-            args = [ch[f]]
-        elif m in [Concat, Chuncat]:
-            c2 = sum([ch[x] for x in f])
-        elif m is Shortcut:
-            c2 = ch[f[0]]
-        elif m is Foldcut:
-            c2 = ch[f] // 2
-        elif m in [Detect, IDetect, IAuxDetect, Classify]:
-            args.append([ch[x] for x in f])
-            if isinstance(args[1], int):  # number of anchors
-                args[1] = [list(range(args[1] * 2))] * len(f)
-        elif m in [IV6Detect, V6Detect]:
-            args.append([ch[x] for x in f])
-        elif m is ReOrg:
-            c2 = ch[f] * 4
-        elif m is Contract:
-            c2 = ch[f] * args[0] ** 2
-        elif m is Expand:
-            c2 = ch[f] // args[0] ** 2
-
-        else:
-            c2 = ch[f]
-        m_ = nn.Sequential(*[m(*args) for _ in range(n)]) if n > 1 else m(*args)  # module
-        t = str(m)[8:-2].replace('__main__.', '')  # module type
-        nparam = sum([x.numel() for x in m_.parameters()])  # number params
-        # index, 'from', type, number params
-        m_.i, m_.f, m_.type, m_.np = i, f, t, nparam
-        logger.info('%3s%45s%3s%15s  %-50s%-30s' % (i, f, n_, f"{nparam:,}", t, args))  # print
-        save.extend(x % i for x in ([f] if isinstance(f, int) else f) if x != -1)  # append to savelist
-        layers.append(m_)
-        if i == 0:
-            ch = []
-        ch.append(c2)
-    return nn.Sequential(*layers), sorted(save)
 
 
 if __name__ == '__main__':

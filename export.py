@@ -4,7 +4,6 @@ import logging
 import sys
 import time
 import warnings
-from copy import deepcopy
 from pathlib import Path
 
 import numpy as np
@@ -13,8 +12,10 @@ import torch.nn as nn
 from torch.utils.mobile_optimizer import optimize_for_mobile
 
 from models.common import (ReOrg, Conv)
+from models.commond3D import Model3D
 from models.experimental import attempt_load, End2End
 from models.yolo import (IDetect, Detect, IAuxDetect)
+
 from utils.activations import SiLU
 from utils.general import (set_logging, check_img_size, check_requirements, colorstr, ONNX_OPSET, ONNX_OPSET_TARGET,
                            MAX_DET)
@@ -105,33 +106,39 @@ if __name__ == '__main__':
             ckpt.pop('optimizer', None)
             ckpt.pop('updates', None)
             # prune(model)
+        is_3D = isinstance(model, Model3D)
 
         best_fitness = model.best_fitness if hasattr(model, 'best_fitness') else 0.
         total_image = model.total_image if hasattr(model, 'total_image') else [0]
         gs = int(max(model.stride.max(), 32))  # grid size (max stride)
 
         input_shape = opt.imgsz
-        if input_shape != -1:
-            if isinstance(input_shape, (tuple, list)):
-                input_shape = [3, check_img_size(input_shape[0], s=gs),
-                               check_img_size(input_shape[1 if len(input_shape) > 1 else 0], s=gs)]
+        if not is_3D:
+            if input_shape != -1:
+                if isinstance(input_shape, (tuple, list)):
+                    input_shape = [3, check_img_size(input_shape[0], s=gs),
+                                   check_img_size(input_shape[1 if len(input_shape) > 1 else 0], s=gs)]
+                else:
+                    input_shape = check_img_size(input_shape)
+                    input_shape = [3, input_shape, input_shape]
+                logging.info(f"{exPrefix} using user input shape {input_shape}")
             else:
-                input_shape = check_img_size(input_shape)
-                input_shape = [3, input_shape, input_shape]
-            logging.info(f"{exPrefix} using user input shape {input_shape}")
-
+                if hasattr(model, "input_shape"):
+                    input_shape = model.input_shape
+                    logging.info(f"{exPrefix} using input shape from pre-trained model")
+                else:
+                    input_shape = [3, 640, 640] if model.is_p5() else [3, 1280, 1280]
+                    logging.info(
+                        f'{exPrefix} using default input shape. to export with special input shape please use --imgsz arg arg')
+                if any([tensorFlowjs, tensorFlowLite, saved_Model, graphDef]):
+                    input_shape = [3, max(input_shape), max(input_shape)]
+                    logging.info(
+                        f"{exPrefix} switching to square shape... input_shape: {input_shape}. since some format does not support rectangle shape")
         else:
-            if hasattr(model, "input_shape"):
-                input_shape = model.input_shape
-                logging.info(f"{exPrefix} using input shape from pre-trained model")
-            else:
-                input_shape = [3, 640, 640] if model.is_p5() else [3, 1280, 1280]
-                logging.info(
-                    f'{exPrefix} using default input shape. to export with special input shape please use --imgsz arg arg')
-            if any([tensorFlowjs, tensorFlowLite, saved_Model, graphDef]):
-                input_shape = [3, max(input_shape), max(input_shape)]
-                logging.info(
-                    f"{exPrefix} switching to square shape... input_shape: {input_shape}. since some format does not support rectangle shape")
+            input_shape = model.input_shape
+            tensorFlowjs = tensorFlowLite = coreML = RKNN = graphDef = saved_Model = openVINO = False
+            ONNX = True
+            logging.info(f"{exPrefix} Exporting for Video Classify model. ")
 
         model_version = model.model_version if hasattr(model, 'model_version') else 0
         model.best_fitness = best_fitness
@@ -147,7 +154,6 @@ if __name__ == '__main__':
         start_points_2_break = 0
         for k, m in model.named_modules():
             end_points_2_break.append(k)
-
             m._non_persistent_buffers_set = set()  # pytorch 1.6.0 compatibility
             if isinstance(m, ReOrg):
                 start_points_2_break = []
@@ -375,13 +381,11 @@ if __name__ == '__main__':
                 except Exception as e:
                     logging.info(f'{prefix} Simplifier failure❌: {e}')
 
-            # onnx.save(onnx_model, f=f)
-
-            # onnx_model = onnx.load(f)  # load onnx model
             onnx.checker.check_model(onnx_model)  # check onnx model
             logging.info(f'{prefix} writing metadata for model...')
             if hasattr(model, "is_Classify"):
-                anchor_grid = model.model[-1].anchor_grid.detach().cpu().numpy().tolist() if not model.is_Classify else None
+                anchor_grid = model.model[
+                    -1].anchor_grid.detach().cpu().numpy().tolist() if not model.is_Classify else None
                 anchors = model.model[-1].anchors.detach().cpu().numpy().tolist() if not model.is_Classify else None
             else:
                 anchor_grid = model.model[-1].anchor_grid.detach().cpu().numpy().tolist()

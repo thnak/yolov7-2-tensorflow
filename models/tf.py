@@ -498,85 +498,6 @@ class TFDetect(Layer):
         return tf.cast(tf.reshape(tf.stack([xv, yv], 2), [1, 1, ny * nx, 2]), dtype=tf.float32)
 
 
-def parse_model(d, ch, model, imgsz):  # model_dict, input_channels(3)
-    logger.info(f"\n{'':>3}{'from':>42}{'n':>3}{'params':>10}  {'module':<40}{'arguments':<30}")
-    anchors, nc, gd, gw = d['anchors'], d['nc'], d['depth_multiple'], d['width_multiple']
-    na = (len(anchors[0]) // 2) if isinstance(anchors, list) else anchors  # number of anchors
-    no = na * (nc + 5)  # number of outputs = anchors * (classes + 5)
-
-    layers, save, c2 = [], [], ch[-1]  # layers, savelist, ch out
-    for i, (f, n, m, args) in enumerate(d['backbone'] + d['head']):  # from, number, module, args
-        m_str = m
-        m = eval(m) if isinstance(m, str) else m  # eval strings
-        for j, a in enumerate(args):
-            try:
-                args[j] = a if a in UPSAMPLEMODE else (eval(a) if isinstance(a, str) else a)
-            except Exception as ex:
-                logger.info(ex)
-
-        n = max(round(n * gd), 1) if n > 1 else n  # depth gain
-        if m in [nn.Conv2d, Conv, RobustConv, RobustConv2, DWConv, GhostConv, RepConv, RepConv_OREPA, DownC,
-                 SPP, SPPF, SPPCSPC, SPPFCSPC, GhostSPPCSPC, MixConv2d, Focus, Stem, GhostStem, CrossConv,
-                 Bottleneck, BottleneckCSPA, BottleneckCSPB, BottleneckCSPC,
-                 RepBottleneck, RepBottleneckCSPA, RepBottleneckCSPB, RepBottleneckCSPC,
-                 Res, ResCSPA, ResCSPB, ResCSPC,
-                 RepRes, RepResCSPA, RepResCSPB, RepResCSPC,
-                 ResX, ResXCSPA, ResXCSPB, ResXCSPC,
-                 RepResX, RepResXCSPA, RepResXCSPB, RepResXCSPC,
-                 Ghost, GhostCSPA, GhostCSPB, GhostCSPC,
-                 SwinTransformerBlock, STCSPA, STCSPB, STCSPC,
-                 SwinTransformer2Block, ST2CSPA, ST2CSPB, ST2CSPC, C3]:
-            c1, c2 = ch[f], args[0]
-            if c2 != no:  # if not output
-                c2 = make_divisible(c2 * gw, 8)
-
-            args = [c1, c2, *args[1:]]
-            if m is Conv:
-                args = args[:7]  # argument number compatibility error from WongKinYiu and this repo
-            if m in [DownC, SPPCSPC, GhostSPPCSPC,
-                     BottleneckCSPA, BottleneckCSPB, BottleneckCSPC,
-                     RepBottleneckCSPA, RepBottleneckCSPB, RepBottleneckCSPC,
-                     ResCSPA, ResCSPB, ResCSPC,
-                     RepResCSPA, RepResCSPB, RepResCSPC,
-                     ResXCSPA, ResXCSPB, ResXCSPC,
-                     RepResXCSPA, RepResXCSPB, RepResXCSPC,
-                     GhostCSPA, GhostCSPB, GhostCSPC,
-                     STCSPA, STCSPB, STCSPC,
-                     ST2CSPA, ST2CSPB, ST2CSPC]:
-                args.insert(2, n)  # number of repeats
-                n = 1
-        elif m is nn.BatchNorm2d:
-            args = [ch[f]]
-        elif m in [Concat, Chuncat]:
-            c2 = sum(ch[-1 if x == -1 else x + 1] for x in f)
-        elif m is Shortcut:
-            c2 = ch[f[0]]
-        elif m is Foldcut:
-            c2 = ch[f] // 2
-        elif m is ReOrg:
-            c2 = ch[f] * 4
-        elif m in [Detect, IDetect, IAuxDetect]:
-            assert m is Detect, 'IDetect and IAuxDetect is not support, please preparameter'
-            args.append([ch[x + 1] for x in f])
-            if isinstance(args[1], int):  # number of anchors
-                args[1] = [list(range(args[1] * 2))] * len(f)
-            args.append(imgsz)
-        else:
-            c2 = ch[f]
-        tf_m = eval('TF' + m_str.replace('IDetect', 'Detect').replace('nn.', '').replace('IAuxDetect', 'Detect'))
-        m_ = keras.Sequential([tf_m(*args, w=model.model[i][j]) for j in range(n)]) if n > 1 \
-            else tf_m(*args, w=model.model[i])  # module
-        torch_m = nn.Sequential(*[m(*args) for _ in range(n)]) if n > 1 else m(*args)  # module
-        t = str(m)[8:-2].replace('__main__.', '')  # module type
-        nparam = sum([x.numel() for x in torch_m.parameters()])  # number params
-        m_.i, m_.f, m_.type, m_.np = i, f, t, nparam  # attach index, 'from' index, type, number params
-        logger.info('%3s%42s%3s%10.0f  %-40s%-30s' % (i, f, n, nparam, t, args))  # print
-        save.extend(x % i for x in ([f] if isinstance(f, int) else f) if x != -1)  # append to savelist
-        layers.append(m_)
-        ch.append(c2)
-    return keras.Sequential(layers), sorted(save)
-
-
 class TFModel:
     def __init__(self, cfg='cfg/yolov7.yaml', ch=3, nc=None, model=None, imgsz=(640, 640)):  # model, channels, classes
         super().__init__()
@@ -592,7 +513,7 @@ class TFModel:
         if nc and nc != self.yaml['nc']:
             logger.info(f"Overriding {cfg} nc={self.yaml['nc']} with nc={nc}")
             self.yaml['nc'] = nc  # override yaml value
-        self.model, self.savelist = parse_model(deepcopy(self.yaml), ch=[ch], model=model, imgsz=imgsz)
+        self.model, self.savelist = self.parse_model(deepcopy(self.yaml), ch=[ch], model=model, imgsz=imgsz)
 
     def __call__(self,
                  inputs,
@@ -636,6 +557,85 @@ class TFModel:
         # Convert nx4 boxes from [x, y, w, h] to [x1, y1, x2, y2] where xy1=top-left, xy2=bottom-right
         x, y, w, h = tf.split(xywh, num_or_size_splits=4, axis=-1)
         return tf.concat([x - w / 2, y - h / 2, x + w / 2, y + h / 2], axis=-1)
+
+    @staticmethod
+    def parse_model(d, ch, model, imgsz):  # model_dict, input_channels(3)
+        logger.info(f"\n{'':>3}{'from':>42}{'n':>3}{'params':>10}  {'module':<40}{'arguments':<30}")
+        anchors, nc, gd, gw = d['anchors'], d['nc'], d['depth_multiple'], d['width_multiple']
+        na = (len(anchors[0]) // 2) if isinstance(anchors, list) else anchors  # number of anchors
+        no = na * (nc + 5)  # number of outputs = anchors * (classes + 5)
+
+        layers, save, c2 = [], [], ch[-1]  # layers, savelist, ch out
+        for i, (f, n, m, args) in enumerate(d['backbone'] + d['head']):  # from, number, module, args
+            m_str = m
+            m = eval(m) if isinstance(m, str) else m  # eval strings
+            for j, a in enumerate(args):
+                try:
+                    args[j] = a if a in UPSAMPLEMODE else (eval(a) if isinstance(a, str) else a)
+                except Exception as ex:
+                    logger.info(ex)
+
+            n = max(round(n * gd), 1) if n > 1 else n  # depth gain
+            if m in [nn.Conv2d, Conv, RobustConv, RobustConv2, DWConv, GhostConv, RepConv, RepConv_OREPA, DownC,
+                     SPP, SPPF, SPPCSPC, SPPFCSPC, GhostSPPCSPC, MixConv2d, Focus, Stem, GhostStem, CrossConv,
+                     Bottleneck, BottleneckCSPA, BottleneckCSPB, BottleneckCSPC,
+                     RepBottleneck, RepBottleneckCSPA, RepBottleneckCSPB, RepBottleneckCSPC,
+                     Res, ResCSPA, ResCSPB, ResCSPC,
+                     RepRes, RepResCSPA, RepResCSPB, RepResCSPC,
+                     ResX, ResXCSPA, ResXCSPB, ResXCSPC,
+                     RepResX, RepResXCSPA, RepResXCSPB, RepResXCSPC,
+                     Ghost, GhostCSPA, GhostCSPB, GhostCSPC,
+                     SwinTransformerBlock, STCSPA, STCSPB, STCSPC,
+                     SwinTransformer2Block, ST2CSPA, ST2CSPB, ST2CSPC, C3]:
+                c1, c2 = ch[f], args[0]
+                if c2 != no:  # if not output
+                    c2 = make_divisible(c2 * gw, 8)
+
+                args = [c1, c2, *args[1:]]
+                if m is Conv:
+                    args = args[:7]  # argument number compatibility error from WongKinYiu and this repo
+                if m in [DownC, SPPCSPC, GhostSPPCSPC,
+                         BottleneckCSPA, BottleneckCSPB, BottleneckCSPC,
+                         RepBottleneckCSPA, RepBottleneckCSPB, RepBottleneckCSPC,
+                         ResCSPA, ResCSPB, ResCSPC,
+                         RepResCSPA, RepResCSPB, RepResCSPC,
+                         ResXCSPA, ResXCSPB, ResXCSPC,
+                         RepResXCSPA, RepResXCSPB, RepResXCSPC,
+                         GhostCSPA, GhostCSPB, GhostCSPC,
+                         STCSPA, STCSPB, STCSPC,
+                         ST2CSPA, ST2CSPB, ST2CSPC]:
+                    args.insert(2, n)  # number of repeats
+                    n = 1
+            elif m is nn.BatchNorm2d:
+                args = [ch[f]]
+            elif m in [Concat, Chuncat]:
+                c2 = sum(ch[-1 if x == -1 else x + 1] for x in f)
+            elif m is Shortcut:
+                c2 = ch[f[0]]
+            elif m is Foldcut:
+                c2 = ch[f] // 2
+            elif m is ReOrg:
+                c2 = ch[f] * 4
+            elif m in [Detect, IDetect, IAuxDetect]:
+                assert m is Detect, 'IDetect and IAuxDetect is not support, please preparameter'
+                args.append([ch[x + 1] for x in f])
+                if isinstance(args[1], int):  # number of anchors
+                    args[1] = [list(range(args[1] * 2))] * len(f)
+                args.append(imgsz)
+            else:
+                c2 = ch[f]
+            tf_m = eval('TF' + m_str.replace('IDetect', 'Detect').replace('nn.', '').replace('IAuxDetect', 'Detect'))
+            m_ = keras.Sequential([tf_m(*args, w=model.model[i][j]) for j in range(n)]) if n > 1 \
+                else tf_m(*args, w=model.model[i])  # module
+            torch_m = nn.Sequential(*[m(*args) for _ in range(n)]) if n > 1 else m(*args)  # module
+            t = str(m)[8:-2].replace('__main__.', '')  # module type
+            nparam = sum([x.numel() for x in torch_m.parameters()])  # number params
+            m_.i, m_.f, m_.type, m_.np = i, f, t, nparam  # attach index, 'from' index, type, number params
+            logger.info('%3s%42s%3s%10.0f  %-40s%-30s' % (i, f, n, nparam, t, args))  # print
+            save.extend(x % i for x in ([f] if isinstance(f, int) else f) if x != -1)  # append to savelist
+            layers.append(m_)
+            ch.append(c2)
+        return keras.Sequential(layers), sorted(save)
 
 
 class AgnosticNMS(Layer):

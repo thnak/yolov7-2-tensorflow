@@ -297,33 +297,62 @@ def prune(model, amount=0.3):
 def fuse_conv_and_bn(conv, bn):
     """Fuse convolution and batchnorm layers https://tehnokv.com/posts/fusing-batchnorm-and-conv/"""
     if isinstance(conv, nn.Conv2d):
-        fusedconv = nn.Conv2d(conv.in_channels,
-                              conv.out_channels,
-                              kernel_size=conv.kernel_size,
-                              stride=conv.stride,
-                              padding=conv.padding,
-                              groups=conv.groups,
-                              bias=True).requires_grad_(False).to(conv.weight.device)
+        fused_conv = nn.Conv2d(conv.in_channels,
+                               conv.out_channels,
+                               kernel_size=conv.kernel_size,
+                               stride=conv.stride,
+                               padding=conv.padding,
+                               groups=conv.groups,
+                               bias=True)
     else:
-        fusedconv = nn.Conv3d(conv.in_channels,
-                              conv.out_channels,
-                              kernel_size=conv.kernel_size,
-                              stride=conv.stride,
-                              padding=conv.padding,
-                              groups=conv.groups,
-                              bias=True).requires_grad_(False).to(conv.weight.device)
+        fused_conv = nn.Conv3d(conv.in_channels,
+                               conv.out_channels,
+                               kernel_size=conv.kernel_size,
+                               stride=conv.stride,
+                               padding=conv.padding,
+                               groups=conv.groups,
+                               bias=True)
+
+    fused_conv = fused_conv.to(conv.weight.device)
+    fused_conv = fused_conv.requires_grad_(False)
 
     # prepare filters
     w_conv = conv.weight.clone().view(conv.out_channels, -1)
     w_bn = torch.diag(bn.weight.div(torch.sqrt(bn.eps + bn.running_var)))
-    fusedconv.weight.copy_(torch.mm(w_bn, w_conv).view(fusedconv.weight.shape))
+    fused_conv.weight.copy_(torch.mm(w_bn, w_conv).view(fused_conv.weight.shape))
 
     # prepare spatial bias
     b_conv = torch.zeros(conv.weight.size(0), device=conv.weight.device) if conv.bias is None else conv.bias
     b_bn = bn.bias - bn.weight.mul(bn.running_mean).div(torch.sqrt(bn.running_var + bn.eps))
-    fusedconv.bias.copy_(torch.mm(w_bn, b_conv.reshape(-1, 1)).reshape(-1) + b_bn)
+    fused_conv.bias.copy_(torch.mm(w_bn, b_conv.reshape(-1, 1)).reshape(-1) + b_bn)
 
-    return fusedconv
+    return fused_conv
+
+
+def fuse_linear_and_bn(linear, bn):
+    """Can we fuse Linear with BatchNorm parameters
+    https://stackoverflow.com/questions/63706428/can-we-fuse-linear-with-batchnorm-parameters"""
+    output_channel = linear.out_features
+    w = linear.weight
+    mean = bn.running_mean
+    var_sqrt = torch.sqrt(bn.running_var + bn.eps)
+
+    beta = bn.weight
+    gamma = bn.bias
+
+    if linear.bias is not None:
+        b = linear.bias
+    else:
+        b = mean.new_zeros(mean.shape)
+
+    w = w * (beta / var_sqrt).reshape([output_channel, 1])
+    b = (b - mean) / var_sqrt * beta + gamma
+    fused_linear = nn.Linear(linear.in_features,
+                             linear.out_features, bias=True)
+
+    fused_linear.weight = nn.Parameter(w)
+    fused_linear.bias = nn.Parameter(b)
+    return fused_linear
 
 
 def model_info(model, verbose=False, img_size=640):

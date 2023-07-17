@@ -1,6 +1,5 @@
 import argparse
 import logging
-import math
 from copy import deepcopy
 from pathlib import Path
 
@@ -9,8 +8,8 @@ import thop
 import torch
 from torch import nn, concatenate
 from utils.general import autopad, make_divisible, UPSAMPLEMODE, check_file, set_logging
-from utils.torch_utils import initialize_weights, scale_img, model_info, select_device, time_synchronized, \
-    fuse_conv_and_bn
+from utils.torch_utils import (initialize_weights, scale_img, model_info, select_device, time_synchronized,
+                               fuse_conv_and_bn, fuse_linear_and_bn)
 from models.common import Concat
 from tqdm import tqdm
 
@@ -33,24 +32,6 @@ class Conv3D(nn.Module):
                               groups=g if isinstance(g, int) else g[0],
                               dilation=d,
                               bias=False)
-        self.bn = nn.BatchNorm3d(c2)
-        self.drop = nn.Dropout(p=dropout)
-        self.act = nn.SiLU() if act is True else (act if isinstance(act, nn.Module) else nn.Identity())
-
-    def forward(self, x):
-        return self.drop(self.act(self.bn(self.conv(x))))
-
-    def fuseforward(self, x):
-        return self.act(self.conv(x))
-
-
-class Conv3D_2P1(nn.Module):
-    """Standard convolution"""
-
-    def __init__(self, c1, c2, k=(1, 1, 1), s=(1, 1, 1), p=(None, None, None), g=(1,), d=(1,), act=True,
-                 dropout=0):
-        super(Conv3D_2P1, self).__init__()
-        self.conv = Conv2Plus1D(c1, c2, k=k, s=s, p=p, g=g, d=d, act=act, dropout=dropout)
         self.bn = nn.BatchNorm3d(c2)
         self.drop = nn.Dropout(p=dropout)
         self.act = nn.SiLU() if act is True else (act if isinstance(act, nn.Module) else nn.Identity())
@@ -128,11 +109,11 @@ class Classify3D(nn.Module):
         list_conv = []
 
         for x in ch:
-            a = nn.Sequential(nn.AdaptiveAvgPool3d((1, 2, 4)),
+            a = nn.Sequential(nn.AdaptiveAvgPool3d((1, 4, 4)),
                               Conv3D(x, dim, k=(1, 1, 1), s=(1, 1, 1), p=(0, 0, 0), g=1, act=nn.ReLU()))
             list_conv.append(a)
         self.m = nn.ModuleList(list_conv)  # output conv
-        self.linear = nn.Sequential(nn.Linear(sum([dim for _ in ch]), nc, bias=True),
+        self.linear = nn.Sequential(nn.Linear(sum([dim for _ in ch]), nc, bias=False),
                                     nn.BatchNorm1d(nc))
         self.act = nn.Softmax(dim=1)
         self.m2 = nn.Sequential(nn.AdaptiveAvgPool3d(1),
@@ -151,31 +132,6 @@ class Classify3D(nn.Module):
             out = self.act(out)
         return out
 
-    def fuse(self):
-        if len(self.linear) > 1:
-            linear, bn = self.linear
-            output_channel = linear.out_features
-            w = linear.weight
-            mean = bn.running_mean
-            var_sqrt = torch.sqrt(bn.running_var + bn.eps)
-
-            beta = bn.weight
-            gamma = bn.bias
-
-            if linear.bias is not None:
-                b = linear.bias
-            else:
-                b = mean.new_zeros(mean.shape)
-
-            w = w * (beta / var_sqrt).reshape([output_channel, 1])
-            b = (b - mean) / var_sqrt * beta + gamma
-            fused_linear = nn.Linear(linear.in_features,
-                                     linear.out_features)
-
-            fused_linear.weight = nn.Parameter(w)
-            fused_linear.bias = nn.Parameter(b)
-            self.linear = fused_linear
-
 
 class ReOrg3D(nn.Module):
     """https://arxiv.org/pdf/2101.00745.pdf"""
@@ -188,67 +144,6 @@ class ReOrg3D(nn.Module):
         out = torch.cat([out[:, :, :, ::2, ::2], out[:, :, :, 1::2, ::2],
                          out[:, :, :, ::2, 1::2], out[:, :, :, 1::2, 1::2]], dim=1)
         return out
-
-
-def parse_model(d, ch, nc=80):  # model_dict, input_channels(3)
-    logger.info('\n%3s%45s%3s%15s  %-50s%-30s' %
-                ('', 'from', 'n', 'params', 'module', 'arguments'))
-    nc, gd, gw = d['nc'], d['depth_multiple'], d['width_multiple']
-    head_dim = d.get("head_dim", 2048)
-
-    layers, save, c2 = [], [], ch[-1]  # layers, savelist, ch out
-
-    # from, number, module, args
-    for i, (f, n, m, args) in enumerate(d.get('backbone', []) + d.get('head', [])):
-        m = eval(m) if isinstance(m, str) else m  # eval strings
-        for j, a in enumerate(args):
-            try:
-                args[j] = a if a in UPSAMPLEMODE else (eval(a) if isinstance(a, str) else a)
-            except Exception as ex:
-                logger.error(f'def parse: {ex}')
-
-        n = n_ = max(round(n * gd), 1) if n > 1 else n  # depth gain
-        if m in [Conv3D, Conv2Plus1D, Conv3D_2P1, subway, ConvPathway1, ConvPathway2]:
-            c1, c2 = ch[f], args[0]
-            c2 = make_divisible(c2 * gw, 8)
-
-            args = [c1, c2, *args[1:]]
-
-            for x in range(2, 7):
-                args[x] = tuple(args[x]) if isinstance(args[x], list) else args[x]
-                args[x] = args[x] * 3 if len(args[x]) == 1 else args[x]
-            args[4] = (None, None, None) if "None" in args[4] else args[4]  # pads
-            args[5] = args[5][0] if isinstance(args[5], tuple) else args[5]  # groups
-            if m is ConvPathway1:
-                args[2] = args[2][0] if isinstance(args[2], tuple) else args[2]
-
-        elif m is nn.BatchNorm3d:
-            args = [ch[f]]
-        elif m in [Classify3D]:
-            args.append([ch[x] for x in f])
-            if isinstance(args[2], int):  # number of anchors
-                args[2] = [list(range(args[2] * 2))] * len(f)
-        elif m in [Concat]:
-            c2 = sum([ch[x] for x in f])
-        else:
-            c2 = ch[f]
-
-        if m is nn.Upsample:
-            if isinstance(args[1], list):
-                args[1] = tuple(args[1])
-
-        m_ = nn.Sequential(*[m(*args) for _ in range(n)]) if n > 1 else m(*args)  # module
-        t = str(m)[8:-2].replace('__main__.', '')  # module type
-        nparam = sum([x.numel() for x in m_.parameters()])  # number params
-        # index, 'from', type, number params
-        m_.i, m_.f, m_.type, m_.np = i, f, t, nparam
-        logger.info('%3s%45s%3s%15s  %-50s%-30s' % (i, f, n_, f"{nparam:,}", t, args))  # print
-        save.extend(x % i for x in ([f] if isinstance(f, int) else f) if x != -1)  # append to savelist
-        layers.append(m_)
-        if i == 0:
-            ch = []
-        ch.append(c2)
-    return nn.Sequential(*layers), sorted(save)
 
 
 # start for  X3D network
@@ -343,7 +238,7 @@ class Model3D(nn.Module):
             logger.info(
                 f'Overriding model.yaml anchors with anchors={anchors}')
             self.yaml['anchors'] = round(anchors)  # override yaml value
-        self.model, self.save = parse_model(deepcopy(self.yaml), ch=[ch], nc=nc)  # model, savelist
+        self.model, self.save = self.parse_model(deepcopy(self.yaml), ch=[ch], nc=nc)  # model, savelist
         self.names = [str(i) for i in range(self.yaml['nc'])]  # default names
         self.best_fitness = 0.
         self.model_version = 0
@@ -358,10 +253,7 @@ class Model3D(nn.Module):
         m = self.model[-1]  # Detect()
         m.inplace = self.inplace
         self.is_Classify = isinstance(m, Classify3D)
-        if self.is_Classify:
-            self.stride = torch.tensor([32])
-        s = 1024  # scale it up for large shape
-        inputSampleShape = [1024] * 2
+        self.stride = torch.tensor([32])
         initialize_weights(self)
 
     def forward(self, x, augment=False, profile=False):
@@ -410,39 +302,66 @@ class Model3D(nn.Module):
             print('%.1fms total' % sum(dt))
         return x
 
-    # initialize biases into Detect(), cf is class frequency
-    def _initialize_biases(self, cf=None):
-        # https://arxiv.org/abs/1708.02002 section 3.3
-        m = self.model[-1]  # Detect() module
-        for mi, s in zip(m.m, m.stride):  # from
-            b = mi.bias.view(m.na, -1).detach()  # conv.bias(255) to (3,85)
-            # obj (8 objects per 640 image)
-            b[:, 4] += math.log(8 / (640 / s) ** 2)
-            b[:, 5:] += math.log(0.6 / (m.nc - 0.99)) if cf is None else torch.log(cf / cf.sum())  # cls
-            mi.bias = torch.nn.Parameter(b.view(-1), requires_grad=True)
+    @staticmethod
+    def parse_model(d, ch, nc=80):  # model_dict, input_channels(3)
+        logger.info('\n%3s%45s%3s%15s  %-50s%-30s' %
+                    ('', 'from', 'n', 'params', 'module', 'arguments'))
+        nc, gd, gw = d['nc'], d['depth_multiple'], d['width_multiple']
+        head_dim = d.get("head_dim", 2048)
 
-    # initialize biases into Detect(), cf is class frequency
-    def _initialize_aux_biases(self, cf=None):
-        # https://arxiv.org/abs/1708.02002 section 3.3
-        m = self.model[-1]  # IAuxDetect() module
-        for mi, mi2, s in zip(m.m, m.m2, m.stride):  # from
-            b = mi.bias.view(m.na, -1).detach()  # conv.bias(255) to (3,85)
-            # obj (8 objects per 640 image)
-            b[:, 4] += math.log(8 / (640 / s) ** 2)
-            b[:, 5:] += math.log(0.6 / (m.nc - 0.99)) if cf is None else torch.log(cf / cf.sum())  # cls
-            mi.bias = torch.nn.Parameter(b.view(-1), requires_grad=True)
-            b2 = mi2.bias.view(m.na, -1).detach()  # conv.bias(255) to (3,85)
-            # obj (8 objects per 640 image)
-            b2[:, 4] += math.log(8 / (640 / s) ** 2)
-            b2[:, 5:] += math.log(0.6 / (m.nc - 0.99)) if cf is None else torch.log(cf / cf.sum())  # cls
-            mi2.bias = torch.nn.Parameter(b2.view(-1), requires_grad=True)
+        layers, save, c2 = [], [], ch[-1]  # layers, savelist, ch out
 
-    def _print_biases(self):
-        m = self.model[-1]  # Detect() module
-        for mi in m.m:  # from
-            b = mi.bias.detach().view(m.na, -1).T  # conv.bias(255) to (3,85)
-            print(('%6g Conv2d.bias:' + '%10.3g' * 6) %
-                  (mi.weight.shape[1], *b[:5].mean(1).tolist(), b[5:].mean()))
+        # from, number, module, args
+        for i, (f, n, m, args) in enumerate(d.get('backbone', []) + d.get('head', [])):
+            m = eval(m) if isinstance(m, str) else m  # eval strings
+            for j, a in enumerate(args):
+                try:
+                    args[j] = a if a in UPSAMPLEMODE else (eval(a) if isinstance(a, str) else a)
+                except Exception as ex:
+                    logger.error(f'def parse: {ex}')
+
+            n = n_ = max(round(n * gd), 1) if n > 1 else n  # depth gain
+            if m in [Conv3D, Conv2Plus1D, subway, ConvPathway1, ConvPathway2]:
+                c1, c2 = ch[f], args[0]
+                c2 = make_divisible(c2 * gw, 8)
+
+                args = [c1, c2, *args[1:]]
+
+                for x in range(2, 7):
+                    args[x] = tuple(args[x]) if isinstance(args[x], list) else args[x]
+                    args[x] = args[x] * 3 if len(args[x]) == 1 else args[x]
+                args[4] = (None, None, None) if "None" in args[4] else args[4]  # pads
+                args[5] = args[5][0] if isinstance(args[5], tuple) else args[5]  # groups
+                if m is ConvPathway1:
+                    args[2] = args[2][0] if isinstance(args[2], tuple) else args[2]
+
+            elif m is nn.BatchNorm3d:
+                args = [ch[f]]
+            elif m in [Classify3D]:
+                args.append([ch[x] for x in f])
+                if isinstance(args[2], int):  # number of anchors
+                    args[2] = [list(range(args[2] * 2))] * len(f)
+            elif m in [Concat]:
+                c2 = sum([ch[x] for x in f])
+            else:
+                c2 = ch[f]
+
+            if m is nn.Upsample:
+                if isinstance(args[1], list):
+                    args[1] = tuple(args[1])
+
+            m_ = nn.Sequential(*[m(*args) for _ in range(n)]) if n > 1 else m(*args)  # module
+            t = str(m)[8:-2].replace('__main__.', '')  # module type
+            nparam = sum([x.numel() for x in m_.parameters()])  # number params
+            # index, 'from', type, number params
+            m_.i, m_.f, m_.type, m_.np = i, f, t, nparam
+            logger.info('%3s%45s%3s%15s  %-50s%-30s' % (i, f, n_, f"{nparam:,}", t, args))  # print
+            save.extend(x % i for x in ([f] if isinstance(f, int) else f) if x != -1)  # append to savelist
+            layers.append(m_)
+            if i == 0:
+                ch = []
+            ch.append(c2)
+        return nn.Sequential(*layers), sorted(save)
 
     def fuse(self):
         """fuse model Conv2d() + BatchNorm2d() layers, fuse Conv2d + im"""
@@ -450,23 +369,27 @@ class Model3D(nn.Module):
         print(prefix)
         pbar = tqdm(self.model.modules(), desc=f'', unit=" layer")
         for m in pbar:
+            pbar.set_description_str(f"fusing {m.__class__.__name__}")
             if isinstance(m, Classify3D):
-                pbar.set_description_str(f"switching to deploy {m.__class__.__name__}")
-                m.fuse()
-            elif isinstance(m, Conv3D) and hasattr(m, "bn"):
-                m.conv = fuse_conv_and_bn(m.conv, m.bn)
-                m.forward = m.fuseforward
-                delattr(m, 'bn')  # remove batchnorm
-                if hasattr(m, "drop"):
-                    delattr(m, "drop")
-            elif isinstance(m, Conv2Plus1D) and hasattr(m, "bn0") and hasattr(m, "bn1"):
-                m.conv0 = fuse_conv_and_bn(m.conv0, m.bn0)
-                m.conv1 = fuse_conv_and_bn(m.conv1, m.bn1)
-                m.forward = m.fuseforward
-                delattr(m, 'bn0')  # remove batchnorm
-                delattr(m, 'bn1')  # remove batchnorm
-                if hasattr(m, "drop"):
-                    delattr(m, "drop")
+                pbar.set_description_str(f"adding Softmax to deploy {m.__class__.__name__}")
+                if len(m.linear) > 1:
+                    m.linear = fuse_linear_and_bn(*m.linear)
+            elif isinstance(m, Conv3D):
+                if hasattr(m, "bn"):
+                    m.conv = fuse_conv_and_bn(m.conv, m.bn)
+                    m.forward = m.fuseforward
+                    delattr(m, 'bn')
+                    if hasattr(m, "drop"):
+                        delattr(m, "drop")
+            elif isinstance(m, Conv2Plus1D):
+                if all([hasattr(m, "bn0"), hasattr(m, "bn1")]):
+                    m.conv0 = fuse_conv_and_bn(m.conv0, m.bn0)
+                    m.conv1 = fuse_conv_and_bn(m.conv1, m.bn1)
+                    m.forward = m.fuseforward
+                    delattr(m, 'bn0')
+                    delattr(m, 'bn1')
+                    if hasattr(m, "drop"):
+                        delattr(m, "drop")
         return self
 
     def info(self, verbose=False, img_size=640):  # print model information
