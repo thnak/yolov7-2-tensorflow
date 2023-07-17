@@ -123,9 +123,11 @@ def smart_optimizer(model, name='Adam', lr=0.001, momentum=0.9, decay=1e-5):
     is_3D = "Classify3D" in str(model.yaml)
 
     if name == 'Adam':
-        optimizer = torch.optim.Adam(pg0 if not is_3D else model.parameters(), lr=lr, betas=(momentum, 0.999))  # adjust beta1 to momentum
+        optimizer = torch.optim.Adam(pg0 if not is_3D else model.parameters(), lr=lr,
+                                     betas=(momentum, 0.999))  # adjust beta1 to momentum
     elif name == 'AdamW':
-        optimizer = torch.optim.AdamW(pg0 if not is_3D else model.parameters(), lr=lr, betas=(momentum, 0.999), weight_decay=0.0)
+        optimizer = torch.optim.AdamW(pg0 if not is_3D else model.parameters(), lr=lr, betas=(momentum, 0.999),
+                                      weight_decay=0.0)
     elif name == 'RMSProp':
         optimizer = torch.optim.RMSprop(pg0 if not is_3D else model.parameters(), lr=lr, momentum=momentum)
     elif name == 'SGD':
@@ -294,13 +296,22 @@ def prune(model, amount=0.3):
 
 def fuse_conv_and_bn(conv, bn):
     """Fuse convolution and batchnorm layers https://tehnokv.com/posts/fusing-batchnorm-and-conv/"""
-    fusedconv = nn.Conv2d(conv.in_channels,
-                          conv.out_channels,
-                          kernel_size=conv.kernel_size,
-                          stride=conv.stride,
-                          padding=conv.padding,
-                          groups=conv.groups,
-                          bias=True).requires_grad_(False).to(conv.weight.device)
+    if isinstance(conv, nn.Conv2d):
+        fusedconv = nn.Conv2d(conv.in_channels,
+                              conv.out_channels,
+                              kernel_size=conv.kernel_size,
+                              stride=conv.stride,
+                              padding=conv.padding,
+                              groups=conv.groups,
+                              bias=True).requires_grad_(False).to(conv.weight.device)
+    else:
+        fusedconv = nn.Conv3d(conv.in_channels,
+                              conv.out_channels,
+                              kernel_size=conv.kernel_size,
+                              stride=conv.stride,
+                              padding=conv.padding,
+                              groups=conv.groups,
+                              bias=True).requires_grad_(False).to(conv.weight.device)
 
     # prepare filters
     w_conv = conv.weight.clone().view(conv.out_channels, -1)
@@ -352,7 +363,7 @@ def model_info(model, verbose=False, img_size=640):
         fs += f'               Classify: {model.is_Classify if hasattr(model, "is_Classify") else False}\n'
         fs += f'               Version: {model.model_version if hasattr(model, "model_version") else "0"}\n'
         fs += f'               Best fitness: {model.best_fitness if hasattr(model, "best_fitness") else "-1.0"}\n'
-        fs += f'               Dataset: {str(model.total_image[-1])+" images" if hasattr(model, "total_image") else "[]"}\n'
+        fs += f'               Dataset: {str(model.total_image[-1]) + " images" if hasattr(model, "total_image") else "[]"}\n'
         fs += f'               Input shape: {model.input_shape if hasattr(model, "input_shape") else [1, *img_size]}\n'
         fs += f'               Image size (in memory): {size_in_mem2} (UInt8)\n'
         fs += f'               Stride: {[int(x) for x in model.stride.tolist()]}\n'
@@ -549,7 +560,8 @@ class TracedModel(nn.Module):
         return out
 
 
-def save_model(ckpt=None, last=None, best=None, best_fitness=None, fi=None, epoch=0, epochs=0, wdir=None, wandb_logger=None, opt=None, final_epoch=0):
+def save_model(ckpt=None, last=None, best=None, best_fitness=None, fi=None, epoch=0, epochs=0, wdir=None,
+               wandb_logger=None, opt=None, final_epoch=0):
     if ckpt is not None:
         ckpt['model'] = deepcopy(ckpt['model']).eval().cpu()
         torch.save(ckpt, last)

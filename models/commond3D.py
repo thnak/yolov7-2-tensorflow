@@ -9,7 +9,8 @@ import thop
 import torch
 from torch import nn, concatenate
 from utils.general import autopad, make_divisible, UPSAMPLEMODE, check_file, set_logging
-from utils.torch_utils import initialize_weights, scale_img, model_info, select_device, time_synchronized
+from utils.torch_utils import initialize_weights, scale_img, model_info, select_device, time_synchronized, \
+    fuse_conv_and_bn
 from models.common import Concat
 from tqdm import tqdm
 
@@ -32,7 +33,6 @@ class Conv3D(nn.Module):
                               groups=g if isinstance(g, int) else g[0],
                               dilation=d,
                               bias=False)
-        # self.conv = Conv2Plus1D(c1, c2, k=k, s=s, p=p, g=g, d=d,act=act, dropout=dropout)
         self.bn = nn.BatchNorm3d(c2)
         self.drop = nn.Dropout(p=dropout)
         self.act = nn.SiLU() if act is True else (act if isinstance(act, nn.Module) else nn.Identity())
@@ -50,8 +50,6 @@ class Conv3D_2P1(nn.Module):
     def __init__(self, c1, c2, k=(1, 1, 1), s=(1, 1, 1), p=(None, None, None), g=(1,), d=(1,), act=True,
                  dropout=0):
         super(Conv3D_2P1, self).__init__()
-        pad = (autopad(k_, p_) for k_, p_ in zip(k, p))
-
         self.conv = Conv2Plus1D(c1, c2, k=k, s=s, p=p, g=g, d=d, act=act, dropout=dropout)
         self.bn = nn.BatchNorm3d(c2)
         self.drop = nn.Dropout(p=dropout)
@@ -71,24 +69,35 @@ class Conv2Plus1D(nn.Module):
         pad = (autopad(k_, p_) for k_, p_ in zip((1, k[1], k[2]), p))
         pad2 = (autopad(k_, p_) for k_, p_ in zip((k[0], 1, 1), p))
         g1 = g if isinstance(g, int) else g[0]
-        # g1 = g1 - 1 if c1 % 3 == 0 else g1
-        self.conv = nn.Sequential(nn.Conv3d(c1, c2,
-                                            kernel_size=(1, k[1], k[2]),
-                                            stride=1,
-                                            padding=pad,
-                                            groups=g1,
-                                            dilation=d,
-                                            bias=False),
-                                  nn.Conv3d(c2, c2,
-                                            kernel_size=(k[0], 1, 1),
-                                            stride=s,
-                                            padding=pad2,
-                                            groups=g if isinstance(g, int) else g[0],
-                                            dilation=d,
-                                            bias=False))
+        self.conv0 = nn.Conv3d(c1, c2,
+                               kernel_size=(1, k[1], k[2]),
+                               stride=1,
+                               padding=pad,
+                               groups=g1,
+                               dilation=d,
+                               bias=False)
+        self.bn0 = nn.BatchNorm3d(c2)
 
-    def forward(self, x):
-        return self.conv(x)
+        self.conv1 = nn.Conv3d(c2, c2,
+                               kernel_size=(k[0], 1, 1),
+                               stride=s,
+                               padding=pad2,
+                               groups=g if isinstance(g, int) else g[0],
+                               dilation=d,
+                               bias=False)
+        self.bn1 = nn.BatchNorm3d(c2)
+        self.drop = nn.Dropout(p=dropout)
+        self.act = nn.SiLU() if act is True else (act if isinstance(act, nn.Module) else nn.Identity())
+
+    def forward(self, inputs: torch.Tensor):
+        inputs = self.conv0(inputs)
+        inputs = self.bn0(inputs)
+        inputs = self.conv1(inputs)
+        inputs = self.bn1(inputs)
+        return self.drop(self.act(inputs))
+
+    def fuseforward(self, inputs: torch.Tensor):
+        return self.act(self.conv1(self.conv0(inputs)))
 
 
 class MP3D(nn.Module):
@@ -118,27 +127,17 @@ class Classify3D(nn.Module):
         self.nc = nc  # number of classes
         list_conv = []
 
-        def calc(input_channel, num_classes):
-            return int(max(input_channel, num_classes) * 2.048)
-
         for x in ch:
             a = nn.Sequential(nn.AdaptiveAvgPool3d((1, 2, 4)),
-                              nn.Conv3d(x, dim,
-                                        kernel_size=(1, 1, 1),
-                                        stride=(1, 1, 1),
-                                        bias=False),
-                              nn.BatchNorm3d(dim),
-                              nn.ReLU(),
-                              )
+                              Conv3D(x, dim, k=(1, 1, 1), s=(1, 1, 1), p=(0, 0, 0), g=1, act=nn.ReLU()))
             list_conv.append(a)
-            self.m = nn.ModuleList(list_conv)  # output conv
-            self.linear = nn.Sequential(nn.Linear(sum([dim for _ in ch]), nc, bias=True),
-                                        # nn.BatchNorm1d(nc)
-                                        )
-            self.act = nn.Softmax(dim=1)
-            self.m2 = nn.Sequential(nn.AdaptiveAvgPool3d(1),
-                                    nn.Flatten(1))
-            self.inplace = inplace
+        self.m = nn.ModuleList(list_conv)  # output conv
+        self.linear = nn.Sequential(nn.Linear(sum([dim for _ in ch]), nc, bias=True),
+                                    nn.BatchNorm1d(nc))
+        self.act = nn.Softmax(dim=1)
+        self.m2 = nn.Sequential(nn.AdaptiveAvgPool3d(1),
+                                nn.Flatten(1))
+        self.inplace = inplace
 
     def forward(self, x):
         z = []  # inference output
@@ -454,6 +453,20 @@ class Model3D(nn.Module):
             if isinstance(m, Classify3D):
                 pbar.set_description_str(f"switching to deploy {m.__class__.__name__}")
                 m.fuse()
+            elif isinstance(m, Conv3D) and hasattr(m, "bn"):
+                m.conv = fuse_conv_and_bn(m.conv, m.bn)
+                m.forward = m.fuseforward
+                delattr(m, 'bn')  # remove batchnorm
+                if hasattr(m, "drop"):
+                    delattr(m, "drop")
+            elif isinstance(m, Conv2Plus1D) and hasattr(m, "bn0") and hasattr(m, "bn1"):
+                m.conv0 = fuse_conv_and_bn(m.conv0, m.bn0)
+                m.conv1 = fuse_conv_and_bn(m.conv1, m.bn1)
+                m.forward = m.fuseforward
+                delattr(m, 'bn0')  # remove batchnorm
+                delattr(m, 'bn1')  # remove batchnorm
+                if hasattr(m, "drop"):
+                    delattr(m, "drop")
         return self
 
     def info(self, verbose=False, img_size=640):  # print model information
@@ -473,7 +486,7 @@ class Model3D(nn.Module):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--cfg', type=str,
-                        default='X3D_M.yaml', help='model.yaml')
+                        default='yolov7_3D-cls-tiny.yaml', help='model.yaml')
     parser.add_argument('--device', default='cpu',
                         help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     parser.add_argument('--profile', action='store_true',
