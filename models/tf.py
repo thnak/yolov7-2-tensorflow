@@ -531,6 +531,8 @@ def parse_model(d, ch, model, imgsz):  # model_dict, input_channels(3)
                 c2 = make_divisible(c2 * gw, 8)
 
             args = [c1, c2, *args[1:]]
+            if m is Conv:
+                args = args[:7]  # argument number compatibility error from WongKinYiu and this repo
             if m in [DownC, SPPCSPC, GhostSPPCSPC,
                      BottleneckCSPA, BottleneckCSPB, BottleneckCSPC,
                      RepBottleneckCSPA, RepBottleneckCSPB, RepBottleneckCSPC,
@@ -641,7 +643,7 @@ class AgnosticNMS(Layer):
     def __init__(self):
         super(AgnosticNMS, self).__init__()
 
-    def __call__(self, inputs, topk_all, iou_thres, conf_thres):
+    def call(self, inputs, topk_all, iou_thres, conf_thres):
         # wrap map_fn to avoid TypeSpec related error https://stackoverflow.com/a/65809989/3036450
         return tf.map_fn(lambda x: self._nms(x, topk_all, iou_thres, conf_thres),
                          inputs,

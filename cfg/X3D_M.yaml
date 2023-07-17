@@ -6,7 +6,7 @@ p5: True
 ch: 3
 sub_sample: 16
 step: 5
-DIM_C5: 2048
+head_dim: 2048
 
 backbone:
   # [from, number, module, args] c2, k=1, s=1, p=None, g=1, d=1, act=True
@@ -58,5 +58,5 @@ backbone:
 # yolov7-tiny head
 head:
   [
-    [ [ -1 ], 1, Classify3D, [ nc , DIM_C5] ]
+    [ [ -1 ], 1, Classify3D, [ nc , head_dim] ]
   ]

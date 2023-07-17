@@ -105,7 +105,6 @@ if __name__ == '__main__':
             ckpt.pop('optimizer', None)
             ckpt.pop('updates', None)
             # prune(model)
-            model_ori = deepcopy(model)
 
         best_fitness = model.best_fitness if hasattr(model, 'best_fitness') else 0.
         total_image = model.total_image if hasattr(model, 'total_image') else [0]
@@ -180,7 +179,7 @@ if __name__ == '__main__':
                     else:
                         for m_ in model.parameters():
                             m_.requires_grad = False
-                        model.fuse()
+                        model = model.fuse()
                         break
 
         if RKNN:
@@ -433,8 +432,8 @@ if __name__ == '__main__':
         if openVINO:
             prefix = colorstr('OpenVINO:')
             try:
-                meta = {'stride': int(max(model_ori.stride)),
-                        'names': model_ori.names}
+                meta = {'stride': int(max(model.stride)),
+                        'names': model.names}
                 from tools.auxexport import export_openvino
 
                 logging.info(f'{prefix} Starting export...')
@@ -450,7 +449,7 @@ if __name__ == '__main__':
             prefix = colorstr('TensorFlow SavedModel:')
             from tools.auxexport import export_saved_model
 
-            outputpath, s_models = export_saved_model(model_ori,
+            outputpath, s_models = export_saved_model(model,
                                                       img,
                                                       weight,
                                                       False,

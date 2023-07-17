@@ -649,7 +649,7 @@ def train(hyp, opt, tb_writer=None,
 
     with torch_distributed_zero_first(rank):
         check_dataset(data_dict)  # check
-    train_path, val_path, test_path = parse_path(data_dict=data_dict)
+    train_path, val_path, test_path = Path(data_dict.get("train")), Path(data_dict.get("val", "val__")), Path(data_dict.get("test", "test__"))
 
     # Freeze
     freeze = [f'model.{x}.' for x in (freeze if len(freeze) > 1 else range(
@@ -794,6 +794,7 @@ def train(hyp, opt, tb_writer=None,
             else:
                 test_dataloader = data_loader['test_dataloader']
         else:
+
             logger.info(colorstr("val: ") + 'val and test is the same things or test path does not exists!')
 
         if not opt.resume:

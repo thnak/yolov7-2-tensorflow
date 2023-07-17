@@ -195,7 +195,7 @@ def parse_model(d, ch, nc=80):  # model_dict, input_channels(3)
     logger.info('\n%3s%45s%3s%15s  %-50s%-30s' %
                 ('', 'from', 'n', 'params', 'module', 'arguments'))
     nc, gd, gw = d['nc'], d['depth_multiple'], d['width_multiple']
-    DIM_C5 = d.get("DIM_C5", 2048)
+    head_dim = d.get("head_dim", 2048)
 
     layers, save, c2 = [], [], ch[-1]  # layers, savelist, ch out
 
