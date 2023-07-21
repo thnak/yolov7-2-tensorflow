@@ -108,16 +108,18 @@ class Classify3D(nn.Module):
         self.nc = nc  # number of classes
         list_conv = []
 
-        for x in ch:
-            a = nn.Sequential(nn.AdaptiveAvgPool3d((1, 4, 4)),
-                              Conv3D(x, dim, k=(1, 1, 1), s=(1, 1, 1), p=(0, 0, 0), g=1, act=nn.ReLU()))
+        for _ in ch:
+            a = nn.Sequential(nn.AdaptiveAvgPool3d((1, 2, 2)))
             list_conv.append(a)
         self.m = nn.ModuleList(list_conv)  # output conv
-        self.linear = nn.Sequential(nn.Linear(sum([dim for _ in ch]), nc, bias=False),
-                                    nn.BatchNorm1d(nc))
+        self.linear0 = nn.Sequential(nn.Linear(sum([_ * 2 * 2 for _ in ch]), dim, bias=False),
+                                     nn.BatchNorm1d(dim))
+        self.linear1 = nn.Sequential(nn.Linear(dim, nc, bias=False),
+                                     nn.BatchNorm1d(nc))
+
+        self.act_ = nn.LeakyReLU()
         self.act = nn.Softmax(dim=1)
-        self.m2 = nn.Sequential(nn.AdaptiveAvgPool3d(1),
-                                nn.Flatten(1))
+        self.m2 = nn.Sequential(nn.Flatten(1))
         self.inplace = inplace
 
     def forward(self, x):
@@ -127,7 +129,8 @@ class Classify3D(nn.Module):
             z.append(out)
         out = concatenate(z, dim=1)
         out = self.m2(out)
-        out = self.linear(out)
+        out = self.linear0(out)
+        out = self.linear1(self.act_(out))
         if torch.onnx.is_in_onnx_export():
             out = self.act(out)
         return out
@@ -372,15 +375,17 @@ class Model3D(nn.Module):
             pbar.set_description_str(f"fusing {m.__class__.__name__}")
             if isinstance(m, Classify3D):
                 pbar.set_description_str(f"adding Softmax to deploy {m.__class__.__name__}")
-                if len(m.linear) > 1:
-                    m.linear = fuse_linear_and_bn(*m.linear)
-            elif isinstance(m, Conv3D):
-                if hasattr(m, "bn"):
-                    m.conv = fuse_conv_and_bn(m.conv, m.bn)
-                    m.forward = m.fuseforward
-                    delattr(m, 'bn')
-                    if hasattr(m, "drop"):
-                        delattr(m, "drop")
+                if len(m.linear0) > 1:
+                    m.linear0 = fuse_linear_and_bn(*m.linear0)
+                if len(m.linear1) > 1:
+                    m.linear1 = fuse_linear_and_bn(*m.linear1)
+                elif isinstance(m, Conv3D):
+                    if hasattr(m, "bn"):
+                        m.conv = fuse_conv_and_bn(m.conv, m.bn)
+                        m.forward = m.fuseforward
+                        delattr(m, 'bn')
+                        if hasattr(m, "drop"):
+                            delattr(m, "drop")
             elif isinstance(m, Conv2Plus1D):
                 if all([hasattr(m, "bn0"), hasattr(m, "bn1")]):
                     m.conv0 = fuse_conv_and_bn(m.conv0, m.bn0)
@@ -409,7 +414,7 @@ class Model3D(nn.Module):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--cfg', type=str,
-                        default='yolov7_3D-cls-tiny.yaml', help='model.yaml')
+                        default='X3D_M.yaml', help='model.yaml')
     parser.add_argument('--device', default='cpu',
                         help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     parser.add_argument('--profile', action='store_true',

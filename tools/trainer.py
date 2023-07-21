@@ -335,10 +335,12 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None, use3D=Fal
     torch.save({'model': model}, save_dir_)
     model.to(device)
     logger.info(f'saved init model at: {save_dir_}')
+    tloss, vloss, best_fitness = 0.0, 0.0, 0.0  # train loss, val loss, fitness
+    top1, top5 = 0, 0
+    mean_tloss, mean_vloss = [],[]
     # epoch ------------------------------------------------------------------
     for epoch in range(start_epoch, epochs):
         model.to(device).train(mode=True)
-        tloss, vloss, best_fitness = 0.0, 0.0, 0.0  # train loss, val loss, fitness
         if rank != -1:
             dataloader.sampler.set_epoch(epoch)
         logger.info(('\n' + '%11s' * len(tag_results)) % tag_results)
@@ -373,7 +375,8 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None, use3D=Fal
 
             # Print
             if rank in [-1, 0]:
-                tloss = (tloss * i + loss.item()) / (i + 1)  # update mean losses
+                mean_tloss.append(loss.item())
+                tloss = np.mean(mean_tloss)
                 mem = '%.3gG' % (
                     torch.cuda.memory_reserved(device=device) / 1E9 if torch.cuda.is_available() else 0)  # (GB)
 
@@ -410,14 +413,14 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None, use3D=Fal
                 if tb_writer:
                     tb_writer.add_scalar("Accuracy/Top1", top1, epoch)
                     tb_writer.add_scalar("Accuracy/Top5", top5, epoch)
-                    tb_writer.add_figure("Confusion Matrix", fig, epoch)
-                fi = top1
-            if best_fitness < fi:
-                best_fitness = fi
+                    tb_writer.add_figure("Confusion Matrix/Val", fig, epoch)
+            if best_fitness < top1:
+                best_fitness = top1
             if tb_writer:
                 tb_writer.add_scalar("Loss/train", tloss, epoch)
                 tb_writer.add_scalar("Loss/val", vloss, epoch)
-                tb_writer.add_scalar("Lr", lr[-1], epoch)
+                for idx, x in enumerate(lr):
+                    tb_writer.add_scalar(f"LearnRate/Lr{idx}", x, epoch)
                 tb_writer.add_scalar("BestFitness", best_fitness, epoch)
 
             # Save model
@@ -447,7 +450,7 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None, use3D=Fal
                                                         last,
                                                         best,
                                                         best_fitness,
-                                                        fi,
+                                                        top1,
                                                         epoch,
                                                         epochs,
                                                         wdir,
@@ -473,10 +476,10 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None, use3D=Fal
             prefix = colorstr('Testing')
             if opt.evolve < 1 and test_path.as_posix() != val_path.as_posix():
                 logger.info(f'{prefix} model {best.as_posix()}.')
+                test_dataset = val_dataset
                 with torch_distributed_zero_first(rank):
-                    if test_path.as_posix() != val_path.as_posix() and test_path.exists():
+                    if test_path.exists():
                         if data_loader['test_dataloader'] is None:
-                            test_dataset = val_dataset
                             if test_path.as_posix() != val_path.as_posix():
                                 test_dataset = LoadSampleAndTarget(root=test_path.as_posix(),
                                                                    augment=True)
@@ -484,31 +487,38 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None, use3D=Fal
                                                                     batch_size=batch_size * 2,
                                                                     shuffle=False if opt.rect else True,
                                                                     world_size=opt.world_size,
-                                                                    workers=opt.workers, prefix=colorstr('val: '))
+                                                                    workers=opt.workers, prefix=colorstr('test: '))
                             data_loader["test_dataloader"] = test_dataloader
                         else:
                             test_dataloader = data_loader['test_dataloader']
                     else:
                         logger.info(
                             colorstr("test: ") + 'val and test is the same things or test path does not exists!')
+
                 # testing here
+                top1, top5, vloss, fig = cls_test(data_dict,
+                                                  batch_size=batch_size * 2,
+                                                  imgsz=imgsz_test,
+                                                  model=ema.ema,
+                                                  conf_thres=0.5,
+                                                  single_cls=opt.single_cls,
+                                                  dataloader=test_dataloader,
+                                                  save_dir=save_dir,
+                                                  verbose=False,
+                                                  plots=plots,
+                                                  wandb_logger=wandb_logger,
+                                                  compute_loss=compute_loss_val,
+                                                  epoch=epoch)
+                if tb_writer:
+                    tb_writer.add_scalar("Accuracy/Top1_Test", top1, epoch)
+                    tb_writer.add_scalar("Accuracy/Top5_Test", top5, epoch)
+                    tb_writer.add_figure("Confusion Matrix/Test", fig, epoch)
+                    tb_writer.add_scalar("Loss/test", vloss, epoch)
 
         final = best if best.exists() else last  # final model
         for f in last, best:
             if f.exists():
                 strip_optimizer(f, halfModel=True)
-                if 'best.pt' in str(f):
-                    output_path = str(f)
-                    output_path = output_path.replace('best.pt',
-                                                      'deploy_best.pt')
-                    try:
-                        if opt.evolve <= 1:
-                            Re_parameterization(inputWeightPath=str(f),
-                                                outputWeightPath=output_path,
-                                                device=map_device)
-                    except Exception as ex:
-                        prefix = colorstr('reparamater: ')
-                        logger.error(f'{prefix}{ex}')
         if opt.bucket:
             os.system(f'gsutil cp {final} gs://{opt.bucket}/weights')  # upload
         if wandb_logger.wandb and opt.evolve <= 1:  # Log the stripped model
