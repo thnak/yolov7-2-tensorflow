@@ -377,7 +377,7 @@ def model_info(model, verbose=False, img_size=640):
     try:  # FLOPS
         check_requirements('thop')
         from thop import profile
-        img_size = img_size if isinstance(img_size, list) else [3, img_size, img_size]  # expand if int/float
+        img_size = img_size if isinstance(img_size, (list, tuple)) else [3, img_size, img_size]  # expand if int/float
         img = torch.zeros((1, *img_size), device=next(model.parameters()).device, dtype=data_type)
         flops = profile(deepcopy(model), inputs=(img,), verbose=False)[0] / 1E9 * 2  # stride GFLOPS
         flops = round(flops, 3)
@@ -393,7 +393,7 @@ def model_info(model, verbose=False, img_size=640):
         fs += f'               Version: {model.model_version if hasattr(model, "model_version") else "0"}\n'
         fs += f'               Best fitness: {model.best_fitness if hasattr(model, "best_fitness") else "-1.0"}\n'
         fs += f'               Dataset: {str(model.total_image[-1]) + " images" if hasattr(model, "total_image") else "[]"}\n'
-        fs += f'               Input shape: {model.input_shape if hasattr(model, "input_shape") else [1, *img_size]}\n'
+        fs += f'               Input shape: {img.size()}\n'
         fs += f'               Image size (in memory): {size_in_mem2} (UInt8)\n'
         fs += f'               Stride: {[int(x) for x in model.stride.tolist()]}\n'
         fs += f'               Number of class: {len(model.names)}\n'

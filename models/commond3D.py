@@ -414,7 +414,7 @@ class Model3D(nn.Module):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--cfg', type=str,
-                        default='X3D_M.yaml', help='model.yaml')
+                        default='x3d_M.yaml', help='model.yaml')
     parser.add_argument('--device', default='cpu',
                         help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     parser.add_argument('--profile', action='store_true',
@@ -429,9 +429,7 @@ if __name__ == '__main__':
     model.eval()
     model.fuse()
     img = torch.rand(1, 3, 16, 256, 256).to(device)
-    macs, x = thop.profile(model, inputs=(img,))
-    n_p = sum(x.numel() for x in model.parameters())  # number parameters
-    print(f"MACs: {macs / 1E9 * 2:,} GMACs, {n_p:,} paramaters")
+    model.info(img_size=img.shape[1:], verbose=True)
 
     y = model(img, profile=True)
     print(y.shape)
