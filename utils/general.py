@@ -1152,7 +1152,7 @@ def cls_split(train, rate=[0.8, 0.2, 0.2]):
 
     train_rate, val_rate, test_rate = rate
     assert train_rate >= val_rate <= 1, "train_rate >= val_rate <= 1"
-    assert sum([train_rate, val_rate]) == 1, "train rate and test rate must be equal to 1"
+    assert sum([train_rate, test_rate]) == 1, "train rate and test rate must be equal to 1"
     all_train = [x for x in train.iterdir() if x.is_dir()]  # get name dirs
     print("spliting...........")
     for x in all_train:

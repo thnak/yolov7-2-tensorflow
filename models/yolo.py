@@ -31,26 +31,29 @@ class Classify(nn.Module):
         self.nc = nc  # number of classes
         list_conv = []
 
-        for x in ch:
-            a = nn.Sequential(nn.AdaptiveAvgPool2d((2, 2)),
-                              Conv(x, dim, k=1, s=1, p=None, g=1, act=nn.ReLU))
+        for _ in ch:
+            a = nn.Sequential(nn.AdaptiveAvgPool2d((2, 2)))
             list_conv.append(a)
-        self.m0 = nn.ModuleList(list_conv)  # output conv
-        self.m1 = nn.Sequential(nn.AdaptiveAvgPool2d(1),
-                                nn.Flatten(1))
-        self.linear = nn.Sequential(nn.Linear(sum([dim for _ in ch]), nc, bias=False),
-                                    nn.BatchNorm1d(nc))
-        self.act = nn.Softmax(1)
+        self.m = nn.ModuleList(list_conv)  # output conv
+        self.linear0 = nn.Sequential(nn.Linear(sum([_ * 2 * 2 for _ in ch]), dim, bias=False),
+                                     nn.BatchNorm1d(dim))
+        self.linear1 = nn.Sequential(nn.Linear(dim, nc, bias=False),
+                                     nn.BatchNorm1d(nc))
+
+        self.act_ = nn.LeakyReLU()
+        self.act = nn.Softmax(dim=1)
+        self.m2 = nn.Sequential(nn.Flatten(1))
         self.inplace = inplace
 
     def forward(self, x):
         z = []  # inference output
-        for i, m in enumerate(self.m0):
+        for i, m in enumerate(self.m):
             out = m(x[i])  # conv
             z.append(out)
-        out = torch.concatenate(z, dim=1)
-        out = self.m1(out)
-        out = self.linear(out)
+        out = torch.cat(z, dim=1)
+        out = self.m2(out)
+        out = self.linear0(out)
+        out = self.linear1(self.act_(out))
         if torch.onnx.is_in_onnx_export():
             out = self.act(out)
         return out
