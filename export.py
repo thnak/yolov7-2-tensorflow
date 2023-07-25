@@ -228,8 +228,8 @@ if __name__ == '__main__':
                 logging.info(
                     f'\n{prefix} Starting TorchScript export with torch{torch.__version__}')
                 f = weight.as_posix().replace('.pt', '.torch-script.pt')  # filename
-                ts = torch.jit.trace(model, img, strict=True, check_trace=True)
-                ts.save(f)
+                ts = torch.jit.trace(model, img, strict=False)
+                torch.jit.save(ts, f)
                 logging.info(f'{prefix} export success✅, saved as {f}')
                 filenames.append(f)
             except Exception as e:

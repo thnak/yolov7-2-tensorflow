@@ -373,19 +373,19 @@ class Model3D(nn.Module):
         pbar = tqdm(self.model.modules(), desc=f'', unit=" layer")
         for m in pbar:
             pbar.set_description_str(f"fusing {m.__class__.__name__}")
-            if isinstance(m, Classify3D):
+            if isinstance(m, Conv3D):
+                if hasattr(m, "bn"):
+                    m.conv = fuse_conv_and_bn(m.conv, m.bn)
+                    m.forward = m.fuseforward
+                    delattr(m, 'bn')
+                    if hasattr(m, "drop"):
+                        delattr(m, "drop")
+            elif isinstance(m, Classify3D):
                 pbar.set_description_str(f"adding Softmax to deploy {m.__class__.__name__}")
-                if len(m.linear0) > 1:
+                if len(m.linear0) == 2:
                     m.linear0 = fuse_linear_and_bn(*m.linear0)
-                if len(m.linear1) > 1:
+                if len(m.linear1) == 2:
                     m.linear1 = fuse_linear_and_bn(*m.linear1)
-                elif isinstance(m, Conv3D):
-                    if hasattr(m, "bn"):
-                        m.conv = fuse_conv_and_bn(m.conv, m.bn)
-                        m.forward = m.fuseforward
-                        delattr(m, 'bn')
-                        if hasattr(m, "drop"):
-                            delattr(m, "drop")
             elif isinstance(m, Conv2Plus1D):
                 if all([hasattr(m, "bn0"), hasattr(m, "bn1")]):
                     m.conv0 = fuse_conv_and_bn(m.conv0, m.bn0)
@@ -395,6 +395,7 @@ class Model3D(nn.Module):
                     delattr(m, 'bn1')
                     if hasattr(m, "drop"):
                         delattr(m, "drop")
+
         return self
 
     def info(self, verbose=False, img_size=640):  # print model information
@@ -414,7 +415,7 @@ class Model3D(nn.Module):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--cfg', type=str,
-                        default='x3d_M.yaml', help='model.yaml')
+                        default='X3D_M.yaml', help='model.yaml')
     parser.add_argument('--device', default='cpu',
                         help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     parser.add_argument('--profile', action='store_true',
@@ -429,9 +430,11 @@ if __name__ == '__main__':
     model.eval()
     model.fuse()
     img = torch.rand(1, 3, 16, 256, 256).to(device)
+    model_jit = torch.jit.trace(model, img)
+    torch.jit.save(model_jit, 'jitmodel.pt')
     model.info(img_size=img.shape[1:], verbose=True)
 
-    y = model(img, profile=True)
+    y = model_jit(img)
     print(y.shape)
 
     from onnxsim import simplify

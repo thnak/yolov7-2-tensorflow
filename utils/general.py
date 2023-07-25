@@ -1193,6 +1193,12 @@ def parse_path(data_dict: dict, split_rate=[.8, .2, .2]):
     assert train_path.exists(), f"Could not find train dataset"
     val_path = Path(data_dict.get("val", (train_path.parent / "val").as_posix()))
     test_path = Path(data_dict.get("test", (train_path.parent / "test").as_posix()))
+    train_, val_, test_ = split_rate
+    if val_ > 0:
+        if test_ == 0:
+            test_path = val_path
+    if val_ == test_ == 0:
+        val_path = train_path
     val_path.mkdir(exist_ok=True)
     test_path.mkdir(exist_ok=True)
     # find class

@@ -648,9 +648,11 @@ class LoadSampleforVideoClassify(Dataset):
         self.step = 5
         self.pin_memory = False
         try:
-            torchvision.set_video_backend("cuda" if torch.cuda.is_available() else "video_reader")
-        except:
             torchvision.set_video_backend("video_reader")
+        except Exception as ex:
+            check_requirements("av")
+            torchvision.set_video_backend("pyav")
+            logger.info(f"{self.prefix} fallback to PyAV backend \n{ex}")
 
     def prepare(self):
         """prepare dataset"""
@@ -721,11 +723,13 @@ class LoadSampleforVideoClassify(Dataset):
         if path is None:
             path, target = random.choice(self.samples)
         vid = torchvision.io.VideoReader(path, "video")
+        vid.set_current_stream("video")
         metadata = vid.get_metadata()
         # Seek and return frames
         n_length = self.clip_len * self.step
-
-        max_seek = metadata["video"]['duration'][0] - (n_length / metadata["video"]['fps'][0])
+        fps = metadata["video"]['fps']
+        fps = fps[0] if isinstance(fps, list) else fps
+        max_seek = metadata["video"]['duration'][0] - (n_length / fps)
         start = random.uniform(0., max_seek)
         idx = 0
         video = torch.zeros([self.clip_len, 3, self.imgsz, self.imgsz], dtype=dtype)
