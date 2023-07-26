@@ -731,14 +731,10 @@ class LoadSampleforVideoClassify(Dataset):
         fps = fps[0] if isinstance(fps, list) else fps
         max_seek = metadata["video"]['duration'][0] - (n_length / fps)
         start = random.uniform(0., max_seek)
-        idx = 0
         video = torch.zeros([self.clip_len, 3, self.imgsz, self.imgsz], dtype=dtype)
-        for i, frame in enumerate(itertools.islice(vid.seek(start), n_length)):
-            if i % self.step == 0:
-                video[idx, ...] = resize_transform(frame['data'])
-                idx += 1
-                if idx >= self.clip_len:
-                    break
+        for i, frame in enumerate(itertools.islice(vid.seek(start), 0, n_length, self.step)):
+            video[i, ...] = resize_transform(frame['data'])
+
         if transform:
             video = transform(video)
         return video, self.classes[target]

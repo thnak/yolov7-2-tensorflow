@@ -706,8 +706,10 @@ class Model(nn.Module):
                 m.forward = m.fuseforward
             elif isinstance(m, Classify):
                 pbar.set_description_str(f"adding Softmax to deploy {m.__class__.__name__}")
-                if len(m.linear) > 1:
-                    m.linear = fuse_linear_and_bn(*m.linear)
+                if len(m.linear0) == 2:
+                    m.linear0 = fuse_linear_and_bn(*m.linear0)
+                if len(m.linear1) == 2:
+                    m.linear1 = fuse_linear_and_bn(*m.linear1)
         return self
 
     def nms(self, mode=True, conf=0.25, iou=0.45, classes=None):  # add or remove NMS module

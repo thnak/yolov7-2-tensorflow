@@ -4,8 +4,8 @@ depth_multiple: 1.0  # model depth multiple
 width_multiple: 1.0  # layer channel multiple
 p5: True
 ch: 3
-sub_sample: 9
-step: 3
+sub_sample: 16
+step: 5
 head_dim: 2048
 
 # anchors
