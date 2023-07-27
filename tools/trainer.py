@@ -98,12 +98,14 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None, use3D=Fal
 
     with torch_distributed_zero_first(rank):
         train_path, val_path, test_path = parse_path(data_dict=data_dict)
-        dataset = LoadSampleAndTarget(root=train_path.as_posix(), augment=True, prefix=colorstr('train: '))
+        dataset = LoadSampleAndTarget(root=train_path.as_posix(), augment=True,
+                                      prefix=colorstr('train: '),
+                                      backend=opt.video_backend)
         val_dataset = dataset
         if train_path.as_posix() != val_path.as_posix():
             val_dataset = LoadSampleAndTarget(root=val_path.as_posix(), augment=True,
                                               prefix=colorstr(
-                                                  'val: '))
+                                                  'val: '), backend=opt.video_backend)
 
         if tb_writer:
             data_, names = dataset.dataset_analysis()
@@ -112,6 +114,9 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None, use3D=Fal
                 data_, names = val_dataset.dataset_analysis()
                 tb_writer.add_figure("Datasets/val", plot_dataset(data_, names, "Total samples per class in Val"))
             del data_, names
+
+        assert len(dataset.classes) == len(val_dataset.classes), \
+            f"number of classes mismatch from train and val ({len(dataset.classes)} and {len(val_dataset.classes)})"
 
     total_image.append(len(dataset))
     nb = len(dataset)  # number of batches
@@ -209,6 +214,11 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None, use3D=Fal
     model.total_image = total_image
     model.best_fitness = best_fitness
 
+    mean = model.yaml.get("mean", [0, 0, 0])
+    std = model.yaml.get("std", [1, 1, 1])
+    dataset.std = val_dataset.std = std
+    dataset.mean = val_dataset.mean = mean
+
     if tb_writer and hasattr(dataset, "loadSample"):
         logger.info(f"{colorstr('Train: ')}Plotting samples to Tensorboard.")
         for x in range(10):
@@ -254,6 +264,8 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None, use3D=Fal
             else:
                 val_dataloader = data_loader['val_dataloader']
 
+    model.yaml['mean'] = dataset.mean
+    model.yaml['std'] = dataset.std
     # accumulate loss before optimizing
     accumulate = max(round(nbs / total_batch_size), 1)
     hyp['weight_decay'] *= total_batch_size * accumulate / nbs  # scale weight_decay
@@ -337,7 +349,7 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None, use3D=Fal
     logger.info(f'saved init model at: {save_dir_}')
     tloss, vloss, best_fitness = 0.0, 0.0, 0.0  # train loss, val loss, fitness
     top1, top5 = 0, 0
-    mean_tloss, mean_vloss = [],[]
+    mean_tloss, mean_vloss = [], []
     # epoch ------------------------------------------------------------------
     for epoch in range(start_epoch, epochs):
         model.to(device).train(mode=True)
@@ -482,7 +494,8 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None, use3D=Fal
                         if data_loader['test_dataloader'] is None:
                             if test_path.as_posix() != val_path.as_posix():
                                 test_dataset = LoadSampleAndTarget(root=test_path.as_posix(),
-                                                                   augment=True)
+                                                                   augment=True,
+                                                                   backend=opt.video_backend)
                             test_dataloader = create_dataloader_cls(dataset=test_dataset,
                                                                     batch_size=batch_size * 2,
                                                                     shuffle=False if opt.rect else True,
@@ -659,7 +672,8 @@ def train(hyp, opt, tb_writer=None,
 
     with torch_distributed_zero_first(rank):
         check_dataset(data_dict)  # check
-    train_path, val_path, test_path = Path(data_dict.get("train")), Path(data_dict.get("val", "val__")), Path(data_dict.get("test", "test__"))
+    train_path, val_path, test_path = Path(data_dict.get("train")), Path(data_dict.get("val", "val__")), Path(
+        data_dict.get("test", "test__"))
 
     # Freeze
     freeze = [f'model.{x}.' for x in (freeze if len(freeze) > 1 else range(

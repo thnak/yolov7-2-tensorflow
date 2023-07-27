@@ -469,7 +469,7 @@ class LoadSampleAndTarget(torchvision.datasets.ImageFolder):
     std = np.array([1., 1., 1.])
     mean = np.array([0., 0., 0.])
 
-    def __init__(self, root, augment=True, cache=True, prefix=""):
+    def __init__(self, root, augment=True, cache=True, prefix="", backend='pyav'):
         super().__init__(root=root)
         self.samples = [list(x) + [Path(x[0]).with_suffix('.npy'), None] for x in self.samples]  # file, index, npy, im
         self.prefix = prefix
@@ -629,7 +629,7 @@ class LoadSampleforVideoClassify(Dataset):
     std = (1., 1., 1.)
     use_BGR = False
 
-    def __init__(self, root, augment=True, cache=True, prefix=""):
+    def __init__(self, root, augment=True, cache=True, prefix="", backend='pyav'):
         self.transform = None
         root = Path(root) if isinstance(root, str) else root
         self.prefix = prefix
@@ -647,8 +647,11 @@ class LoadSampleforVideoClassify(Dataset):
         self.clip_len = 16
         self.step = 5
         self.pin_memory = False
+        backend = backend.lower()
         try:
-            torchvision.set_video_backend("video_reader")
+            if backend == "pyav":
+                check_requirements("av")
+            torchvision.set_video_backend(backend=backend)
         except Exception as ex:
             check_requirements("av")
             torchvision.set_video_backend("pyav")
@@ -656,7 +659,8 @@ class LoadSampleforVideoClassify(Dataset):
 
     def prepare(self):
         """prepare dataset"""
-        self.calculateMeanStd()
+        if sum(self.mean) == 0 and sum(self.std) == 1:
+            self.calculateMeanStd()
         self.step = max(1, int(self.step))
         self.clip_len = max(1, int(self.clip_len))
 
