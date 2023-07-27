@@ -62,8 +62,9 @@ if __name__ == '__main__':
     parser.add_argument('--v5_metric', action='store_true', help='assume maximum recall as 1.0 in AP calculation')
     parser.add_argument('--seed', type=int, default=0, help='Global training seed')
     parser.add_argument('--tensorboard', action='store_true', help='Start with Tensorboard')
-    parser.add_argument('--compile', action='store_true', help='Use torch.compile() API if available')
-    parser.add_argument('--video_backend', default="pyav", type=str, help='torchvision video backend')
+    parser.add_argument('--video_backend', default="pyav", type=str, help='video backend for VideoReader')
+    parser.add_argument('--plot_samples', type=int, default=0, help='total samples to plot in tensorboard')
+
 
 
     opt = parser.parse_args()

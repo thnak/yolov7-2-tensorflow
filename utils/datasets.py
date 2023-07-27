@@ -639,7 +639,7 @@ class LoadSampleforVideoClassify(Dataset):
         class_to_indx = {class_name: i for i, class_name in enumerate(classes)}
         self.classes = classes
         self.class_to_indx = class_to_indx
-        assert len(class_to_indx) > 0, f"dataset not found from {root.as_posix()}"
+        assert len(class_to_indx) > 0, f"dataset not found ({root.as_posix()})"
         self.samples = make_dataset(directory=root.as_posix(),
                                     class_to_idx=class_to_indx,
                                     extensions=tuple(VID_FORMATS))
@@ -655,17 +655,19 @@ class LoadSampleforVideoClassify(Dataset):
         except Exception as ex:
             check_requirements("av")
             torchvision.set_video_backend("pyav")
-            logger.info(f"{self.prefix} fallback to PyAV backend \n{ex}")
+            logger.info(f"{self.prefix}fallback to PyAV backend \n{ex}")
 
     def prepare(self):
         """prepare dataset"""
         if sum(self.mean) == 0 and sum(self.std) == 1:
             self.calculateMeanStd()
+        else:
+            logger.info(f"{self.prefix}Using mean: {self.mean}, std: {self.std} for this dataset.")
         self.step = max(1, int(self.step))
         self.clip_len = max(1, int(self.clip_len))
 
         logger.info(
-            f"{self.prefix} total {len(self.samples)} samples with {len(self.classes)} classes, "
+            f"{self.prefix}total {len(self.samples)} samples with {len(self.classes)} classes, "
             f"frame length: {self.clip_len}, step frame: {self.step}")
         self.transform = transforms.Compose([
             transforms.Lambda(lambd=lambda x: self.randomDropChannel(x, 0.1)),
@@ -736,7 +738,7 @@ class LoadSampleforVideoClassify(Dataset):
         max_seek = metadata["video"]['duration'][0] - (n_length / fps)
         start = random.uniform(0., max_seek)
         video = torch.zeros([self.clip_len, 3, self.imgsz, self.imgsz], dtype=dtype)
-        for i, frame in enumerate(itertools.islice(vid.seek(start), 0, n_length, self.step)):
+        for i, frame in enumerate(itertools.islice(vid.seek(start, keyframes_only=True), 0, n_length, self.step)):
             video[i, ...] = resize_transform(frame['data'])
 
         if transform:
