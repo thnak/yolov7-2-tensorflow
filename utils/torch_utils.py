@@ -304,6 +304,14 @@ def fuse_conv_and_bn(conv, bn):
                                padding=conv.padding,
                                groups=conv.groups,
                                bias=True)
+    elif isinstance(conv, nn.Conv1d):
+        fused_conv = nn.Conv1d(conv.in_channels,
+                               conv.out_channels,
+                               kernel_size=conv.kernel_size,
+                               stride=conv.stride,
+                               padding=conv.padding,
+                               groups=conv.groups,
+                               bias=True)
     else:
         fused_conv = nn.Conv3d(conv.in_channels,
                                conv.out_channels,

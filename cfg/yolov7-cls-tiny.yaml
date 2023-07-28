@@ -7,9 +7,9 @@ ch: 3
 head_dim: 1024
 # anchors
 anchors:
-  - [ 29,39,  77,40,  41,80 ]  # P3/8
-  - [ 117,44,  107,60,  69,96 ]  # P4/16
-  - [ 120,96,  105,198,  178,244 ]  # P5/32
+  - [ 29,39,  77,40,  41,80 ]  # not use
+  - [ 117,44,  107,60,  69,96 ]  # not use
+  - [ 120,96,  105,198,  178,244 ]  # not use
 
 # yolov7-tiny backbone
 backbone:
@@ -106,9 +106,7 @@ head:
     [ [ -1, -2, -3, -4 ], 1, Concat, [ 1 ] ],
     [ -1, 1, Conv, [ 256, 1, 1, None, 1, 1,  nn.LeakyReLU(0.1) ] ],  # 73
 
-    [ 57, 1, Conv, [ 128, 3, 1, None, 1, 1,  nn.LeakyReLU(0.1) ] ],
-    [ 65, 1, Conv, [ 256, 3, 1, None, 1, 1,  nn.LeakyReLU(0.1) ] ],
     [ 73, 1, Conv, [ 512, 3, 1, None, 1, 1,  nn.LeakyReLU(0.1) ] ],
 
-    [ [ 76 ], 1, Classify, [ nc, head_dim ] ],   # Detect(P3, P4, P5)
+    [ [ 74 ], 1, Classify, [ nc, head_dim ] ],   # Detect(P3, P4, P5)
   ]

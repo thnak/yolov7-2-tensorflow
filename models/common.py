@@ -5,11 +5,14 @@ import torch.nn as nn
 import torch.nn.functional as F
 import warnings
 from utils.general import non_max_suppression, check_requirements, autopad
+from utils.activations import SiLU, Hardswish
 
 try:
     from timm.models.layers import DropPath, to_2tuple
 except ImportError:
     pass
+
+ACT_LIST = (nn.LeakyReLU, nn.Hardswish, Hardswish, nn.ReLU, nn.ReLU6, nn.SiLU, SiLU, nn.Tanh, nn.Sigmoid, nn.ELU, nn.PReLU, nn.Softmax, nn.Hardsigmoid, nn.GELU, nn.Softsign, nn.Softplus)
 
 
 class MP(nn.Module):
@@ -95,23 +98,62 @@ class Foldcut(nn.Module):
         return x1 + x2
 
 
-class Conv(nn.Module):
-    """Standard convolution"""
+class FullyConnected(nn.Module):
+    def __init__(self, in_channel: int, out_channel: int, act=False):
+        """Linear + BatchNorm + Act
+        act = False -> nn.Identity() otherwise nn.Act"""
+        super(FullyConnected, self).__init__()
+        self.linear = nn.Linear(in_channel, out_channel, bias=False)
+        self.bn = nn.BatchNorm1d(out_channel)
+        self.act = nn.SiLU() if act is True else (act if isinstance(act, nn.Module) else nn.Identity())
 
-    def __init__(self, c1, c2, k=1, s=1, p=None, g=1, d=1, act=True,
-                 dropout=0):  # ch_in, ch_out, kernel, stride, padding, groups
+    def forward(self, inputs: torch.Tensor):
+        return self.act(self.bn(self.linear(inputs)))
+
+    def fuseforward(self, inputs):
+        return self.act(self.linear(inputs))
+
+
+class Conv1D(nn.Module):
+    def __init__(self, in_channel: int, out_channel: int,
+                 kernel_size: int = 1,
+                 stride: int = 1,
+                 padding: int = 0,
+                 dilation: int = 1,
+                 groups: int = 1, act=False):
+        super(Conv1D, self).__init__()
+        self.conv = nn.Conv1d(in_channel, out_channel,
+                              kernel_size=kernel_size,
+                              stride=stride,
+                              padding=padding,
+                              dilation=dilation,
+                              groups=groups,
+                              bias=False)
+        self.bn = nn.BatchNorm1d(out_channel)
+        self.act = nn.SiLU() if act is True else (act if isinstance(act, nn.Module) else nn.Identity())
+
+    def forward(self, inputs: torch.Tensor):
+        return self.act(self.bn(self.conv(inputs)))
+
+    def fuseforward(self, inputs):
+        return self.act(self.conv(inputs))
+
+
+class Conv(nn.Module):
+    """Standard convolution with args(ch_in, ch_out, kernel, stride, padding, groups, dilation, activation, dropout"""
+
+    def __init__(self, c1, c2, k=1, s=1, p=None, g=1, d=1, act=True, dropout=0):
         super(Conv, self).__init__()
-        self.conv = nn.Conv2d(c1, c2, k, s, autopad(k, p), groups=g, dilation=d, bias=False)
+        if isinstance(d, ACT_LIST):
+            act = d
+            d = 1
+        assert 0 <= dropout <= 1, f"dropout rate must be 0 <= dropout <= 1, your {dropout}"
+        self.conv = nn.Conv2d(c1, c2, k, s, autopad(k, p, d), groups=g, dilation=d, bias=False)
         self.bn = nn.BatchNorm2d(c2)
-        if dropout > 0:
-            self.drop = nn.Dropout(p=dropout)
-            self.forward = self.__forward__
+        self.drop = nn.Dropout(p=dropout)
         self.act = nn.SiLU() if act is True else (act if isinstance(act, nn.Module) else nn.Identity())
 
     def forward(self, x):
-        return self.act(self.bn(self.conv(x)))
-
-    def __forward__(self, x):
         return self.drop(self.act(self.bn(self.conv(x))))
 
     def fuseforward(self, x):
@@ -1339,7 +1381,7 @@ class CrossConv(nn.Module):
         # ch_in, ch_out, kernel, stride, groups, expansion, shortcut
         super().__init__()
         c_ = int(c2 * e)  # hidden channels
-        self.cv1 = Conv(c1, c_, (1, k), (1, s))
+        self.cv1 = Conv(c1, c_, (1, k), (1, s), g=g)
         self.cv2 = Conv(c_, c2, (k, 1), (s, 1), g=g)
         self.add = shortcut and c1 == c2
 
@@ -1470,20 +1512,6 @@ class NMS(nn.Module):
 
     def forward(self, x):
         return non_max_suppression(x[0], conf_thres=self.conf, iou_thres=self.iou, classes=self.classes)
-
-
-# class Classify(nn.Module):
-#     """Classification head, i.e. x(b,c1,20,20) to x(b,c2)"""
-#
-#     def __init__(self, c1, c2, k=1, s=1, p=None, g=1):  # ch_in, ch_out, kernel, stride, padding, groups
-#         super(Classify, self).__init__()
-#         self.aap = nn.AdaptiveAvgPool2d(1)  # to x(b,c1,1,1)
-#         self.conv = nn.Conv2d(c1, c2, k, s, autopad(k, p), groups=g)  # to x(b,c2,1,1)
-#         self.flat = nn.Flatten()
-#
-#     def forward(self, x):
-#         z = torch.cat([self.aap(y) for y in (x if isinstance(x, list) else [x])], 1)  # cat if list
-#         return self.flat(self.conv(z))  # flatten to x(b,c2)
 
 
 ##### end of yolov5 ######

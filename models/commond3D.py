@@ -2,15 +2,14 @@ import argparse
 import logging
 from copy import deepcopy
 from pathlib import Path
-
 import onnx
 import thop
 import torch
-from torch import nn, concatenate
+from torch import nn
 from utils.general import autopad, make_divisible, UPSAMPLEMODE, check_file, set_logging
 from utils.torch_utils import (initialize_weights, scale_img, model_info, select_device, time_synchronized,
                                fuse_conv_and_bn, fuse_linear_and_bn)
-from models.common import Concat
+from models.common import Concat, FullyConnected, Conv1D
 from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
@@ -24,7 +23,9 @@ class Conv3D(nn.Module):
         super(Conv3D, self).__init__()
         k = (k, k, k) if isinstance(k, int) else k
         p = (p, p, p) if isinstance(p, int) else p
-        pad = (autopad(k_, p_) for k_, p_ in zip(k, p))
+        d = (d, d, d) if isinstance(d, int) else d
+
+        pad = (autopad(k_, p_, d_) for k_, p_, d_ in zip(k, p, d))
         self.conv = nn.Conv3d(c1, c2,
                               kernel_size=k,
                               stride=s,
@@ -47,8 +48,11 @@ class Conv2Plus1D(nn.Module):
     def __init__(self, c1, c2, k=(1, 1, 1), s=(1, 1, 1), p=(None, None, None), g=(1,), d=(1,), act=True,
                  dropout=0):
         super(Conv2Plus1D, self).__init__()
-        pad = (autopad(k_, p_) for k_, p_ in zip((1, k[1], k[2]), p))
-        pad2 = (autopad(k_, p_) for k_, p_ in zip((k[0], 1, 1), p))
+        k = (k, k, k) if isinstance(k, int) else k
+        p = (p, p, p) if isinstance(p, int) else p
+        d = (d, d, d) if isinstance(d, int) else d
+        pad = (autopad(k_, p_, d_) for k_, p_, d_ in zip((1, k[1], k[2]), p, d))
+        pad2 = (autopad(k_, p_, d_) for k_, p_, d_ in zip((k[0], 1, 1), p, d))
         g1 = g if isinstance(g, int) else g[0]
         self.conv0 = nn.Conv3d(c1, c2,
                                kernel_size=(1, k[1], k[2]),
@@ -93,9 +97,12 @@ class MP3D(nn.Module):
 class SP3D(nn.Module):
     def __init__(self, k=3, s=1):
         super(SP3D, self).__init__()
-        self.m = nn.MaxPool3d(kernel_size=(1, k, k),
-                              stride=(1, s, s),
-                              padding=(0, k // 2, k // 2),
+        k = (k, k, k) if isinstance(k, int) else k
+        s = (s, s, s) if isinstance(s, int) else s
+        pad = [x // 2 for x in k]
+        self.m = nn.MaxPool3d(kernel_size=k,
+                              stride=s,
+                              padding=tuple(pad),
                               dilation=1)
 
     def forward(self, x):
@@ -107,32 +114,30 @@ class Classify3D(nn.Module):
         super(Classify3D, self).__init__()
         self.nc = nc  # number of classes
         list_conv = []
-
         for _ in ch:
-            a = nn.Sequential(nn.AdaptiveAvgPool3d((1, 2, 2)))
+            a = nn.Sequential(nn.AdaptiveAvgPool3d(4))
             list_conv.append(a)
         self.m = nn.ModuleList(list_conv)  # output conv
-        self.linear0 = nn.Sequential(nn.Linear(sum([_ * 2 * 2 for _ in ch]), dim, bias=False),
-                                     nn.BatchNorm1d(dim))
-        self.linear1 = nn.Sequential(nn.Linear(dim, nc, bias=False),
-                                     nn.BatchNorm1d(nc))
-
-        self.act_ = nn.LeakyReLU()
+        self.conv = Conv1D(sum([_ for _ in ch]), dim, 1, 1, 0, 1, 1, act=nn.LeakyReLU())
+        self.linear = nn.Linear(dim, nc, bias=True)
         self.act = nn.Softmax(dim=1)
-        self.m2 = nn.Sequential(nn.Flatten(1))
         self.inplace = inplace
 
     def forward(self, x):
         z = []  # inference output
         for i, m in enumerate(self.m):
-            out = m(x[i])  # conv
+            out = m(x[i])
             z.append(out)
-        out = concatenate(z, dim=1)
-        out = self.m2(out)
-        out = self.linear0(out)
-        out = self.linear1(self.act_(out))
-        if torch.onnx.is_in_onnx_export():
+        out = torch.cat(z, dim=1)
+        b, c, d, h, w = out.shape
+        out = out.view(-1, c, d * h * w)
+        out = self.conv(out)
+        out = out.permute((0, 2, 1))
+        out = self.linear(out)
+        if torch.onnx.is_in_onnx_export() or not self.training:
             out = self.act(out)
+        out = out.mean(1)
+
         return out
 
 
@@ -295,8 +300,9 @@ class Model3D(nn.Module):
                 t = time_synchronized()
                 for _ in range(10):
                     m(x.copy() if c else x)
-                dt.append((time_synchronized() - t) * 100)
-                print('%10.1f%10.0f%10.1fms %-40s' % (o, m.np, dt[-1], m.type))
+                t1 = time_synchronized() - t
+                dt.append(t1 * 100)
+                print('%3i%10.6f%10.0f%10.1fms %-40s' % (m.i, o, m.np, dt[-1], m.type))
 
             x = m(x)  # run
             y.append(x if m.i in self.save else None)  # save output
@@ -337,7 +343,6 @@ class Model3D(nn.Module):
                 args[5] = args[5][0] if isinstance(args[5], tuple) else args[5]  # groups
                 if m is ConvPathway1:
                     args[2] = args[2][0] if isinstance(args[2], tuple) else args[2]
-
             elif m is nn.BatchNorm3d:
                 args = [ch[f]]
             elif m in [Classify3D]:
@@ -373,19 +378,18 @@ class Model3D(nn.Module):
         pbar = tqdm(self.model.modules(), desc=f'', unit=" layer")
         for m in pbar:
             pbar.set_description_str(f"fusing {m.__class__.__name__}")
-            if isinstance(m, Conv3D):
+            if isinstance(m, (Conv3D, Conv1D)):
                 if hasattr(m, "bn"):
                     m.conv = fuse_conv_and_bn(m.conv, m.bn)
                     m.forward = m.fuseforward
                     delattr(m, 'bn')
                     if hasattr(m, "drop"):
                         delattr(m, "drop")
-            elif isinstance(m, Classify3D):
-                pbar.set_description_str(f"adding Softmax to deploy {m.__class__.__name__}")
-                if len(m.linear0) == 2:
-                    m.linear0 = fuse_linear_and_bn(*m.linear0)
-                if len(m.linear1) == 2:
-                    m.linear1 = fuse_linear_and_bn(*m.linear1)
+            elif isinstance(m, FullyConnected):
+                if hasattr(m, 'bn'):
+                    m.linear = fuse_linear_and_bn(m.linear, m.bn)
+                    m.forward = m.fuseforward
+                    delattr(m, 'bn')
             elif isinstance(m, Conv2Plus1D):
                 if all([hasattr(m, "bn0"), hasattr(m, "bn1")]):
                     m.conv0 = fuse_conv_and_bn(m.conv0, m.bn0)
@@ -415,7 +419,7 @@ class Model3D(nn.Module):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--cfg', type=str,
-                        default='X3D_M.yaml', help='model.yaml')
+                        default='yolov7_3D-cls-tiny.yaml', help='model.yaml')
     parser.add_argument('--device', default='cpu',
                         help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     parser.add_argument('--profile', action='store_true',
@@ -434,7 +438,7 @@ if __name__ == '__main__':
     torch.jit.save(model_jit, 'jitmodel.pt')
     model.info(img_size=img.shape[1:], verbose=True)
 
-    y = model_jit(img)
+    y = model(img, profile=True)
     print(y.shape)
 
     from onnxsim import simplify

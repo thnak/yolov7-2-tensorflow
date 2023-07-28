@@ -336,7 +336,7 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None, use3D=Fal
     results_ = (0, 0, 0, 0, 0, 0, 0)
     scheduler.last_epoch = start_epoch - 1  # do not move
 
-    scaler = GradScaler()
+    scaler = GradScaler(enabled=device.type == 'cuda')
     compute_loss, compute_loss_val = SmartLoss(model, hyp)
 
     logger.info(f'Image sizes {imgsz} train, {imgsz_test} test\n'
@@ -351,12 +351,13 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None, use3D=Fal
     tloss, vloss, best_fitness = 0.0, 0.0, 0.0  # train loss, val loss, fitness
     top1, top5 = 0, 0
     mean_tloss, mean_vloss = [], []
+
     # epoch ------------------------------------------------------------------
+    logger.info(('\n' + '%11s' * len(tag_results)) % tag_results)
     for epoch in range(start_epoch, epochs):
         model.to(device).train(mode=True)
         if rank != -1:
             dataloader.sampler.set_epoch(epoch)
-        logger.info(('\n' + '%11s' * len(tag_results)) % tag_results)
         pbar = enumerate(dataloader)
         if rank in [-1, 0]:
             pbar = tqdm(pbar, total=len(dataloader), unit='batch',
@@ -394,57 +395,60 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None, use3D=Fal
                     torch.cuda.memory_reserved(device=device) / 1E9 if torch.cuda.is_available() else 0)  # (GB)
 
                 pbar.desc = f"{f'{epoch + 1}/{epochs}':>11}{mem:>11}{tloss:>11.6g}" + ' ' * 36
+                if i == len(pbar) - 1:
+                    ema.update_attr(
+                        model, include=['yaml', 'nc', 'hyp', 'gr', 'names',
+                                        'stride', 'class_weights', 'best_fitness',
+                                        'input_shape', 'model_version', 'total_image',
+                                        'is_anchorFree', 'is_Classify'])
+                    final_epoch = epoch + 1 == epochs
+                    if not opt.notest or final_epoch:  # Calculate mAP
+                        wandb_logger.current_epoch = epoch + 1
+                        top1, top5, vloss, fig = cls_test(model=ema.ema,
+                                                          dataloader=val_dataloader,
+                                                          compute_loss=compute_loss_val,
+                                                          epoch=epoch,
+                                                          pbar=pbar,
+                                                          device=device)
+                        if tb_writer:
+                            tb_writer.add_scalar("Accuracy/Top1", top1, epoch)
+                            tb_writer.add_scalar("Accuracy/Top5", top5, epoch)
+                            tb_writer.add_figure("Confusion Matrix/Val", fig, epoch)
+                        else:
+                            save_ = save_dir / f"Confusion Matrix"
+                            save_.mkdir(exist_ok=True)
+                            save_ = save_ / f"Val {epoch}.jpg"
+                            fig.savefig(save_.as_posix())
+                    if best_fitness < top1:
+                        model.best_fitness = best_fitness = top1
+                        model.metrics = {"top1": top1, "top5": top5}
+                    if tb_writer:
+                        tb_writer.add_scalar("Loss/train", tloss, epoch)
+                        tb_writer.add_scalar("Loss/val", vloss, epoch)
+                        lr = [xx['lr'] for xx in optimizer.param_groups]  # for tensorboard
+                        for idx, x in enumerate(lr):
+                            tb_writer.add_scalar(f"LearnRate/Lr{idx}", x, epoch)
+                        tb_writer.add_scalar("BestFitness", best_fitness, epoch)
 
         # Scheduler
-        lr = [xx['lr'] for xx in optimizer.param_groups]  # for tensorboard
         scheduler.step()
+        final_epoch = epoch + 1 == epochs
 
         # DDP process 0 or single-GPU
         if rank in [-1, 0]:
-            # mAP
-            ema.update_attr(
-                model, include=['yaml', 'nc', 'hyp', 'gr', 'names',
-                                'stride', 'class_weights', 'best_fitness',
-                                'input_shape', 'model_version', 'total_image',
-                                'is_anchorFree', 'is_Classify'])
-            final_epoch = epoch + 1 == epochs
-            if not opt.notest or final_epoch:  # Calculate mAP
-                wandb_logger.current_epoch = epoch + 1
-                top1, top5, vloss, fig = cls_test(data_dict,
-                                                  batch_size=batch_size * 2,
-                                                  imgsz=imgsz_test,
-                                                  model=ema.ema,
-                                                  conf_thres=0.5,
-                                                  single_cls=opt.single_cls,
-                                                  dataloader=val_dataloader,
-                                                  save_dir=save_dir,
-                                                  verbose=False,
-                                                  plots=plots and final_epoch,
-                                                  wandb_logger=wandb_logger,
-                                                  compute_loss=compute_loss_val,
-                                                  epoch=epoch)
-                if tb_writer:
-                    tb_writer.add_scalar("Accuracy/Top1", top1, epoch)
-                    tb_writer.add_scalar("Accuracy/Top5", top5, epoch)
-                    tb_writer.add_figure("Confusion Matrix/Val", fig, epoch)
-            if best_fitness < top1:
-                best_fitness = top1
-            if tb_writer:
-                tb_writer.add_scalar("Loss/train", tloss, epoch)
-                tb_writer.add_scalar("Loss/val", vloss, epoch)
-                for idx, x in enumerate(lr):
-                    tb_writer.add_scalar(f"LearnRate/Lr{idx}", x, epoch)
-                tb_writer.add_scalar("BestFitness", best_fitness, epoch)
-
             # Save model
             if (not opt.nosave) or (final_epoch and opt.evolve < 1):  # if save
                 input_shape = list(images.shape[1:]) if isinstance(images.shape[1:], torch.Size) else images.shape[1:]
                 model.input_shape = input_shape
                 if rank in [-1, 0]:
                     ema.update_attr(model,
-                                    include=['yaml', 'nc', 'hyp', 'gr', 'names', 'stride', 'class_weights',
+                                    include=['yaml', 'nc', 'hyp', 'gr', 'names',
+                                             'stride', 'class_weights',
                                              'best_fitness',
-                                             'input_shape', 'model_version', 'total_image', 'is_anchorFree'])
+                                             'input_shape', 'model_version',
+                                             'total_image',
+                                             'is_anchorFree', "is_Classify",
+                                             "metrics"])
 
                 ckpt = {
                     'epoch': epoch,
@@ -528,6 +532,11 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None, use3D=Fal
                     tb_writer.add_scalar("Accuracy/Top5_Test", top5, epoch)
                     tb_writer.add_figure("Confusion Matrix/Test", fig, epoch)
                     tb_writer.add_scalar("Loss/test", vloss, epoch)
+                else:
+                    save_ = save_dir / f"Confusion Matrix"
+                    save_.mkdir(exist_ok=True)
+                    save_ = save_ / "Test.jpg"
+                    fig.savefig(save_.as_posix())
 
         final = best if best.exists() else last  # final model
         for f in last, best:
@@ -863,7 +872,7 @@ def train(hyp, opt, tb_writer=None,
     # P, R, mAP@.5, mAP@.5-.95, val_loss(box, obj, cls)
     results_ = (0, 0, 0, 0, 0, 0, 0)
     scheduler.last_epoch = start_epoch - 1  # do not move
-    scaler = GradScaler()
+    scaler = GradScaler(enabled=device.type == 'cuda')
 
     compute_loss, compute_loss_val = SmartLoss(model, hyp)
 
@@ -1053,8 +1062,7 @@ def train(hyp, opt, tb_writer=None,
             fi = fitness(np.array(results_).reshape(1, -1))
 
             if fi > best_fitness:
-                best_fitness = fi.tolist()[0]
-                model.best_fitness = best_fitness
+                model.best_fitness = best_fitness = fi.tolist()[0]
             wandb_logger.end_epoch(best_result=best_fitness == fi)
 
             # Save model

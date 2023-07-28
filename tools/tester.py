@@ -7,7 +7,7 @@ from threading import Thread
 import numpy as np
 import torch
 import yaml
-from tqdm.auto import tqdm
+from tqdm import tqdm
 
 from models.experimental import attempt_load
 from utils.datasets import create_dataloader
@@ -20,31 +20,11 @@ from utils.torch_utils import select_device, time_synchronized, TracedModel
 
 
 @torch.no_grad()
-def cls_test(data,
-             weights=None,
-             batch_size=32,
-             imgsz=640,
-             conf_thres=0.001,
-             iou_thres=0.6,  # for NMS
-             save_json=False,
-             single_cls=False,
-             augment=False,
-             verbose=False,
+def cls_test(
              model=None,
              dataloader=None,
-             save_dir=Path(''),  # for saving images
-             save_txt=False,  # for auto-labelling
-             save_hybrid=False,  # for hybrid auto-labelling
-             save_conf=False,  # save auto-label confidences
-             plots=True,
-             wandb_logger=None,
              compute_loss=None,
-             trace=False,
-             project=None,
-             name=None,
-             task=None,
-             exist_ok=None,
-             device=None, epoch=0):
+             device=None, epoch=0, pbar=None):
     training = model is not None
     if training:  # called by train.py
         device = next(model.parameters()).device  # get model device
@@ -54,9 +34,17 @@ def cls_test(data,
         model.half()
     # Configure
     model.eval()
+    for m in model.parameters():
+        m.requires_grad = False
+
     preds, targets, loss = [], [], 0
     n = len(dataloader)
-    bar = tqdm(dataloader, f"{' ':>69}", total=n, bar_format=TQDM_BAR_FORMAT)
+    root_dir = dataloader.dataset.root
+    root_dir = root_dir if isinstance(root_dir, str) else Path(root_dir)
+    action = 'validating' if root_dir.stem == 'val' else 'testing'
+    bar = tqdm(dataloader, f"{pbar.desc[:-36]}{action:>36}", total=n,
+               leave=not training, bar_format=TQDM_BAR_FORMAT, position=0)
+
     confusionMatrix = ConfuseMatrix_cls(nc=model.nc)
     for i, (imgs, labels) in enumerate(bar):
         with torch.autocast(enabled=device.type == "cuda", device_type="cuda"):
@@ -73,7 +61,7 @@ def cls_test(data,
     correct = (targets[:, None] == preds).float()
     acc = torch.stack((correct[:, 0], correct.max(1).values), dim=1)  # (top1, top5) accuracy
     top1, top5 = acc.mean(0).tolist()
-    print(f"{' ':>33}{loss:>11.3g}{top1:>11.3g}{top5:>11.3g}")
+    pbar.desc = f"{pbar.desc[:-36]}{loss:>11.3g}{top1:>11.3g}{top5:>11.3g}"
     return top1, top5, loss, fig
 
 
@@ -136,6 +124,8 @@ def test(data,
         model.half()
     # Configure
     model.eval()
+    for m in model.parameters():
+        m.requires_grad = False
     if isinstance(data, str):
         is_coco = data.endswith('coco.yaml')
         with open(data) as f:

@@ -30,32 +30,31 @@ class Classify(nn.Module):
         super(Classify, self).__init__()
         self.nc = nc  # number of classes
         list_conv = []
-
         for _ in ch:
-            a = nn.Sequential(nn.AdaptiveAvgPool2d((2, 2)))
+            a = nn.Sequential(nn.AdaptiveAvgPool2d(4))
             list_conv.append(a)
         self.m = nn.ModuleList(list_conv)  # output conv
-        self.linear0 = nn.Sequential(nn.Linear(sum([_ * 2 * 2 for _ in ch]), dim, bias=False),
-                                     nn.BatchNorm1d(dim))
-        self.linear1 = nn.Sequential(nn.Linear(dim, nc, bias=False),
-                                     nn.BatchNorm1d(nc))
-
-        self.act_ = nn.LeakyReLU()
+        self.conv = Conv1D(sum([_ for _ in ch]), dim, 1, 1, 0, 1, 1)
+        self.linear1 = nn.Linear(dim, nc, True)
         self.act = nn.Softmax(dim=1)
-        self.m2 = nn.Sequential(nn.Flatten(1))
         self.inplace = inplace
 
     def forward(self, x):
         z = []  # inference output
         for i, m in enumerate(self.m):
-            out = m(x[i])  # conv
+            out = m(x[i])
             z.append(out)
         out = torch.cat(z, dim=1)
-        out = self.m2(out)
-        out = self.linear0(out)
-        out = self.linear1(self.act_(out))
-        if torch.onnx.is_in_onnx_export():
+        b, c, h, w = out.shape
+        out = out.view(-1, c, h * w)
+        out = self.conv(out)
+        out = out.permute((0, 2, 1))
+
+        out = self.linear1(out)
+        if torch.onnx.is_in_onnx_export() or not self.training:
             out = self.act(out)
+        out = out.mean(1)
+
         return out
 
 
@@ -638,7 +637,7 @@ class Model(nn.Module):
                 for _ in range(10):
                     m(x.copy() if c else x)
                 dt.append((time_synchronized() - t) * 100)
-                print('%10.1f%10.0f%10.1fms %-40s' % (o, m.np, dt[-1], m.type))
+                print('%2i%10.1f%10.0f%10.1fms %-40s' % (m.i, o, m.np, dt[-1], m.type))
             x = m(x)  # run
             y.append(x if m.i in self.save else None)  # save output
 
@@ -696,7 +695,7 @@ class Model(nn.Module):
                 m.fuse_repvgg_block()
             elif isinstance(m, RepConv_OREPA):
                 m.switch_to_deploy()
-            elif isinstance(m, (Conv, DWConv)):
+            elif isinstance(m, (Conv, DWConv, Conv1D)):
                 if hasattr(m, 'bn'):
                     m.conv = fuse_conv_and_bn(m.conv, m.bn)
                     delattr(m, 'bn')
@@ -704,12 +703,11 @@ class Model(nn.Module):
             elif isinstance(m, (IDetect, IAuxDetect)):
                 m.fuse()
                 m.forward = m.fuseforward
-            elif isinstance(m, Classify):
-                pbar.set_description_str(f"adding Softmax to deploy {m.__class__.__name__}")
-                if len(m.linear0) == 2:
-                    m.linear0 = fuse_linear_and_bn(*m.linear0)
-                if len(m.linear1) == 2:
-                    m.linear1 = fuse_linear_and_bn(*m.linear1)
+            elif isinstance(m, FullyConnected):
+                if hasattr(m, 'bn'):
+                    m.linear = fuse_linear_and_bn(m.linear, m.bn)
+                    m.forward = m.fuseforward
+                    delattr(m, 'bn')
         return self
 
     def nms(self, mode=True, conf=0.25, iou=0.45, classes=None):  # add or remove NMS module
@@ -1319,10 +1317,9 @@ class TensorRT_Engine(object):
 
 
 if __name__ == '__main__':
-
     parser = argparse.ArgumentParser()
     parser.add_argument('--cfg', type=str,
-                        default='yolor-csp-c.yaml', help='model.yaml')
+                        default='yolov7-cls-tiny.yaml', help='model.yaml')
     parser.add_argument('--device', default='',
                         help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     parser.add_argument('--profile', action='store_true',
@@ -1334,8 +1331,14 @@ if __name__ == '__main__':
 
     # Create model
     model = Model(opt.cfg).to(device)
-    model.train()
+    model.eval()
 
-    if opt.profile:
-        img = torch.rand(1, 3, 640, 640).to(device)
-        y = model(img, profile=True)
+    img = torch.rand(1, 3, 256, 256).to(device)
+    y = model(img, profile=True)
+    from onnxsim import simplify
+    import onnx
+
+    torch.onnx.export(model, img, "3dmodel.onnx")
+    model = onnx.load("3dmodel.onnx")
+    model, c = simplify(model)
+    onnx.save(model, "3dmodel.onnx")

@@ -631,7 +631,8 @@ class LoadSampleforVideoClassify(Dataset):
 
     def __init__(self, root, augment=True, cache=True, prefix="", backend='pyav'):
         self.transform = None
-        root = Path(root) if isinstance(root, str) else root
+        self.root = root = Path(root) if isinstance(root, str) else root
+
         self.prefix = prefix
         from torchvision.datasets.folder import make_dataset
         classes = [x.name for x in root.iterdir() if x.is_dir()]

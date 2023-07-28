@@ -4,6 +4,7 @@ from keras.layers import Layer
 import inspect
 from typing import Optional
 from models.yolo import *
+from models.common import ACT_LIST
 from utils.activations import SiLU, Hardswish
 from utils.general import make_divisible, colorstr, autopad, UPSAMPLEMODE
 
@@ -191,32 +192,32 @@ class TFPad(Layer):
 
 class TFConv(Layer):
     # Standard convolution
-    def __init__(self, c1, c2, k=1, s=1, p=None, g=1, act=True, w=None):
+    def __init__(self, c1, c2, k=1, s=1, p=None, g=1, d=1, act=True, w=None):
         # ch_in, ch_out, weights, kernel, stride, padding, groups
         super(TFConv, self).__init__()
         # TensorFlow convolution padding is inconsistent with PyTorch (e.g. k=3 s=2 'SAME' padding)
         # see https://stackoverflow.com/questions/52975843/comparing-conv2d-with-padding-between-tensorflow-and-pytorch
+        if isinstance(d, ACT_LIST):
+            act = d
+            d = 1
         conv = keras.layers.Conv2D(
             filters=c2,
             kernel_size=k,
             strides=s,
             padding='SAME' if s == 1 else 'VALID',
             use_bias=not hasattr(w, 'bn'),
+            groups=g,
             kernel_initializer=keras.initializers.Constant(
                 w.conv.weight.permute(2, 3, 1, 0).cpu().detach().numpy()),
             bias_initializer='zeros' if hasattr(w, 'bn') else keras.initializers.Constant(
                 w.conv.bias.cpu().detach().numpy()))
 
-        self.conv = conv if s == 1 else keras.Sequential([TFPad(autopad(k, p)), conv])
+        self.conv = conv if s == 1 else keras.Sequential([TFPad(autopad(k, p, d)), conv])
         self.bn = TFBN(w.bn) if hasattr(w, 'bn') else tf.identity
         self.act = activations(w.act) if act else tf.identity
 
     def call(self, inputs):
-        out = self.conv(inputs)
-        out = self.bn(out)
-        out = self.act(out)
-        # return self.act(self.bn(self.conv(inputs)))
-        return out
+        return self.act(self.bn(self.conv(inputs)))
 
 
 class TFDownC(Layer):
@@ -705,8 +706,6 @@ def activations(act=nn.SiLU):
         return lambda x: keras.activations.relu(x, alpha=0.25)
     elif isinstance(act, nn.Softmax):
         return lambda x: keras.activations.softmax(x)
-    elif isinstance(act, nn.Softsign):
-        return lambda x: keras.activations.softsign(x)
     elif isinstance(act, nn.Softplus):
         return lambda x: keras.activations.softplus(x)
     elif isinstance(act, nn.Softsign):

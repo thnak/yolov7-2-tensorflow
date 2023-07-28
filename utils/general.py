@@ -25,8 +25,6 @@ from utils.metrics import fitness
 torch.set_printoptions(linewidth=320, precision=5, profile='long')
 np.set_printoptions(linewidth=320, formatter={'float_kind': '{:11.5g}'.format})  # format short g, %precision=5
 pd.options.display.max_columns = 10
-# cv2.setNumThreads(0)  # prevent OpenCV from multithreading (incompatible with PyTorch DataLoader)
-# os.environ['NUMEXPR_MAX_THREADS'] = str(os.cpu_count())  # NumExpr max threads
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 IMG_FORMATS = ['.bmp', '.jpg', '.jpeg', '.png', '.tif', '.tiff', '.dng', '.webp', '.mpo',
                '.pfm']  # acceptable image suffixes
@@ -1222,8 +1220,11 @@ def parse_path(data_dict: dict, split_rate=[.8, .2, .2]):
         return train_path, val_path, test_path
 
 
-def autopad(k, p=None):  # kernel, padding
+def autopad(kernel_size: int | tuple[int] | list[int], pad_size=None, dilation=1):
     """Pad to 'same' shape outputs"""
-    if p is None:
-        p = k // 2 if isinstance(k, int) else [x // 2 for x in k]  # auto-pad
-    return p
+    if dilation > 1:
+        kernel_size = dilation * (kernel_size - 1) + 1 if isinstance(kernel_size, int) else [dilation * (x - 1) + 1 for x in kernel_size]  # actual kernel-size
+    if pad_size is None:
+        pad_size = kernel_size // 2 if isinstance(kernel_size, int) else [x // 2 for x in kernel_size]  # auto-pad
+    return pad_size
+

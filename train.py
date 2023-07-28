@@ -63,7 +63,7 @@ if __name__ == '__main__':
     parser.add_argument('--seed', type=int, default=0, help='Global training seed')
     parser.add_argument('--tensorboard', action='store_true', help='Start with Tensorboard')
     parser.add_argument('--video_backend', default="pyav", type=str, help='video backend for VideoReader')
-    parser.add_argument('--plot_samples', type=int, default=0, help='total samples to plot in tensorboard')
+    parser.add_argument('--plot_samples', type=int, default=10, help='total samples to plot in tensorboard')
 
 
 
