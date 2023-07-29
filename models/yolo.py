@@ -26,6 +26,8 @@ except ImportError:
 
 
 class Classify(nn.Module):
+    export = False
+
     def __init__(self, nc=80, dim=2048, ch=(), inplace=True):  # detection layer
         super(Classify, self).__init__()
         self.nc = nc  # number of classes
@@ -51,7 +53,7 @@ class Classify(nn.Module):
         out = out.permute((0, 2, 1))
 
         out = self.linear1(out)
-        if torch.onnx.is_in_onnx_export() or not self.training:
+        if torch.onnx.is_in_onnx_export() or self.export:
             out = self.act(out)
         out = out.mean(1)
 

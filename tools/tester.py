@@ -34,10 +34,9 @@ def cls_test(
         model.half()
     # Configure
     model.eval()
-    for m in model.parameters():
-        m.requires_grad = False
 
-    preds, targets, loss = [], [], 0
+    preds, targets, loss = [], [], []
+    top1, top5 = 0, 0
     n = len(dataloader)
     root_dir = dataloader.dataset.root
     root_dir = root_dir if isinstance(root_dir, str) else Path(root_dir)
@@ -54,15 +53,17 @@ def cls_test(
             preds.append(pred.argsort(1, descending=True)[:, :5])
             targets.append(labels)
             if compute_loss:
-                loss += compute_loss(pred, labels)
+                loss.append(compute_loss(pred, labels).item())
+
+        mean_loss = np.mean(loss)
+        preds_, targets_ = torch.cat(preds), torch.cat(targets)
+        correct = (targets_[:, None] == preds_).float()
+        acc = torch.stack((correct[:, 0], correct.max(1).values), dim=1)  # (top1, top5) accuracy
+        top1, top5 = acc.mean(0).tolist()
+        pbar.desc = f"{pbar.desc[:-36]}{mean_loss:>11.3g}{top1:>11.3g}{top5:>11.3g}"
     fig = confusionMatrix.plot(dataloader.dataset.classes, title=f"Confusion Matrix {epoch}")
-    loss /= n
-    preds, targets = torch.cat(preds), torch.cat(targets)
-    correct = (targets[:, None] == preds).float()
-    acc = torch.stack((correct[:, 0], correct.max(1).values), dim=1)  # (top1, top5) accuracy
-    top1, top5 = acc.mean(0).tolist()
-    pbar.desc = f"{pbar.desc[:-36]}{loss:>11.3g}{top1:>11.3g}{top5:>11.3g}"
-    return top1, top5, loss, fig
+
+    return top1, top5, mean_loss, fig
 
 
 @torch.no_grad()
@@ -124,8 +125,7 @@ def test(data,
         model.half()
     # Configure
     model.eval()
-    for m in model.parameters():
-        m.requires_grad = False
+
     if isinstance(data, str):
         is_coco = data.endswith('coco.yaml')
         with open(data) as f:

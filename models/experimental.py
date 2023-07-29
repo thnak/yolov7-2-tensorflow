@@ -218,6 +218,8 @@ class End2End(nn.Module):
         device = device if device else torch.device('cpu')
         assert isinstance(max_wh, int) or max_wh is None
         self.model = model.to(device)
+        self.is_Classify = False
+        self.stride = model.stride
         self.model.model[-1].end2end = True
         self.patch_model = ONNX_TRT if max_wh is None else ONNX_ORT
         self.end2end = self.patch_model(max_obj, iou_thres, score_thres, max_wh, device, n_classes)

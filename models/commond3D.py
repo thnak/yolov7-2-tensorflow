@@ -110,6 +110,8 @@ class SP3D(nn.Module):
 
 
 class Classify3D(nn.Module):
+    export = False
+
     def __init__(self, nc=80, dim=2048, ch=(), inplace=True):  # detection layer
         super(Classify3D, self).__init__()
         self.nc = nc  # number of classes
@@ -134,7 +136,7 @@ class Classify3D(nn.Module):
         out = self.conv(out)
         out = out.permute((0, 2, 1))
         out = self.linear(out)
-        if torch.onnx.is_in_onnx_export() or not self.training:
+        if torch.onnx.is_in_onnx_export() or self.export:
             out = self.act(out)
         out = out.mean(1)
 
@@ -224,7 +226,6 @@ class ConvPathway2(nn.Module):
 # stop for X3D network
 
 class Model3D(nn.Module):
-    # model, input channels, number of classes
     def __init__(self, cfg='yolor-csp-c.yaml', ch=3, nc=None, anchors=None):
         super(Model3D, self).__init__()
         self.traced = False

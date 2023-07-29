@@ -400,7 +400,7 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None, use3D=Fal
                         model, include=['yaml', 'nc', 'hyp', 'gr', 'names',
                                         'stride', 'class_weights', 'best_fitness',
                                         'input_shape', 'model_version', 'total_image',
-                                        'is_anchorFree', 'is_Classify'])
+                                        'is_anchorFree', 'is_Classify', "metrics"])
                     final_epoch = epoch + 1 == epochs
                     if not opt.notest or final_epoch:  # Calculate mAP
                         wandb_logger.current_epoch = epoch + 1
@@ -440,15 +440,6 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None, use3D=Fal
             if (not opt.nosave) or (final_epoch and opt.evolve < 1):  # if save
                 input_shape = list(images.shape[1:]) if isinstance(images.shape[1:], torch.Size) else images.shape[1:]
                 model.input_shape = input_shape
-                if rank in [-1, 0]:
-                    ema.update_attr(model,
-                                    include=['yaml', 'nc', 'hyp', 'gr', 'names',
-                                             'stride', 'class_weights',
-                                             'best_fitness',
-                                             'input_shape', 'model_version',
-                                             'total_image',
-                                             'is_anchorFree', "is_Classify",
-                                             "metrics"])
 
                 ckpt = {
                     'epoch': epoch,

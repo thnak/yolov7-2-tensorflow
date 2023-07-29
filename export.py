@@ -27,26 +27,26 @@ sys.path.append('./')  # to run '$ python *.py' files in subdirectories
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Export your pytorch model to another format")
     parser.add_argument('--weights', nargs='+', type=str, default=['./best.pt'], help='weights path')
-    parser.add_argument('--batch-size', type=int, default=1, help='batch size for onnx export')
+    parser.add_argument('--batch_size', type=int, default=1, help='batch size for onnx export')
     parser.add_argument('--imgsz', type=int, nargs='+', default=-1,
                         help="special input shape, omitting this parameter will use default argument. "
                              "Example --imgsz 640 320 or --imgsz 640")
     parser.add_argument('--dynamic', action='store_true', help='dynamic ONNX axes')
-    parser.add_argument('--dynamic-batch', action='store_true', help='dynamic batch onnx for tensorrt and onnx-runtime')
+    parser.add_argument('--dynamic_batch', action='store_true', help='dynamic batch onnx for tensorrt and onnx-runtime')
     parser.add_argument('--include', nargs='+', type=str, default='onnx',
                         help='specify a special format for model output')
     parser.add_argument('--end2end', action='store_true', help='export end2end onnx for ORT or TRT)')
-    parser.add_argument('--max-hw', '--ort', action='store_true', default=None,
+    parser.add_argument('--max_hw', '--ort', action='store_true', default=None,
                         help='end2end onnxruntime')
-    parser.add_argument('--topk-all', type=int, default=MAX_DET,
+    parser.add_argument('--topk_all', type=int, default=MAX_DET,
                         help=f'topk objects for every frames. Default {MAX_DET}"')
-    parser.add_argument('--iou-thres', '-iou', type=float, default=0.45, help=f'iou threshold for NMS. Default {0.45}')
-    parser.add_argument('--conf-thres', '-conf', type=float, default=0.2, help=f'conf threshold for NMS. Default {0.2}')
-    parser.add_argument('--onnx-opset', type=int, default=12,
+    parser.add_argument('--iou_thres', '-iou', type=float, default=0.45, help=f'iou threshold for NMS. Default {0.45}')
+    parser.add_argument('--conf_thres', '-conf', type=float, default=0.2, help=f'conf threshold for NMS. Default {0.2}')
+    parser.add_argument('--onnx_opset', type=int, default=12,
                         help='onnx opset version, 11 for DmlExecutionProvider. Default 12')
     parser.add_argument('--device', default='cpu', help='cuda:0 or dml:0. default cpu')
     parser.add_argument('--simplify', action='store_true', help='simplify onnx model')
-    parser.add_argument('--include-nms', action='store_true',
+    parser.add_argument('--include_nms', action='store_true',
                         help='registering EfficientNMS_TRT plugin to export TensorRT engine')
     parser.add_argument('--nms', action='store_true', help='TF: add NMS to model')
     parser.add_argument('--agnostic-nms', action='store_true', help='TF: add agnostic NMS to model')
@@ -145,6 +145,8 @@ if __name__ == '__main__':
         model.model_version = model_version
         model.total_image = total_image
         model.input_shape = input_shape
+        if not hasattr(model, "is_Classify"):
+            model.is_Classify = False
         labels = model.names
 
         img = torch.zeros(opt.batch_size, *input_shape, device=map_device)
@@ -196,9 +198,6 @@ if __name__ == '__main__':
 
         model_Gflops = model.info(verbose=False, img_size=input_shape)
         logging.info(model_Gflops)
-        model.model[-1].export = True if any([coreML]) and not opt.end2end else False  # set Detect() layer grid export,
-        # for coreml export set to True
-        y = model(img)
 
         if device.type in ['cuda'] and opt.fp16:
             img = img.to(device).half()
@@ -208,12 +207,14 @@ if __name__ == '__main__':
                 logging.warning(f'Export with fp16 only support for CUDA device, yours {device.type}')
 
         # model output shape
+        y = model(img)
         shape = tuple((y[0] if isinstance(y, (tuple, list)) else y).shape)
         logging.info(f'{exPrefix} model output shape {shape} in pytorch format')
+        del y
+        # set Detect() layer grid export
+        model.model[-1].export = True if any([coreML, is_3D, model.is_Classify]) and not opt.end2end else False
+        model.model[-1].include_nms = True if opt.include_nms else False
 
-        if opt.include_nms:
-            model.model[-1].include_nms = True
-            y = None
         filenames = []
         if RKNN:
             prefix = colorstr('RKNN:')
@@ -292,12 +293,8 @@ if __name__ == '__main__':
             logging.info(
                 f'\n{prefix} Starting ONNX export with onnx {onnx.__version__}')
             f = weight.as_posix().replace('.pt', '.onnx')  # filename
-            output_names = ['classes',
-                            'boxes'] if y is None else ['output']
-            if y is None:
-                output_names = ["classes", "boxes"]
-            else:
-                output_names = ["output"]
+            output_names = ['classes', 'boxes'] if opt.include_nms else ['output']
+
             dynamic_axes = None
             if opt.dynamic:
                 dynamic_axes = {'images': {0: 'batch', 2: 'height', 3: 'width'},  # size(1,3,640,640)
@@ -317,32 +314,31 @@ if __name__ == '__main__':
                 else:
                     output_axes = {'output': {0: 'batch'}, }
                 dynamic_axes.update(output_axes)
-            if opt.end2end:
-                x = 'TensorRT' if not opt.max_hw else 'ONNXRUNTIME'
-                logging.info(f'{prefix} Starting export end2end model for {colorstr(x)}')
-                model = End2End(model, opt.topk_all, opt.iou_thres,
-                                opt.conf_thres, max(input_shape[1:]) if opt.max_hw else None, map_device, len(labels))
-                if opt.end2end and not opt.max_hw:
-                    output_names = ['num_dets', 'det_boxes',
-                                    'det_scores', 'det_classes']
-                    shapes = [opt.batch_size, 1, opt.batch_size, opt.topk_all, 4,
-                              opt.batch_size, opt.topk_all, opt.batch_size, opt.topk_all]
+            if not opt.include_nms:
+                if opt.end2end:
+                    x = 'TensorRT' if not opt.max_hw else 'ONNXRUNTIME'
+                    logging.info(f'{prefix} Starting export end2end model for {colorstr(x)}')
+                    model = End2End(model, opt.topk_all, opt.iou_thres,
+                                    opt.conf_thres, max(input_shape[1:]) if opt.max_hw else None, map_device, len(labels))
+                    if opt.end2end and not opt.max_hw:
+                        output_names = ['num_dets', 'det_boxes',
+                                        'det_scores', 'det_classes']
+                        shapes = [opt.batch_size, 1, opt.batch_size, opt.topk_all, 4,
+                                  opt.batch_size, opt.topk_all, opt.batch_size, opt.topk_all]
+                    else:
+                        output_names = ['output']
                 else:
-                    output_names = ['output']
-            else:
-                model.model[-1].concat = True
+                    model.model[-1].concat = True
             if opt.onnx_opset not in ONNX_OPSET:
                 logging.info(f'{prefix} onnx opset must be in {ONNX_OPSET}, switching to 12')
                 opt.onnx_opset = 12
             dml = False
             try:
                 import torch_directml
-
                 dml = True
             except ImportError:
                 pass
-            except Exception:
-                pass
+
             if opt.onnx_opset not in ONNX_OPSET_TARGET and dml:
                 logging.info(
                     f'{prefix} onnx opset tested for version {ONNX_OPSET_TARGET}, newer version may have poor performance for ONNXRUNTIME in DmlExecutionProvider')
@@ -358,80 +354,80 @@ if __name__ == '__main__':
                               training=torch.onnx.TrainingMode.EVAL,
                               dynamic_axes=dynamic_axes,
                               keep_initializers_as_inputs=True)
-            if RKNN:
-                onnx.utils.extract_model(input_path=f, output_path=f, input_names=start_points_2_break,
-                                         output_names=end_points_2_break)
-            # Checks
-            onnx_model = onnx.load(f)  # load onnx model
-            onnx.checker.check_model(onnx_model)  # check onnx model
+        if RKNN:
+            onnx.utils.extract_model(input_path=f, output_path=f, input_names=start_points_2_break,
+                                     output_names=end_points_2_break)
+        # Checks
+        onnx_model = onnx.load(f)  # load onnx model
+        onnx.checker.check_model(onnx_model)  # check onnx model
 
-            if opt.end2end and not opt.max_hw:
-                for i in onnx_model.graph.output:
-                    for j in i.type.tensor_type.shape.dim:
-                        j.dim_param = str(shapes.pop(0))
+        if opt.end2end and not opt.max_hw:
+            for i in onnx_model.graph.output:
+                for j in i.type.tensor_type.shape.dim:
+                    j.dim_param = str(shapes.pop(0))
 
-            if opt.simplify:
-                try:
-                    check_requirements('onnxsim')
-                    import onnxsim
+        if opt.simplify:
+            try:
+                check_requirements('onnxsim')
+                import onnxsim
 
-                    logging.info(f'{prefix} Starting to simplify ONNX...')
-                    onnx_model, check = onnxsim.simplify(onnx_model)
-                    assert check, 'assert check failed'
-                except Exception as e:
-                    logging.info(f'{prefix} Simplifier failure❌: {e}')
+                logging.info(f'{prefix} Starting to simplify ONNX...')
+                onnx_model, check = onnxsim.simplify(onnx_model)
+                assert check, 'assert check failed'
+            except Exception as e:
+                logging.info(f'{prefix} Simplifier failure❌: {e}')
 
-            onnx.checker.check_model(onnx_model)  # check onnx model
-            logging.info(f'{prefix} writing metadata for model...')
-            if hasattr(model, "is_Classify"):
-                anchor_grid = model.model[
-                    -1].anchor_grid.detach().cpu().numpy().tolist() if not model.is_Classify else None
-                anchors = model.model[-1].anchors.detach().cpu().numpy().tolist() if not model.is_Classify else None
-            else:
+        onnx.checker.check_model(onnx_model)  # check onnx model
+        logging.info(f'{prefix} writing metadata for model...')
+
+        anchors = anchor_grid = None
+        if RKNN:
+            if model.is_Classify:
                 anchor_grid = model.model[-1].anchor_grid.detach().cpu().numpy().tolist()
                 anchors = model.model[-1].anchors.detach().cpu().numpy().tolist()
-            onnx_MetaData = {'model_infor': model_Gflops,
-                             'export_gitstatus': gitstatus,
-                             'best_fitness': best_fitness,
-                             'nc': len(labels),
-                             'stride': model.stride.cpu().tolist(),
-                             'names': labels,
-                             'total_image': total_image,
-                             'export_date': datetime.datetime.now().isoformat('#'),
-                             'exporting_opt': vars(opt),
-                             "anchor_grid": anchor_grid,
-                             "anchors": anchors,
-                             }
-            key_prefix = colorstr('yellow', 'key:')
-            for index, key in enumerate(ckpt):
-                if key == 'model':
-                    continue
-                if key == 'best_fitness':
-                    ckpt[key] = ckpt[key].tolist()[0] if isinstance(ckpt[key], (np.ndarray, torch.Tensor)) else ckpt[
-                        key]
-                onnx_MetaData[key] = ckpt[key]
 
-            for index, key in enumerate(onnx_MetaData):
-                metadata = onnx_model.metadata_props.add()
-                metadata.key = key
-                metadata.value = str(onnx_MetaData[key])
-                # logging.info(f'{key_prefix} {key}, value: {onnx_MetaData[key]}')
+        onnx_MetaData = {'model_infor': model_Gflops,
+                         'export_gitstatus': gitstatus,
+                         'best_fitness': best_fitness,
+                         'nc': len(labels),
+                         'stride': model.stride.cpu().tolist(),
+                         'names': labels,
+                         'total_image': total_image,
+                         'export_date': datetime.datetime.now().isoformat('#'),
+                         'exporting_opt': vars(opt),
+                         "anchor_grid": anchor_grid,
+                         "anchors": anchors,
+                         }
+        key_prefix = colorstr('yellow', 'key:')
+        for index, key in enumerate(ckpt):
+            if key == 'model':
+                continue
+            if key == 'best_fitness':
+                ckpt[key] = ckpt[key].tolist()[0] if isinstance(ckpt[key], (np.ndarray, torch.Tensor)) else ckpt[
+                    key]
+            onnx_MetaData[key] = ckpt[key]
 
-            onnxmltools.utils.save_model(onnx_model, f)
-            logging.info(f'{prefix} export success✅, saved as {f}')
+        for index, key in enumerate(onnx_MetaData):
+            metadata = onnx_model.metadata_props.add()
+            metadata.key = key
+            metadata.value = str(onnx_MetaData[key])
+            # logging.info(f'{key_prefix} {key}, value: {onnx_MetaData[key]}')
 
-            if opt.include_nms and not opt.end2end:
-                logging.info(
-                    f'{prefix} Registering NMS plugin for ONNX TRT...')
-                from utils.add_nms import RegisterNMS
+        onnxmltools.utils.save_model(onnx_model, f)
+        logging.info(f'{prefix} export success✅, saved as {f}')
 
-                mo = RegisterNMS(logger=logging,
-                                 onnx_model_path=f,
-                                 precision='fp16' if img.dtype == torch.float16 else 'fp32', prefix=prefix)
-                mo.register_nms(score_thresh=opt.conf_thres, nms_thresh=opt.iou_thres, detections_per_img=opt.topk_all)
-                mo.save(f, onnx_MetaData=onnx_MetaData)
-                logging.info(f'{prefix} registering NMS plugin for ONNX success✅ {f}')
-            filenames.append(f)
+        if opt.include_nms and not opt.end2end:
+            logging.info(
+                f'{prefix} Registering NMS plugin for ONNX TRT...')
+            from utils.add_nms import RegisterNMS
+
+            mo = RegisterNMS(logger=logging,
+                             onnx_model_path=f,
+                             precision='fp16' if img.dtype == torch.float16 else 'fp32', prefix=prefix)
+            mo.register_nms(score_thresh=opt.conf_thres, nms_thresh=opt.iou_thres, detections_per_img=opt.topk_all)
+            mo.save(f, onnx_MetaData=onnx_MetaData)
+            logging.info(f'{prefix} registering NMS plugin for ONNX success✅ {f}')
+        filenames.append(f)
 
         if openVINO:
             prefix = colorstr('OpenVINO:')
