@@ -36,7 +36,7 @@ def cls_test(
     model.eval()
 
     preds, targets, loss = [], [], []
-    top1, top5 = 0, 0
+    top1, top5, mean_loss = 0, 0, 0
     n = len(dataloader)
     root_dir = dataloader.dataset.root
     root_dir = root_dir if isinstance(root_dir, str) else Path(root_dir)
@@ -60,7 +60,7 @@ def cls_test(
         correct = (targets_[:, None] == preds_).float()
         acc = torch.stack((correct[:, 0], correct.max(1).values), dim=1)  # (top1, top5) accuracy
         top1, top5 = acc.mean(0).tolist()
-        pbar.desc = f"{pbar.desc[:-36]}{mean_loss:>11.3g}{top1:>11.3g}{top5:>11.3g}"
+    pbar.desc = f"{pbar.desc[:-36]}{mean_loss:>11.3g}{top1:>11.3g}{top5:>11.3g}"
     fig = confusionMatrix.plot(dataloader.dataset.classes, title=f"Confusion Matrix {epoch}")
 
     return top1, top5, mean_loss, fig
