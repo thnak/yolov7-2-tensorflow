@@ -645,8 +645,8 @@ class LoadSampleforVideoClassify(Dataset):
                                     class_to_idx=class_to_indx,
                                     extensions=tuple(VID_FORMATS))
         self.imgsz = 224
-        self.clip_len = 16
-        self.step = 5
+        self.sample_length = 16
+        self.sampling_rate = 5
         self.pin_memory = False
         backend = backend.lower()
         try:
@@ -664,12 +664,12 @@ class LoadSampleforVideoClassify(Dataset):
             self.calculateMeanStd()
         else:
             logger.info(f"{self.prefix}Using mean: {self.mean}, std: {self.std} for this dataset.")
-        self.step = max(1, int(self.step))
-        self.clip_len = max(1, int(self.clip_len))
+        self.sampling_rate = max(1, int(self.sampling_rate))
+        self.sample_length = max(1, int(self.sample_length))
 
         logger.info(
             f"{self.prefix}total {len(self.samples)} samples with {len(self.classes)} classes, "
-            f"frame length: {self.clip_len}, step frame: {self.step}")
+            f"frame length: {self.sample_length}, step frame: {self.sampling_rate}")
         self.transform = transforms.Compose([
             transforms.Lambda(lambd=lambda x: self.randomDropChannel(x, 0.1)),
             transforms.Lambda(lambd=lambda x: self.randomDropFrame(x, 0.1)),
@@ -705,7 +705,7 @@ class LoadSampleforVideoClassify(Dataset):
             psum_sq += (video ** 2).sum(axis=[0, 2, 3])
             pbar.set_description(f"{self.prefix}Collecting data to calculate mean, std...")
             if i >= len(samples) - 10:
-                count = len(samples) * self.clip_len * self.imgsz * self.imgsz
+                count = len(samples) * self.sample_length * self.imgsz * self.imgsz
                 total_mean = psum / count
                 total_var = (psum_sq / count) - (total_mean ** 2)
                 total_std = torch.sqrt(total_var)
@@ -726,20 +726,21 @@ class LoadSampleforVideoClassify(Dataset):
     def loadSample(self, path=None, transform=None, dtype=torch.uint8):
         """choice a random sample to plot"""
         target = 0
-        resize_transform = transforms.Compose([transforms.Resize((self.imgsz, self.imgsz), antialias=True)])
+        resize_transform = transforms.Compose([transforms.Resize((self.imgsz, self.imgsz), antialias=False)])
         if path is None:
             path, target = random.choice(self.samples)
         vid = torchvision.io.VideoReader(path, "video")
         vid.set_current_stream("video")
         metadata = vid.get_metadata()
         # Seek and return frames
-        n_length = self.clip_len * self.step
+        n_length = self.sample_length * self.sampling_rate
         fps = metadata["video"]['fps']
         fps = fps[0] if isinstance(fps, list) else fps
         max_seek = metadata["video"]['duration'][0] - (n_length / fps)
         start = random.uniform(0., max_seek)
-        video = torch.zeros([self.clip_len, 3, self.imgsz, self.imgsz], dtype=dtype)
-        for i, frame in enumerate(itertools.islice(vid.seek(start, keyframes_only=True), 0, n_length, self.step)):
+        video = torch.zeros([self.sample_length, 3, self.imgsz, self.imgsz], dtype=dtype)
+        for i, frame in enumerate(itertools.islice(vid.seek(start, keyframes_only=True), 0,
+                                                   n_length, self.sampling_rate)):
             video[i, ...] = resize_transform(frame['data'])
 
         if transform:

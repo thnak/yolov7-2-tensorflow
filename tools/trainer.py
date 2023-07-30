@@ -172,11 +172,11 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None, use3D=Fal
     if Path(opt.cfg).exists() and opt.cfg != "":
         with open(opt.cfg, "r") as f:
             model3d_config = yaml.load(f, yaml.SafeLoader)
-        clip_len = model3d_config.get("sub_sample", 16)
-        step = model3d_config.get("step", 3)
+        clip_len = model3d_config.get("sample_length", 16)
+        step = model3d_config.get("sampling_rate", 3)
     else:
-        clip_len = model.yaml.get("sub_sample", 16)
-        step = model.yaml.get("step", 3)
+        clip_len = model.yaml.get("sample_length", 16)
+        step = model.yaml.get("sampling_rate", 3)
     # Freeze
     freeze = [f'model.{x}.' for x in (freeze if len(freeze) > 1 else range(
         freeze[0]))]  # parameter names to freeze (full or partial)
@@ -195,8 +195,8 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None, use3D=Fal
         try:
             imgsz, imgsz_test = [check_img_size(x, gs) for x in opt.imgsz]
             if use3D:
-                dataset.step = val_dataset.step = step
-                dataset.clip_len = val_dataset.clip_len = clip_len
+                dataset.sampling_rate = val_dataset.sampling_rate = step
+                dataset.sample_length = val_dataset.sample_length = clip_len
                 model.input_shape = [input_channel, clip_len, imgsz, imgsz] if isinstance(imgsz, int) else [
                     input_channel, clip_len, *imgsz]
             else:
@@ -350,12 +350,13 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None, use3D=Fal
     logger.info(f'saved init model at: {save_dir_}')
     tloss, vloss, best_fitness = 0.0, 0.0, 0.0  # train loss, val loss, fitness
     top1, top5 = 0, 0
-    mean_tloss, mean_vloss = [], []
 
     # epoch ------------------------------------------------------------------
     logger.info(('\n' + '%11s' * len(tag_results)) % tag_results)
     for epoch in range(start_epoch, epochs):
         model.to(device).train(mode=True)
+        mean_tloss, mean_vloss = [], []
+
         if rank != -1:
             dataloader.sampler.set_epoch(epoch)
         pbar = enumerate(dataloader)

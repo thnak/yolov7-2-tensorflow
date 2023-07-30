@@ -1,4 +1,9 @@
-from utils.general import check_requirements, check_version
+import json
+import sys
+import warnings
+
+from models.experimental import End2End
+from utils.general import check_requirements, check_version, colorstr, ONNX_OPSET, ONNX_OPSET_TARGET
 import os
 import subprocess
 import yaml
@@ -27,7 +32,8 @@ def export_openvino(file_, metadata, half, prefix='OpenVINO:'):
 
     cmd = f"mo --input_model {file.with_suffix('.onnx')} --output_dir {f} --data_type {'FP16' if half else 'FP32'}"
     subprocess.run(cmd.split(), check=True, env=os.environ)  # export
-    yaml_save(Path(f) / file.with_suffix('.yaml').name, metadata)  # add metadata.yaml
+    save_dir = Path(f) / file.with_suffix('.yaml').name
+    yaml_save(save_dir.as_posix(), metadata)  # add metadata.yaml
     return f, None
 
 
@@ -47,14 +53,14 @@ def export_tfjs(file_, names, prefix='TensorFlow.js:'):
 
     json = Path(f_json).read_text()
     with open(f_json, 'w') as j:  # sort JSON Identity_* in ascending order
-        subst = re.sub(
-            r'{"outputs": {"Identity.?.?": {"name": "Identity.?.?"}, '
-            r'"Identity.?.?": {"name": "Identity.?.?"}, '
-            r'"Identity.?.?": {"name": "Identity.?.?"}, '
-            r'"Identity.?.?": {"name": "Identity.?.?"}}}', r'{"outputs": {"Identity": {"name": "Identity"}, '
-                                                           r'"Identity_1": {"name": "Identity_1"}, '
-                                                           r'"Identity_2": {"name": "Identity_2"}, '
-                                                           r'"Identity_3": {"name": "Identity_3"}}}', json)
+        subst = re.sub(r'{"outputs": {"Identity.?.?": {"name": "Identity.?.?"}, '
+                       r'"Identity.?.?": {"name": "Identity.?.?"}, '
+                       r'"Identity.?.?": {"name": "Identity.?.?"}, '
+                       r'"Identity.?.?": {"name": "Identity.?.?"}}}',
+                       r'{"outputs": {"Identity": {"name": "Identity"}, '
+                       r'"Identity_1": {"name": "Identity_1"}, '
+                       r'"Identity_2": {"name": "Identity_2"}, '
+                       r'"Identity_3": {"name": "Identity_3"}}}', json)
         j.write(subst)
     with open(f_labels, 'w') as f:
         labels_ = ''
@@ -62,7 +68,7 @@ def export_tfjs(file_, names, prefix='TensorFlow.js:'):
             labels_ += f'{x}\n'
         labels_ = labels_[:-1]
         f.writelines(labels_)
-    return f_web, None
+    return f_web
 
 
 def export_pb(keras_model, file, prefix='TensorFlow GraphDef:'):
@@ -127,8 +133,10 @@ def export_saved_model(model,
     return f, keras_model
 
 
-def export_tflite(keras_model, im, file, int8, data=None, nms=False, agnostic_nms=False, stride=32, prefix='TensorFlow Lite:'):
-    # YOLOv5 TensorFlow Lite export
+def export_tflite(keras_model, im, file, int8, data=None, nms=False, agnostic_nms=False, stride=32,
+                  prefix='TensorFlow Lite:'):
+    """YOLOv5 TensorFlow Lite export"""
+    check_requirements(f"tensorflow")
     import tensorflow as tf
 
     print(f'\n{prefix} starting export with tensorflow {tf.__version__}...')
@@ -167,7 +175,7 @@ def export_tflite(keras_model, im, file, int8, data=None, nms=False, agnostic_nm
 
 
 def add_tflite_metadata(file, metadata, num_outputs):
-    # Add metadata to *.tflite models per https://www.tensorflow.org/lite/models/convert/metadata
+    """Add metadata to *.tflite models per https://www.tensorflow.org/lite/models/convert/metadata"""
     import contextlib
     with contextlib.suppress(ImportError):
         check_requirements('tflite-support')
@@ -178,14 +186,14 @@ def add_tflite_metadata(file, metadata, num_outputs):
         tmp_file = Path('/tmp/meta.txt')
 
         with open(tmp_file, 'w') as meta_f:
-            meta_f.write(str(metadata))
+            meta_f.write(json.dumps(metadata))
 
         model_meta = _metadata_fb.ModelMetadataT()
         input_meta = _metadata_fb.TensorMetadataT()
         output_meta = _metadata_fb.TensorMetadataT()
         output_meta.name = "output"
-        output_meta.description = "output [1,6300,85] = [xywh, conf, class0, class1, ...]"
-        input_meta.name = "image"
+        output_meta.description = "Tensor[batch, n_pred, [xhwh, cls, cnf]]"
+        input_meta.name = "images"
         input_meta.description = "Image to predict"
         input_meta.content = _metadata_fb.ContentT()
         input_meta.content.contentProperties = _metadata_fb.ImagePropertiesT()
@@ -214,3 +222,172 @@ def add_tflite_metadata(file, metadata, num_outputs):
         tmp_file.unlink()
 
 
+def TryExport_ONNX(weight: Path, model, feed: torch.Tensor, map_device, logging,
+                   MetaData: dict = {}, start_points_2_break: list = [], end_points_2_break: list = [],
+                   prefix: str = colorstr('ONNX:'), **kwargs):
+    check_requirements(('onnx', 'onnxmltools'))
+    import onnx
+    import onnxmltools
+
+    logging.info(f'\n{prefix} Starting ONNX export with onnx {onnx.__version__}')
+    f = weight.as_posix().replace('.pt', '.onnx')  # filename
+    output_names = ['classes', 'boxes'] if kwargs["include_nms"] else ['output']
+
+    dynamic_axes = None
+    if kwargs["dynamic"]:
+        dynamic_axes = {'images': {0: 'batch', 2: 'height', 3: 'width'},  # size(1,3,640,640)
+                        'output': {0: 'batch', 2: 'y', 3: 'x'}}
+    if kwargs["dynamic_batch"]:
+        kwargs.batch_size = 'batch'
+        dynamic_axes = {
+            'images': {
+                0: 'batch',
+            }, }
+        if kwargs["end2end"] and not kwargs["max_hw"]:
+            output_axes = {
+                'num_dets': {0: 'batch'},
+                'det_boxes': {0: 'batch'},
+                'det_scores': {0: 'batch'},
+                'det_classes': {0: 'batch'}, }
+        else:
+            output_axes = {'output': {0: 'batch'}, }
+        dynamic_axes.update(output_axes)
+    if not kwargs["include_nms"]:
+        if kwargs["end2end"]:
+            x = 'TensorRT' if not kwargs["max_hw"] else 'ONNXRUNTIME'
+            logging.info(f'{prefix} Starting export end2end model for {colorstr(x)}')
+            model = End2End(model, kwargs["topk_all"], kwargs["iou_thres"],
+                            kwargs["conf_thres"], max(model.input_shape) if kwargs["max_hw"] else None, map_device,
+                            len(model.names))
+            if kwargs["end2end"] and not kwargs["max_hw"]:
+                output_names = ['num_dets', 'det_boxes',
+                                'det_scores', 'det_classes']
+                shapes = [kwargs["batch_size"], 1, kwargs["batch_size"], kwargs["topk_all"], 4,
+                          kwargs["batch_size"], kwargs["topk_all"], kwargs["batch_size"], kwargs["topk_all"]]
+            else:
+                output_names = ['output']
+        else:
+            model.model[-1].concat = True
+    if kwargs["onnx_opset"] not in ONNX_OPSET:
+        logging.info(f'{prefix} onnx opset must be in {ONNX_OPSET}, switching to 12')
+        kwargs["onnx_opset"] = ONNX_OPSET_TARGET
+    dml = False
+    try:
+        import torch_directml
+        dml = True
+    except ImportError:
+        pass
+
+    if kwargs["onnx_opset"] not in ONNX_OPSET_TARGET and dml:
+        logging.warn(
+            f'{prefix} onnx opset tested for version {ONNX_OPSET_TARGET}, '
+            f'newer version may have poor performance for ONNXRUNTIME in DmlExecutionProvider')
+    torch.onnx.disable_log()
+    if feed.dtype != torch.float16 and kwargs["trace"]:
+        model = torch.jit.trace(model, feed).eval()
+        logging.info(f'{prefix} Traced model!')
+    torch.onnx.export(model,
+                      feed, f, verbose=kwargs["v"],
+                      opset_version=kwargs["onnx_opset"],
+                      input_names=['images'],
+                      output_names=output_names,
+                      training=torch.onnx.TrainingMode.EVAL,
+                      dynamic_axes=dynamic_axes,
+                      keep_initializers_as_inputs=True)
+
+    if sum([len(start_points_2_break), len(end_points_2_break)]) > 1:
+        onnx.utils.extract_model(input_path=f, output_path=f, input_names=start_points_2_break,
+                                 output_names=end_points_2_break)
+    # Checks
+    onnx_model = onnx.load(f)  # load onnx model
+    onnx.checker.check_model(onnx_model)  # check onnx model
+
+    if kwargs["end2end"] and not kwargs["max_hw"]:
+        for i in onnx_model.graph.output:
+            for j in i.type.tensor_type.shape.dim:
+                j.dim_param = str(shapes.pop(0))
+
+    if kwargs["simplify"]:
+        try:
+            check_requirements('onnxsim')
+            import onnxsim
+
+            logging.info(f'{prefix} Starting to simplify ONNX...')
+            onnx_model, check = onnxsim.simplify(onnx_model)
+            assert check, 'assert check failed'
+        except Exception as e:
+            logging.info(f'{prefix} Simplifier failure❌: {e}')
+
+    onnx.checker.check_model(onnx_model)  # check onnx model
+    logging.info(f'{prefix} writing metadata for model...')
+
+    for index, key in enumerate(MetaData):
+        metadata = onnx_model.metadata_props.add()
+        metadata.key = key
+        metadata.value = str(MetaData[key])
+
+    onnxmltools.utils.save_model(onnx_model, f)
+
+    if kwargs["include_nms"] and not kwargs["end2end"]:
+        logging.info(f'{prefix} Registering NMS plugin for ONNX TRT...')
+        from utils.add_nms import RegisterNMS
+
+        mo = RegisterNMS(logger=logging,
+                         onnx_model_path=f,
+                         precision='fp16' if feed.dtype == torch.float16 else 'fp32', prefix=prefix)
+        mo.register_nms(score_thresh=kwargs["conf_thres"], nms_thresh=kwargs["iou_thres"],
+                        detections_per_img=kwargs["topk_all"])
+        mo.save(f, onnx_MetaData=MetaData)
+        logging.info(f'{prefix} registering NMS plugin for ONNX success✅ {f}')
+    return f
+
+
+def TryExportTorchScript(weight: Path, model, feed: torch.Tensor, logging,
+                         MetaData: dict = {}, lite: bool = False,
+                         prefix: str = colorstr('ONNX:'), **kwargs):
+    from torch.utils.mobile_optimizer import optimize_for_mobile
+
+    logging.info(
+        f'\n{prefix} Starting {"TorchScript-Lite" if lite else "TorchScript"} export with torch {torch.__version__}')
+    f = weight.as_posix().replace('.pt', '.torchscript.ptl' if lite else ".torchscript.ptl")  # filename
+    tsl = torch.jit.trace(model, feed, strict=False)
+    MetaData["input_shape"] = [*feed.shape]
+
+    if lite:
+        tsl = optimize_for_mobile(tsl)
+        tsl._save_for_lite_interpreter(f, _extra_files={"config.txt": json.dumps(MetaData)})
+    else:
+        torch.jit.save(tsl, f, _extra_files={"config.txt": json.dumps(MetaData)})
+    return f
+
+
+def TryExportCoreML(weight: Path, model, feed: torch.Tensor, logging,
+                    prefix: str = colorstr('ONNX:'), **kwargs):
+    check_requirements('coremltools')
+    import coremltools as ct
+
+    logging.info(f'\n{prefix} Starting CoreML export with coremltools {ct.__version__}')
+    if kwargs["end2end"]:
+        from models.yolo import iOSModel
+
+        ts = iOSModel(model, feed)
+        ts = torch.jit.trace(ts, feed, strict=False)
+    ct_model = ct.convert(ts,
+                          inputs=[ct.ImageType('image',
+                                               shape=feed.shape,
+                                               scale=1 / 255.0,
+                                               bias=[0, 0, 0])])
+    bits, mode = (8, 'kmeans_lut') if kwargs['int8'] else (
+        16, 'linear') if kwargs['fp16'] else (32, None)
+    if bits < 32:
+        if sys.platform.lower() == 'darwin':  # quantization only supported on macOS
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=DeprecationWarning)
+                ct_model = ct.models.neural_network.quantization_utils.quantize_weights(
+                    ct_model, bits, mode)
+        else:
+            logging.info(
+                f'{prefix} quantization only supported on macOS, skipping...')
+    f = weight.as_posix().replace('.pt', '.mlmodel')  # filename
+    ct_model.save(f)
+    return f

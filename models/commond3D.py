@@ -136,10 +136,9 @@ class Classify3D(nn.Module):
         out = self.conv(out)
         out = out.permute((0, 2, 1))
         out = self.linear(out)
+        out = out.mean(1)
         if torch.onnx.is_in_onnx_export() or self.export:
             out = self.act(out)
-        out = out.mean(1)
-
         return out
 
 

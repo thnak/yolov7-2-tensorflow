@@ -1,6 +1,8 @@
 import argparse
 import datetime
+import json
 import logging
+import pathlib
 import sys
 import time
 import warnings
@@ -67,8 +69,8 @@ if __name__ == '__main__':
     opt.include = [x.lower() for x in opt.include] if isinstance(
         opt.include, list) else [opt.include.lower()]
 
-    torchScript = any(x in ['torchscript', 'coreml'] for x in opt.include)
-    torchScriptLite = any(x in ['torchscriptlite'] for x in opt.include)
+    torchScript = any(x in ['torchscript', 'coreml', "torchscriptlite"] for x in opt.include)
+    torchScriptLite = any(x in ["torchscriptlite"] for x in opt.include)
     ONNX = any(x in ['onnx', 'open', 'openvino'] for x in opt.include)
     openVINO = any(x in ['openvino', 'open'] for x in opt.include)
     tensorFlowjs = any(x in ['tfjs'] for x in opt.include)
@@ -81,15 +83,15 @@ if __name__ == '__main__':
     RKNN = any(x in ['rknn'] for x in opt.include)
 
     t = time.time()
-    opt.weights = [Path(x) for x in opt.weights] if isinstance(
-        opt.weights, (tuple, list)) else [Path(opt.weights)]
+    opt.weights = opt.weights if isinstance(opt.weights, (tuple, list)) else [opt.weights]
     warnings.filterwarnings('ignore', category=torch.jit.TracerWarning)
     warnings.filterwarnings(action='ignore', category=UserWarning)
     warnings.filterwarnings(action='ignore', category=FutureWarning)
+    print(opt.__dict__)
 
     exPrefix = colorstr('Export:')
-
     for weight in opt.weights:
+        weight = Path(weight)
         logging.info(f'{exPrefix} loading PyTorch model')
         device, gitstatus = select_device(opt.device)
         map_device = 'cpu' if device.type == 'privateuseone' else device
@@ -195,6 +197,8 @@ if __name__ == '__main__':
             for i, x in enumerate(end_points_2_break):
                 from_modul, modul_idx, attr, idx = x.split('.')
                 end_points_2_break[i] = f'/{from_modul}.{modul_idx}/{attr}.{idx}/Conv_output_0'
+        else:
+            end_points_2_break = start_points_2_break = []
 
         model_Gflops = model.info(verbose=False, img_size=input_shape)
         logging.info(model_Gflops)
@@ -215,6 +219,35 @@ if __name__ == '__main__':
         model.model[-1].export = True if any([coreML, is_3D, model.is_Classify]) and not opt.end2end else False
         model.model[-1].include_nms = True if opt.include_nms else False
 
+        # metadata
+        anchors = anchor_grid = None
+        if RKNN:
+            if model.is_Classify:
+                anchor_grid = model.model[-1].anchor_grid.detach().cpu().numpy().tolist()
+                anchors = model.model[-1].anchors.detach().cpu().numpy().tolist()
+
+        MetaData = {'model_infor': model_Gflops,
+                    'export_gitstatus': gitstatus,
+                    'best_fitness': best_fitness,
+                    'nc': len(labels),
+                    'stride': model.stride.cpu().tolist(),
+                    'names': labels,
+                    'total_image': total_image,
+                    'export_date': datetime.datetime.now().isoformat('#'),
+                    'exporting_opt': vars(opt),
+                    "anchor_grid": anchor_grid,
+                    "anchors": anchors,
+                    "mean": model.yaml.get('mean', [0, 0, 0]),
+                    "std": model.yaml.get('std', [1, 1, 1]),
+                    "sampling_rate": model.yaml.get("sampling_rate", 0)}
+        for index, key in enumerate(ckpt):
+            if key == 'model':
+                continue
+            if key == 'best_fitness':
+                ckpt[key] = ckpt[key].tolist()[0] if isinstance(ckpt[key], (np.ndarray, torch.Tensor)) else ckpt[key]
+            MetaData[key] = ckpt[key]
+
+        # export
         filenames = []
         if RKNN:
             prefix = colorstr('RKNN:')
@@ -226,11 +259,12 @@ if __name__ == '__main__':
         if torchScript:
             prefix = colorstr('TorchScript:')
             try:
-                logging.info(
-                    f'\n{prefix} Starting TorchScript export with torch{torch.__version__}')
-                f = weight.as_posix().replace('.pt', '.torch-script.pt')  # filename
-                ts = torch.jit.trace(model, img, strict=False)
-                torch.jit.save(ts, f)
+                from tools.auxexport import TryExportTorchScript
+
+                f = TryExportTorchScript(weight=weight, model=model, feed=img,
+                                         map_device=map_device, logging=logging, MetaData=MetaData,
+                                         lite=torchScriptLite,
+                                         prefix=prefix, **opt.__dict__)
                 logging.info(f'{prefix} export success✅, saved as {f}')
                 filenames.append(f)
             except Exception as e:
@@ -239,208 +273,44 @@ if __name__ == '__main__':
         if coreML:
             prefix = colorstr('CoreML:')
             try:
-                check_requirements('coremltools')
-                from models.yolo import iOSModel
-                import coremltools as ct
+                from tools.auxexport import TryExportCoreML
 
-                logging.info(f'\n{prefix} Starting CoreML export with coremltools {ct.__version__}')
-                if opt.end2end:
-                    ts = iOSModel(model, img)
-                    ts = torch.jit.trace(ts, img, strict=False)
-                ct_model = ct.convert(ts,
-                                      inputs=[ct.ImageType('image',
-                                                           shape=img.shape,
-                                                           scale=1 / 255.0,
-                                                           bias=[0, 0, 0])])
-                bits, mode = (8, 'kmeans_lut') if opt.int8 else (
-                    16, 'linear') if opt.fp16 else (32, None)
-                if bits < 32:
-                    if sys.platform.lower() == 'darwin':  # quantization only supported on macOS
-                        with warnings.catch_warnings():
-                            warnings.filterwarnings("ignore", category=DeprecationWarning)
-                            ct_model = ct.models.neural_network.quantization_utils.quantize_weights(
-                                ct_model, bits, mode)
-                    else:
-                        logging.info(
-                            f'{prefix} quantization only supported on macOS, skipping...')
-                f = weight.as_posix().replace('.pt', '.mlmodel')  # filename
-                ct_model.save(f)
-                logging.info(
-                    f'{prefix} CoreML export success✅, saved as %s' % f)
+                f = TryExportCoreML(weight=weight, model=model, feed=img,
+                                    map_device=map_device, logging=logging,
+                                    prefix=prefix, **opt.__dict__)
+                logging.info(f'{prefix} export success✅, saved as %s' % f)
                 filenames.append(f)
             except Exception as e:
-                logging.info(f'{prefix} CoreML export failure❌: {e}')
-        if torchScriptLite:
-            prefix = colorstr('TorchScript-Lite:')
-            try:
-                logging.info(
-                    f'\n{prefix} Starting TorchScript-Lite export with torch {torch.__version__}')
-                f = weight.as_posix().replace('.pt', '.torchscript.ptl')  # filename
-                tsl = torch.jit.trace(model, img, strict=False)
-                tsl = optimize_for_mobile(tsl)
-                tsl._save_for_lite_interpreter(f)
-                logging.info(
-                    f'{prefix} TorchScript-Lite export success✅, saved as {f}')
-                filenames.append(f)
-            except Exception as e:
-                logging.info(f'{prefix} export failure❌:\n{e}')
+                logging.info(f'{prefix} export failure❌: {e}')
+
         if ONNX:
             prefix = colorstr('ONNX:')
-            check_requirements(('onnx', 'onnxmltools'))
-            import onnx
-            import onnxmltools
-
-            logging.info(
-                f'\n{prefix} Starting ONNX export with onnx {onnx.__version__}')
-            f = weight.as_posix().replace('.pt', '.onnx')  # filename
-            output_names = ['classes', 'boxes'] if opt.include_nms else ['output']
-
-            dynamic_axes = None
-            if opt.dynamic:
-                dynamic_axes = {'images': {0: 'batch', 2: 'height', 3: 'width'},  # size(1,3,640,640)
-                                'output': {0: 'batch', 2: 'y', 3: 'x'}}
-            if opt.dynamic_batch:
-                opt.batch_size = 'batch'
-                dynamic_axes = {
-                    'images': {
-                        0: 'batch',
-                    }, }
-                if opt.end2end and not opt.max_hw:
-                    output_axes = {
-                        'num_dets': {0: 'batch'},
-                        'det_boxes': {0: 'batch'},
-                        'det_scores': {0: 'batch'},
-                        'det_classes': {0: 'batch'}, }
-                else:
-                    output_axes = {'output': {0: 'batch'}, }
-                dynamic_axes.update(output_axes)
-            if not opt.include_nms:
-                if opt.end2end:
-                    x = 'TensorRT' if not opt.max_hw else 'ONNXRUNTIME'
-                    logging.info(f'{prefix} Starting export end2end model for {colorstr(x)}')
-                    model = End2End(model, opt.topk_all, opt.iou_thres,
-                                    opt.conf_thres, max(input_shape[1:]) if opt.max_hw else None, map_device, len(labels))
-                    if opt.end2end and not opt.max_hw:
-                        output_names = ['num_dets', 'det_boxes',
-                                        'det_scores', 'det_classes']
-                        shapes = [opt.batch_size, 1, opt.batch_size, opt.topk_all, 4,
-                                  opt.batch_size, opt.topk_all, opt.batch_size, opt.topk_all]
-                    else:
-                        output_names = ['output']
-                else:
-                    model.model[-1].concat = True
-            if opt.onnx_opset not in ONNX_OPSET:
-                logging.info(f'{prefix} onnx opset must be in {ONNX_OPSET}, switching to 12')
-                opt.onnx_opset = 12
-            dml = False
             try:
-                import torch_directml
-                dml = True
-            except ImportError:
-                pass
+                from tools.auxexport import TryExport_ONNX
 
-            if opt.onnx_opset not in ONNX_OPSET_TARGET and dml:
-                logging.info(
-                    f'{prefix} onnx opset tested for version {ONNX_OPSET_TARGET}, newer version may have poor performance for ONNXRUNTIME in DmlExecutionProvider')
-            torch.onnx.disable_log()
-            if img.dtype != torch.float16 and opt.trace:
-                model = torch.jit.trace(model, img).eval()
-                logging.info(f'{prefix} Traced model!')
-            torch.onnx.export(model,
-                              img, f, verbose=opt.v,
-                              opset_version=opt.onnx_opset,
-                              input_names=['images'],
-                              output_names=output_names,
-                              training=torch.onnx.TrainingMode.EVAL,
-                              dynamic_axes=dynamic_axes,
-                              keep_initializers_as_inputs=True)
-        if RKNN:
-            onnx.utils.extract_model(input_path=f, output_path=f, input_names=start_points_2_break,
-                                     output_names=end_points_2_break)
-        # Checks
-        onnx_model = onnx.load(f)  # load onnx model
-        onnx.checker.check_model(onnx_model)  # check onnx model
+                f = TryExport_ONNX(weight=weight, model=model, feed=img,
+                                   map_device=map_device, logging=logging,
+                                   start_points_2_break=start_points_2_break,
+                                   end_points_2_break=end_points_2_break,
+                                   MetaData=MetaData,
+                                   prefix=prefix, **opt.__dict__)
+                filenames.append(f)
+                logging.info(f'{prefix} export success✅, saved as %s' % f)
 
-        if opt.end2end and not opt.max_hw:
-            for i in onnx_model.graph.output:
-                for j in i.type.tensor_type.shape.dim:
-                    j.dim_param = str(shapes.pop(0))
-
-        if opt.simplify:
-            try:
-                check_requirements('onnxsim')
-                import onnxsim
-
-                logging.info(f'{prefix} Starting to simplify ONNX...')
-                onnx_model, check = onnxsim.simplify(onnx_model)
-                assert check, 'assert check failed'
             except Exception as e:
-                logging.info(f'{prefix} Simplifier failure❌: {e}')
-
-        onnx.checker.check_model(onnx_model)  # check onnx model
-        logging.info(f'{prefix} writing metadata for model...')
-
-        anchors = anchor_grid = None
-        if RKNN:
-            if model.is_Classify:
-                anchor_grid = model.model[-1].anchor_grid.detach().cpu().numpy().tolist()
-                anchors = model.model[-1].anchors.detach().cpu().numpy().tolist()
-
-        onnx_MetaData = {'model_infor': model_Gflops,
-                         'export_gitstatus': gitstatus,
-                         'best_fitness': best_fitness,
-                         'nc': len(labels),
-                         'stride': model.stride.cpu().tolist(),
-                         'names': labels,
-                         'total_image': total_image,
-                         'export_date': datetime.datetime.now().isoformat('#'),
-                         'exporting_opt': vars(opt),
-                         "anchor_grid": anchor_grid,
-                         "anchors": anchors,
-                         }
-        key_prefix = colorstr('yellow', 'key:')
-        for index, key in enumerate(ckpt):
-            if key == 'model':
-                continue
-            if key == 'best_fitness':
-                ckpt[key] = ckpt[key].tolist()[0] if isinstance(ckpt[key], (np.ndarray, torch.Tensor)) else ckpt[
-                    key]
-            onnx_MetaData[key] = ckpt[key]
-
-        for index, key in enumerate(onnx_MetaData):
-            metadata = onnx_model.metadata_props.add()
-            metadata.key = key
-            metadata.value = str(onnx_MetaData[key])
-            # logging.info(f'{key_prefix} {key}, value: {onnx_MetaData[key]}')
-
-        onnxmltools.utils.save_model(onnx_model, f)
-        logging.info(f'{prefix} export success✅, saved as {f}')
-
-        if opt.include_nms and not opt.end2end:
-            logging.info(
-                f'{prefix} Registering NMS plugin for ONNX TRT...')
-            from utils.add_nms import RegisterNMS
-
-            mo = RegisterNMS(logger=logging,
-                             onnx_model_path=f,
-                             precision='fp16' if img.dtype == torch.float16 else 'fp32', prefix=prefix)
-            mo.register_nms(score_thresh=opt.conf_thres, nms_thresh=opt.iou_thres, detections_per_img=opt.topk_all)
-            mo.save(f, onnx_MetaData=onnx_MetaData)
-            logging.info(f'{prefix} registering NMS plugin for ONNX success✅ {f}')
-        filenames.append(f)
+                logging.info(f'{prefix} export failure❌:\n{e}')
 
         if openVINO:
             prefix = colorstr('OpenVINO:')
             try:
-                meta = {'stride': int(max(model.stride)),
-                        'names': model.names}
+                meta = MetaData
+                meta["stride"] = max(MetaData["stride"])
                 from tools.auxexport import export_openvino
 
                 logging.info(f'{prefix} Starting export...')
                 outputpath, _ = export_openvino(
                     file_=weight, metadata=meta, half=True, prefix=prefix)
-                logging.info(
-                    f'{prefix} export success✅, saved as: {outputpath}')
+                logging.info(f'{prefix} export success✅, saved as: {outputpath}')
                 filenames.append(outputpath)
             except Exception as e:
                 logging.info(f'{prefix} export failure❌:\n{e}')
@@ -449,61 +319,61 @@ if __name__ == '__main__':
             prefix = colorstr('TensorFlow SavedModel:')
             from tools.auxexport import export_saved_model
 
-            outputpath, s_models = export_saved_model(model,
-                                                      img,
-                                                      weight,
-                                                      False,
-                                                      tf_nms=tensorFlowjs or opt.nms or opt.agnostic_nms,
-                                                      agnostic_nms=tensorFlowjs or opt.agnostic_nms,
-                                                      topk_per_class=opt.topk_all,
-                                                      topk_all=opt.topk_all,
-                                                      iou_thres=opt.iou_thres,
-                                                      conf_thres=opt.conf_thres,
-                                                      keras=opt.keras, prefix=prefix)
-            logging.info(f'{prefix} export success✅, saved as {outputpath}')
-            filenames.append(outputpath)
-        if graphDef:
-            prefix = colorstr('TensorFlow GraphDef:')
-            try:
-                from tools.auxexport import export_pb
+            f, s_models = export_saved_model(model,
+                                             img,
+                                             weight,
+                                             False,
+                                             tf_nms=tensorFlowjs or opt.nms or opt.agnostic_nms,
+                                             agnostic_nms=tensorFlowjs or opt.agnostic_nms,
+                                             topk_per_class=opt.topk_all,
+                                             topk_all=opt.topk_all,
+                                             iou_thres=opt.iou_thres,
+                                             conf_thres=opt.conf_thres,
+                                             keras=opt.keras, prefix=prefix)
+            logging.info(f'{prefix} export success✅, saved as {f}')
+            filenames.append(f)
+            if graphDef:
+                prefix = colorstr('TensorFlow GraphDef:')
+                try:
+                    from tools.auxexport import export_pb
 
-                outputpath = export_pb(s_models, weight, prefix=prefix)[0]
-                logging.info(
-                    f'{prefix} export success✅, saved as {outputpath}')
-                filenames.append(outputpath)
-            except Exception as e:
-                logging.info(f'{prefix} export failure❌:\n{e}')
+                    f = export_pb(s_models, weight, prefix=prefix)[0]
+                    logging.info(
+                        f'{prefix} export success✅, saved as {f}')
+                    filenames.append(f)
+                except Exception as e:
+                    logging.info(f'{prefix} export failure❌:\n{e}')
+
+            if tensorFlowLite:
+                prefix = colorstr('Tensorflow lite:')
+                try:
+                    from tools.auxexport import export_tflite, add_tflite_metadata
+
+                    outputpath = export_tflite(s_models, img, weight,
+                                               int8=opt.int8,
+                                               data=opt.data, nms=opt.nms,
+                                               agnostic_nms=opt.agnostic_nms,
+                                               stride=gs,
+                                               prefix=prefix)[0]
+                    logging.info(f'{prefix} export success✅, saved as {outputpath}')
+                    filenames.append(outputpath)
+                    logging.info(f'{prefix} adding metadata...')
+                    meta = MetaData
+                    meta["stride"] = max(MetaData["stride"])
+                    add_tflite_metadata(outputpath, metadata=meta, num_outputs=len(s_models.outputs))
+                except Exception as e:
+                    logging.info(f'{prefix} export failure❌:\n{e}')
 
         if tensorFlowjs:
             prefix = colorstr('TensorFlow.js:')
             try:
                 from tools.auxexport import export_tfjs
 
-                outputpath = export_tfjs(file_=weight,
-                                         names=labels,
-                                         prefix=prefix)[0]
-                logging.info(
-                    f'{prefix} export success✅, saved as {outputpath}')
-                filenames.append(outputpath)
-            except Exception as e:
-                logging.info(f'{prefix} export failure❌:\n{e}')
-
-        if tensorFlowLite:
-            prefix = colorstr('Tensorflow lite:')
-            try:
-                from tools.auxexport import export_tflite, add_tflite_metadata
-
-                outputpath = export_tflite(s_models, img, weight,
-                                           int8=opt.int8,
-                                           data=opt.data, nms=opt.nms,
-                                           agnostic_nms=opt.agnostic_nms,
-                                           stride=gs,
-                                           prefix=prefix)[0]
-                logging.info(f'{prefix} export success✅, saved as {outputpath}')
-                filenames.append(outputpath)
-                metadata = {'stride': int(max(model.stride)), 'names': model.names}  # model metadata
-                logging.info(f'{prefix} adding metadata...')
-                add_tflite_metadata(outputpath, metadata=metadata, num_outputs=len(s_models.outputs))
+                f = export_tfjs(file_=weight,
+                                names=labels,
+                                prefix=prefix)
+                logging.info(f'{prefix} export success✅, saved as {f}')
+                filenames.append(f)
             except Exception as e:
                 logging.info(f'{prefix} export failure❌:\n{e}')
 

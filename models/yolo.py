@@ -829,7 +829,7 @@ class Model(nn.Module):
         return nn.Sequential(*layers), sorted(save)
 
 
-class iOSModel(torch.nn.Module):
+class iOSModel(nn.Module):
     def __init__(self, model, im):
         super().__init__()
         b, c, h, w = im.shape  # batch, channel, height, width
