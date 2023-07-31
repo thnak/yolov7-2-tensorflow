@@ -12,7 +12,9 @@ try:
 except ImportError:
     pass
 
-ACT_LIST = (nn.LeakyReLU, nn.Hardswish, Hardswish, nn.ReLU, nn.ReLU6, nn.SiLU, SiLU, nn.Tanh, nn.Sigmoid, nn.ELU, nn.PReLU, nn.Softmax, nn.Hardsigmoid, nn.GELU, nn.Softsign, nn.Softplus)
+ACT_LIST = (nn.LeakyReLU, nn.Hardswish, Hardswish, nn.ReLU, nn.ReLU6,
+            nn.SiLU, SiLU, nn.Tanh, nn.Sigmoid, nn.ELU, nn.PReLU,
+            nn.Softmax, nn.Hardsigmoid, nn.GELU, nn.Softsign, nn.Softplus)
 
 
 class MP(nn.Module):
@@ -120,7 +122,7 @@ class Conv1D(nn.Module):
                  stride: int = 1,
                  padding: int = 0,
                  dilation: int = 1,
-                 groups: int = 1, act=False):
+                 groups: int = 1, act: any = False):
         super(Conv1D, self).__init__()
         self.conv = nn.Conv1d(in_channel, out_channel,
                               kernel_size=kernel_size,

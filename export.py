@@ -55,7 +55,7 @@ if __name__ == '__main__':
     parser.add_argument('--fp16', '--half', action='store_true', help='CoreML FP16 half-precision export')
     parser.add_argument('--int8', action='store_true', help='CoreML INT8 quantization')
     parser.add_argument('--v', action='store_true', help='Verbose log')
-    parser.add_argument('--author', type=str, default='Nguyễn Văn Thạnh', help="author's name")
+    parser.add_argument('--author', type=str, default='thnak', help="author's name")
     parser.add_argument('--data', type=str, default='mydataset.yaml', help='data.yaml path')
     parser.add_argument('--trace', action='store_true', help='use torch.jit.trace')
     parser.add_argument('--keras', action='store_true', help='use torch.jit.trace')
@@ -139,7 +139,6 @@ if __name__ == '__main__':
         else:
             input_shape = model.input_shape
             tensorFlowjs = tensorFlowLite = coreML = RKNN = graphDef = saved_Model = openVINO = False
-            ONNX = True
             logging.info(f"{exPrefix} Exporting for Video Classify model. ")
 
         model_version = model.model_version if hasattr(model, 'model_version') else 0
@@ -262,9 +261,9 @@ if __name__ == '__main__':
                 from tools.auxexport import TryExportTorchScript
 
                 f = TryExportTorchScript(weight=weight, model=model, feed=img,
-                                         map_device=map_device, logging=logging, MetaData=MetaData,
+                                         logging=logging, MetaData=MetaData,
                                          lite=torchScriptLite,
-                                         prefix=prefix, **opt.__dict__)
+                                         prefix=prefix)
                 logging.info(f'{prefix} export success✅, saved as {f}')
                 filenames.append(f)
             except Exception as e:

@@ -344,12 +344,12 @@ def TryExport_ONNX(weight: Path, model, feed: torch.Tensor, map_device, logging,
 
 def TryExportTorchScript(weight: Path, model, feed: torch.Tensor, logging,
                          MetaData: dict = {}, lite: bool = False,
-                         prefix: str = colorstr('ONNX:'), **kwargs):
+                         prefix: str = colorstr('ONNX:')):
     from torch.utils.mobile_optimizer import optimize_for_mobile
 
     logging.info(
         f'\n{prefix} Starting {"TorchScript-Lite" if lite else "TorchScript"} export with torch {torch.__version__}')
-    f = weight.as_posix().replace('.pt', '.torchscript.ptl' if lite else ".torchscript.ptl")  # filename
+    f = weight.as_posix().replace('.pt', '.torchscript.ptl' if lite else ".torchscript.pt")  # filename
     tsl = torch.jit.trace(model, feed, strict=False)
     MetaData["input_shape"] = [*feed.shape]
 

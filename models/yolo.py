@@ -37,25 +37,24 @@ class Classify(nn.Module):
             list_conv.append(a)
         self.m = nn.ModuleList(list_conv)  # output conv
         self.conv = Conv1D(sum([_ for _ in ch]), dim, 1, 1, 0, 1, 1)
-        self.linear1 = nn.Linear(dim, nc, True)
+        self.linear1 = FullyConnected(dim, nc, False)
         self.act = nn.Softmax(dim=1)
         self.inplace = inplace
 
     def forward(self, x):
         z = []  # inference output
         for i, m in enumerate(self.m):
-            out = m(x[i])
-            z.append(out)
+            z.append(m(x[i]))
+
         out = torch.cat(z, dim=1)
         b, c, h, w = out.shape
         out = out.view(-1, c, h * w)
         out = self.conv(out)
         out = out.permute((0, 2, 1))
-
+        out = out.mean(1)
         out = self.linear1(out)
         if torch.onnx.is_in_onnx_export() or self.export:
             out = self.act(out)
-        out = out.mean(1)
 
         return out
 

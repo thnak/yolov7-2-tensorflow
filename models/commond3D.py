@@ -18,18 +18,24 @@ logger = logging.getLogger(__name__)
 class Conv3D(nn.Module):
     """Standard convolution"""
 
-    def __init__(self, c1, c2, k=(1, 1, 1), s=(1, 1, 1), p=(None, None, None), g=(1,), d=(1,), act=True,
-                 dropout=0):
+    def __init__(self, c1: int, c2: int,
+                 k: int | tuple[int, int, int] = 1,
+                 s: int | tuple[int, int, int] = 1,
+                 p: None | int | tuple[int, int, int] = None,
+                 g: int | tuple[int, int, int] = 1,
+                 d: int | tuple[int, int, int] = 1,
+                 act: any = True,
+                 dropout: float = 0.0):
         super(Conv3D, self).__init__()
-        k = (k, k, k) if isinstance(k, int) else k
-        p = (p, p, p) if isinstance(p, int) else p
-        d = (d, d, d) if isinstance(d, int) else d
+        k = [k] * 3 if isinstance(k, int) else k
+        p = [p] * 3 if isinstance(p, int) else p
+        d = [d] * 3 if isinstance(d, int) else d
 
-        pad = (autopad(k_, p_, d_) for k_, p_, d_ in zip(k, p, d))
+        pad = [autopad(k_, p_, d_) for k_, p_, d_ in zip(k, p, d)]
         self.conv = nn.Conv3d(c1, c2,
                               kernel_size=k,
                               stride=s,
-                              padding=pad,
+                              padding=tuple(pad),
                               groups=g if isinstance(g, int) else g[0],
                               dilation=d,
                               bias=False)
@@ -121,22 +127,22 @@ class Classify3D(nn.Module):
             list_conv.append(a)
         self.m = nn.ModuleList(list_conv)  # output conv
         self.conv = Conv1D(sum([_ for _ in ch]), dim, 1, 1, 0, 1, 1, act=nn.LeakyReLU())
-        self.linear = nn.Linear(dim, nc, bias=True)
+        self.linear = FullyConnected(dim, nc, act=False)
         self.act = nn.Softmax(dim=1)
         self.inplace = inplace
 
     def forward(self, x):
         z = []  # inference output
         for i, m in enumerate(self.m):
-            out = m(x[i])
-            z.append(out)
+            z.append(m(x[i]))
+
         out = torch.cat(z, dim=1)
         b, c, d, h, w = out.shape
         out = out.view(-1, c, d * h * w)
         out = self.conv(out)
         out = out.permute((0, 2, 1))
-        out = self.linear(out)
         out = out.mean(1)
+        out = self.linear(out)
         if torch.onnx.is_in_onnx_export() or self.export:
             out = self.act(out)
         return out
@@ -157,7 +163,11 @@ class ReOrg3D(nn.Module):
 
 # start for  X3D network
 class globalsubWay(nn.Module):
-    def __init__(self, in_channels, out_channel, kernel_size=1, stride=1, pad=1, groups=1, dia=1):
+    def __init__(self, in_channels: int, out_channel: int,
+                 kernel_size: int | tuple[int, int, int] = 1,
+                 stride: int | tuple[int, int, int] = 1,
+                 pad: int | tuple[int, int, int] = 1, groups: int = 1,
+                 dia: int | tuple[int, int, int] = 1):
         super(globalsubWay, self).__init__()
         self.conv = Conv3D(in_channels, out_channel, kernel_size, stride, pad, in_channels, dia, act=None)
         self.m = nn.Sequential(nn.AdaptiveAvgPool3d(1),
@@ -239,12 +249,10 @@ class Model3D(nn.Module):
         # Define model
         ch = self.yaml['ch'] = self.yaml.get('ch', ch)  # input channels
         if nc and nc != self.yaml['nc']:
-            logger.info(
-                f"Overriding model.yaml nc={self.yaml['nc']} with nc={nc}")
+            logger.info(f"Overriding model.yaml nc={self.yaml['nc']} with nc={nc}")
             self.yaml['nc'] = nc  # override yaml value
         if anchors:
-            logger.info(
-                f'Overriding model.yaml anchors with anchors={anchors}')
+            logger.info(f'Overriding model.yaml anchors with anchors={anchors}')
             self.yaml['anchors'] = round(anchors)  # override yaml value
         self.model, self.save = self.parse_model(deepcopy(self.yaml), ch=[ch], nc=nc)  # model, savelist
         self.names = [str(i) for i in range(self.yaml['nc'])]  # default names
