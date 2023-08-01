@@ -30,6 +30,7 @@ CLAHE_clip_limit: 4
 RandomBrightnessContrast: 0.1
 brightness_limit: 0.2
 contrast_limit: 0.2
+saturation_limit: 0.1
 brightness_by_max: False
 MedianBlur: 0.1
 MedianBlur_blur_limit: 7

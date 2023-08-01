@@ -98,14 +98,18 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None, use3D=Fal
 
     with torch_distributed_zero_first(rank):
         train_path, val_path, test_path = parse_path(data_dict=data_dict)
-        dataset = LoadSampleAndTarget(root=train_path.as_posix(), augment=True,
+        dataset = LoadSampleAndTarget(root=train_path.as_posix(),
+                                      augment=True,
+                                      hyp=hyp,
                                       prefix=colorstr('train: '),
                                       backend=opt.video_backend)
         val_dataset = dataset
         if train_path.as_posix() != val_path.as_posix():
-            val_dataset = LoadSampleAndTarget(root=val_path.as_posix(), augment=True,
-                                              prefix=colorstr(
-                                                  'val: '), backend=opt.video_backend)
+            val_dataset = LoadSampleAndTarget(root=val_path.as_posix(),
+                                              augment=True,
+                                              hyp=hyp,
+                                              prefix=colorstr('val: '),
+                                              backend=opt.video_backend)
 
         if tb_writer:
             data_, names = dataset.dataset_analysis()

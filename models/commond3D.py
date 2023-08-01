@@ -427,7 +427,7 @@ class Model3D(nn.Module):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--cfg', type=str,
-                        default='yolov7_3D-cls-tiny.yaml', help='model.yaml')
+                        default='X3D_M.yaml', help='model.yaml')
     parser.add_argument('--device', default='cpu',
                         help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     parser.add_argument('--profile', action='store_true',

@@ -469,7 +469,7 @@ class LoadSampleAndTarget(torchvision.datasets.ImageFolder):
     std = np.array([1., 1., 1.])
     mean = np.array([0., 0., 0.])
 
-    def __init__(self, root, augment=True, cache=True, prefix="", backend='pyav'):
+    def __init__(self, root, hyp=None, augment=True, cache=True, prefix="", backend='pyav'):
         super().__init__(root=root)
         self.samples = [list(x) + [Path(x[0]).with_suffix('.npy'), None] for x in self.samples]  # file, index, npy, im
         self.prefix = prefix
@@ -629,10 +629,12 @@ class LoadSampleforVideoClassify(Dataset):
     std = (1., 1., 1.)
     use_BGR = False
 
-    def __init__(self, root, augment=True, cache=True, prefix="", backend='pyav'):
+    def __init__(self, root, hyp=None, augment=True, cache=True, prefix="", backend='pyav'):
         self.transform = None
         self.root = root = Path(root) if isinstance(root, str) else root
-
+        if augment:
+            assert isinstance(hyp, dict), f"{prefix}use augment but hyper parameter not found."
+        self.augment = hyp
         self.prefix = prefix
         from torchvision.datasets.folder import make_dataset
         classes = [x.name for x in root.iterdir() if x.is_dir()]
@@ -663,28 +665,39 @@ class LoadSampleforVideoClassify(Dataset):
         if sum(self.mean) == 0 and sum(self.std) == 1:
             self.calculateMeanStd()
         else:
-            logger.info(f"{self.prefix}Using mean: {self.mean}, std: {self.std} for this dataset.")
+            logger.info(f"{self.prefix}Using mean: {self.mean}, std: {self.std} from model.yaml for this dataset.")
         self.sampling_rate = max(1, int(self.sampling_rate))
         self.sample_length = max(1, int(self.sample_length))
+
+        compose = []
+        if self.augment:
+            augment = self.augment
+            ranDropChannel = augment['ChannelDropout']
+            h_flip, v_flip = augment['HorizontalFlip'], augment['VerticalFlip']
+            bright, contrast, satu = augment['brightness_limit'], augment['contrast_limit'], augment['saturation_limit']
+            gray = augment["toGray"]
+            from torchvision.transforms.v2 import ColorJitter as VidColorJitter
+            torchvision.disable_beta_transforms_warning()
+            compose.extend([transforms.Lambda(lambd=lambda x: self.randomDropChannel(x, ranDropChannel)),
+                            transforms.Lambda(lambd=lambda x: self.randomDropFrame(x, 0.05)),
+                            transforms.Lambda(lambd=lambda x: self.h_flip(x, h_flip)),
+                            transforms.Lambda(lambd=lambda x: self.v_flip(x, v_flip)),
+                            VidColorJitter(brightness=bright, contrast=contrast, saturation=satu, hue=0),
+                            transforms.Lambda(lambd=lambda x: self.rgb_2_gray(x, gray))])
+        compose.extend([transforms.Lambda(lambd=lambda x: self.normalize(x, self.mean, self.std))])
+        self.transform = transforms.Compose(compose)
 
         logger.info(
             f"{self.prefix}total {len(self.samples)} samples with {len(self.classes)} classes, "
             f"frame length: {self.sample_length}, step frame: {self.sampling_rate}")
-        self.transform = transforms.Compose([
-            transforms.Lambda(lambd=lambda x: self.randomDropChannel(x, 0.1)),
-            transforms.Lambda(lambd=lambda x: self.randomDropFrame(x, 0.1)),
-            transforms.Lambda(lambd=lambda x: self.hflip(x, 0.1)),
-            transforms.Lambda(lambd=lambda x: self.vflip(x, 0.1)),
-            # transforms.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1, hue=0),
-            transforms.Lambda(lambd=lambda x: self.rgb_2_gray(x, 0.1)),
-            transforms.Lambda(lambd=lambda x: self.normalize(x, self.mean, self.std))
-        ])
 
     def dataset_analysis(self):
         """for now only return number of frame per classes"""
         dict_ = {target: 0 for sample, target in self.samples}
         for x, i in self.samples:
             vid = torchvision.io.VideoReader(x, "video")
+            vid.set_current_stream("video")
+
             metadata = vid.get_metadata()
             total_frames = metadata["video"]['duration'][0] * metadata["video"]['fps'][0]
             dict_[i] += total_frames
@@ -795,7 +808,7 @@ class LoadSampleforVideoClassify(Dataset):
         return inputs
 
     @staticmethod
-    def vflip(inputs: torch.Tensor, p=0.5) -> torch.Tensor:
+    def v_flip(inputs: torch.Tensor, p=0.5) -> torch.Tensor:
         n_dims = len(inputs.shape)
         if random.random() <= p:
             if n_dims == 4:
@@ -805,7 +818,7 @@ class LoadSampleforVideoClassify(Dataset):
         return inputs
 
     @staticmethod
-    def hflip(inputs: torch.Tensor, p=0.5) -> torch.Tensor:
+    def h_flip(inputs: torch.Tensor, p=0.5) -> torch.Tensor:
         n_dims = inputs.dim()
         if random.random() <= p:
             if n_dims == 4:
@@ -815,7 +828,10 @@ class LoadSampleforVideoClassify(Dataset):
         return inputs
 
     @staticmethod
-    def normalize(inputs: torch.Tensor, mean: tuple, std: tuple, pixel_max_value=255.) -> torch.FloatTensor:
+    def normalize(inputs: torch.Tensor,
+                  mean: tuple[float, float, float],
+                  std: tuple[float, float, float],
+                  pixel_max_value=255.) -> torch.FloatTensor:
         """input float tensor in NCHW or CHW format and return the same format"""
         n_dims = inputs.dim()
         inputs = inputs.float()
