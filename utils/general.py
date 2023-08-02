@@ -962,17 +962,17 @@ def apply_classifier(x, model, img, im0):
     return x
 
 
-def increment_path(path, exist_ok=True, sep=''):
+def increment_path(path: Path | str, exist_ok=True, sep=''):
     """Increment path, i.e. runs/exp --> runs/exp{sep}0, runs/exp{sep}1 etc."""
-    path = Path(path)  # os-agnostic
+    path = Path(path) if isinstance(path, str) else path  # os-agnostic
     if (path.exists() and exist_ok) or (not path.exists()):
-        return str(path)
+        return path.as_posix()
     else:
-        dirs = glob.glob(f"{path}{sep}*")  # similar paths
+        dirs = glob.glob(f"{path.as_posix()}{sep}")  # similar paths
         matches = [re.search(rf"%s{sep}(\d+)" % path.stem, d) for d in dirs]
         i = [int(m.groups()[0]) for m in matches if m]  # indices
         n = max(i) + 1 if i else 2  # increment number
-        return f"{path}{sep}{n}"  # update path
+        return f"{path.as_posix()}{sep}{n}"  # update path
 
 
 class BackgroundForegroundColors():
@@ -1223,8 +1223,9 @@ def parse_path(data_dict: dict, split_rate=[.8, .2, .2]):
 def autopad(kernel_size: int | tuple[int] | list[int], pad_size=None, dilation=1):
     """Pad to 'same' shape outputs"""
     if dilation > 1:
-        kernel_size = dilation * (kernel_size - 1) + 1 if isinstance(kernel_size, int) else [dilation * (x - 1) + 1 for x in kernel_size]  # actual kernel-size
+        kernel_size = dilation * (kernel_size - 1) + 1 if isinstance(kernel_size, int) else [dilation * (x - 1) + 1 for
+                                                                                             x in
+                                                                                             kernel_size]  # actual kernel-size
     if pad_size is None:
         pad_size = kernel_size // 2 if isinstance(kernel_size, int) else [x // 2 for x in kernel_size]  # auto-pad
     return pad_size
-

@@ -51,6 +51,7 @@ if __name__ == '__main__':
     parser.add_argument('--sync-bn', action='store_true', help='use SyncBatchNorm, only available in DDP mode')
     parser.add_argument('--local_rank', type=int, default=-1, help='DDP parameter, do not modify')
     parser.add_argument('--workers', type=int, default=512, help='maximum number of dataloader workers')
+    parser.add_argument('--project', type=str, default="runs", help="output dir")
     parser.add_argument('--name', default='exp', help='save to project/name')
     parser.add_argument('--exist_ok', action='store_true', help='existing project/name ok, do not increment')
     parser.add_argument('--quad', action='store_true', help='quad dataloader')
@@ -64,8 +65,6 @@ if __name__ == '__main__':
     parser.add_argument('--tensorboard', action='store_true', help='Start with Tensorboard')
     parser.add_argument('--video_backend', default="pyav", type=str, help='video backend for VideoReader')
     parser.add_argument('--plot_samples', type=int, default=10, help='total samples to plot in tensorboard')
-
-
 
     opt = parser.parse_args()
 
@@ -90,7 +89,6 @@ if __name__ == '__main__':
         logger.info('Resuming training from %s' % ckpt)
         data = str(torch.load(ckpt, map_location="cpu")["model"].yaml)
 
-
     else:
         opt.data, opt.cfg, opt.hyp = check_file(opt.data), check_file(
             opt.cfg), check_file(opt.hyp)  # check files
@@ -101,10 +99,11 @@ if __name__ == '__main__':
         opt.name = 'evolve' if opt.evolve > 1 else opt.name
         with open(opt.cfg, 'r') as fi:
             data = fi.read()
-    project = "runs/train-cls" if "Classify" in data else "runs/train"
+    opt.project = Path(opt.project)
+    project = opt.project / "train-cls" if "Classify" in data else opt.project / "train"
     if not opt.resume:
-      opt.save_dir = increment_path(Path(project) / opt.name, exist_ok=opt.exist_ok | opt.evolve > 1)  # increment run
-    opt.project = project
+        opt.save_dir = increment_path(project / opt.name, exist_ok=opt.exist_ok | opt.evolve > 1)
+    opt.project = project.as_posix()
     # DDP mode
     opt.total_batch_size = opt.batch_size
     if opt.local_rank != -1:
@@ -130,10 +129,9 @@ if __name__ == '__main__':
                 from torch.utils.tensorboard import SummaryWriter
 
                 tb_writer = SummaryWriter(opt.save_dir)  # Tensorboard
-                tensorboard_lauch = threading.Thread(
-                    target=lambda: os.system(f'tensorboard --bind_all --logdir {project}'), daemon=True).start()
-                logger.info(
-                    f"{prefix}Starting...")
+                threading.Thread(target=lambda: os.system(f'tensorboard --bind_all --logdir {project}'),
+                                 daemon=True).start()
+                logger.info(f"{prefix}Starting...")
             except Exception as ex:
                 tb_writer = None
                 logger.warning(f'{prefix}Init error, {ex}')

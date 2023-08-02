@@ -676,13 +676,13 @@ class LoadSampleforVideoClassify(Dataset):
             h_flip, v_flip = augment['HorizontalFlip'], augment['VerticalFlip']
             bright, contrast, satu = augment['brightness_limit'], augment['contrast_limit'], augment['saturation_limit']
             gray = augment["toGray"]
-            from torchvision.transforms.v2 import ColorJitter as VidColorJitter
+            # from torchvision.transforms.v2 import ColorJitter as VidColorJitter
             torchvision.disable_beta_transforms_warning()
             compose.extend([transforms.Lambda(lambd=lambda x: self.randomDropChannel(x, ranDropChannel)),
                             transforms.Lambda(lambd=lambda x: self.randomDropFrame(x, 0.05)),
                             transforms.Lambda(lambd=lambda x: self.h_flip(x, h_flip)),
                             transforms.Lambda(lambd=lambda x: self.v_flip(x, v_flip)),
-                            VidColorJitter(brightness=bright, contrast=contrast, saturation=satu, hue=0),
+                            # VidColorJitter(brightness=bright, contrast=contrast, saturation=satu, hue=None),
                             transforms.Lambda(lambd=lambda x: self.rgb_2_gray(x, gray))])
         compose.extend([transforms.Lambda(lambd=lambda x: self.normalize(x, self.mean, self.std))])
         self.transform = transforms.Compose(compose)
@@ -736,7 +736,7 @@ class LoadSampleforVideoClassify(Dataset):
         video = torch.permute(video, dims=[1, 0, 2, 3])  # NCHW -> CNHW
         return video, target
 
-    def loadSample(self, path=None, transform=None, dtype=torch.uint8):
+    def loadSample(self, path=None, transform=None, dtype=torch.uint8) -> tuple[torch.Tensor, str]:
         """choice a random sample to plot"""
         target = 0
         resize_transform = transforms.Compose([transforms.Resize((self.imgsz, self.imgsz), antialias=False)])
