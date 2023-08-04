@@ -9,6 +9,7 @@ import numpy as np
 import torch
 import torch.distributed as dist
 import yaml
+import cv2
 
 from tools.trainer import train, train_cls
 from utils.general import increment_path, fitness, get_latest_run, check_file, print_mutation, set_logging, colorstr
@@ -16,6 +17,8 @@ from utils.plots import plot_evolution
 from utils.torch_utils import time_synchronized
 from utils.wandb_logging.wandb_utils import check_wandb_resume
 
+cv2.setNumThreads(0)
+cv2.ocl.setUseOpenCL(False)
 # from utils.autobatch import check_train_batch_size
 
 logger = logging.getLogger(__name__)
@@ -24,9 +27,10 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--weights', type=str, default='', help='pretained model path')
     parser.add_argument('--cfg', type=str, default='',
-                        help='model config path. if this rule is empty and --weights got an exists path -->train same model with more epochs')
+                        help='model config path. if this rule is empty and --weights got an exists '
+                             'path -->train same model with more epochs')
     parser.add_argument('--data', type=str, default='', help='data.yaml path')
-    parser.add_argument('--hyp', type=str, default='data/hyp.scratch.custom.yaml', help='hyperparameters path')
+    parser.add_argument('--hyp', type=str, default='data/hyp.ObjectDetection.yaml', help='hyperparameters path')
     parser.add_argument('--epochs', type=int, default=300)
     parser.add_argument('--augment', action='store_true', help='using augment for training')
     parser.add_argument('--batch_size', type=int, default=16, help='total batch size for all GPUs')
@@ -35,7 +39,7 @@ if __name__ == '__main__':
     parser.add_argument('--resume', nargs='?', const=True, default=False, help='resume most recent training')
     parser.add_argument('--nosave', action='store_true', help='only save final checkpoint')
     parser.add_argument('--notest', action='store_true', help='only test final epoch')
-    parser.add_argument('--noautoanchor', action='store_true', help='disable autoanchor check')
+    parser.add_argument('--noautoanchor', action='store_true', help='disable auto anchor check')
     parser.add_argument('--evolve', type=int, default=-1, help='evolve hyperparameters')
     parser.add_argument('--parent', type=bool, default=True,
                         help='parent selection method: single or weighted, default: True (single)')
@@ -64,7 +68,7 @@ if __name__ == '__main__':
     parser.add_argument('--seed', type=int, default=0, help='Global training seed')
     parser.add_argument('--tensorboard', action='store_true', help='Start with Tensorboard')
     parser.add_argument('--video_backend', default="pyav", type=str, help='video backend for VideoReader')
-    parser.add_argument('--plot_samples', type=int, default=10, help='total samples to plot in tensorboard')
+    parser.add_argument('--plot_samples', type=int, default=20, help='total samples to plot in tensorboard')
 
     opt = parser.parse_args()
 
@@ -78,7 +82,7 @@ if __name__ == '__main__':
     wandb_run = check_wandb_resume(opt)
     if opt.resume and not wandb_run:  # resume an interrupted run
         # specified or most recent path
-        ckpt = opt.resume if isinstance(opt.resume, str) else get_latest_run()
+        ckpt = opt.resume if isinstance(opt.resume, str) else get_latest_run(opt.project)
         assert Path(ckpt).is_file(), 'ERROR: --resume checkpoint does not exist'
         with open(Path(ckpt).parent.parent / 'opt.yaml') as f:
             opt = argparse.Namespace(**yaml.load(f, Loader=yaml.SafeLoader))  # replace

@@ -6,8 +6,9 @@ import onnx
 import thop
 import torch
 from torch import nn
-from utils.general import autopad, make_divisible, UPSAMPLEMODE, check_file, set_logging
-from utils.torch_utils import (initialize_weights, scale_img, model_info, select_device, time_synchronized,
+from utils.general import autopad, make_divisible, check_file, set_logging
+from utils.default import UP_SAMPLE_MODES
+from utils.torch_utils import (initialize_weights, model_info, select_device, time_synchronized,
                                fuse_conv_and_bn, fuse_linear_and_bn)
 from models.common import Concat, FullyConnected, Conv1D
 from tqdm import tqdm
@@ -265,44 +266,26 @@ class Model3D(nn.Module):
         self.traced = False
         self.inplace = self.yaml.get('inplace', True)
 
-        # Build strides, anchors
+        # Build strides
         m = self.model[-1]  # Detect()
         m.inplace = self.inplace
         self.is_Classify = isinstance(m, Classify3D)
-        self.stride = torch.tensor([32])
+        self.stride = torch.tensor([8])
         initialize_weights(self)
 
     def forward(self, x, augment=False, profile=False):
-        if augment:
-            img_size = x.shape[-2:]  # height, width
-            s = [1, 0.83, 0.67]  # scales
-            f = [None, 3, None]  # flips (2-ud, 3-lr)
-            y = []  # outputs
-            for si, fi in zip(s, f):
-                xi = scale_img(x.flip(fi) if fi else x, si, gs=int(self.stride.max()))
-                yi = self.forward_once(xi, profile=profile)[0]  # forward
-                # cv2.imwrite(f'img_{si}.jpg', 255 * xi[0].cpu().numpy().transpose((1, 2, 0))[:, :, ::-1])  # save
-                yi[..., :4] /= si  # de-scale
-                if fi == 2:
-                    yi[..., 1] = img_size[0] - yi[..., 1]  # de-flip ud
-                elif fi == 3:
-                    yi[..., 0] = img_size[1] - yi[..., 0]  # de-flip lr
-                y.append(yi)
-            return torch.cat(y, 1), None  # augmented inference, train
-        else:
-            return self.forward_once(x, profile)  # single-scale inference, train
+        return self.forward_once(x, profile)  # single-scale inference, train
 
     def forward_once(self, x, profile=False):
         y, dt = [], []  # outputs
         for m in self.model:
 
-            if m.f != -1:  # if not from previou layer
-                x = y[m.f] if isinstance(m.f, int) else [
-                    x if j == -1 else y[j] for j in m.f]  # from earlier layers
+            if m.f != -1:  # if not from previous layer
+                x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
             if profile:
                 c = isinstance(m, Classify3D)
-                o = thop.profile(m, inputs=(x.copy() if c else x,), verbose=False)[
-                        0] / 1E9 * 2 if thop else 0  # FLOPS
+                o = thop.profile(m, inputs=(x.copy() if c else x,), verbose=False)[0]
+                o /= 1E9 * 2 if thop else 0  # FLOPS
                 for _ in range(10):
                     m(x.copy() if c else x)
                 t = time_synchronized()
@@ -333,7 +316,7 @@ class Model3D(nn.Module):
             m = eval(m) if isinstance(m, str) else m  # eval strings
             for j, a in enumerate(args):
                 try:
-                    args[j] = a if a in UPSAMPLEMODE else (eval(a) if isinstance(a, str) else a)
+                    args[j] = a if a in UP_SAMPLE_MODES else (eval(a) if isinstance(a, str) else a)
                 except Exception as ex:
                     logger.error(f'def parse: {ex}')
 
@@ -441,7 +424,7 @@ if __name__ == '__main__':
     model = Model3D(opt.cfg, nc=101).to(device)
     model.eval()
     model.fuse()
-    img = torch.rand(1, 3, 16, 256, 256).to(device)
+    img = torch.rand(1, 3, 16, 244, 244).to(device)
     model_jit = torch.jit.trace(model, img)
     torch.jit.save(model_jit, 'jitmodel.pt')
     model.info(img_size=img.shape[1:], verbose=True)

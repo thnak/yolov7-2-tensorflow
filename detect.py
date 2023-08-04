@@ -1,6 +1,4 @@
 import argparse
-import numpy as np
-import time
 from pathlib import Path
 import cv2
 import torch
@@ -10,15 +8,15 @@ import models.yolo
 from models.experimental import attempt_load
 from models.yolo import TensorRT_Engine
 from utils.datasets import LoadStreams, LoadImages, LoadScreenshots, check_data_source
-from utils.general import check_img_size, check_requirements, non_max_suppression, \
-    scale_coords, xyxy2xywh, strip_optimizer, set_logging, increment_path, check_git_status, BackgroundForegroundColors, \
-    colorstr
+from utils.general import (check_img_size, non_max_suppression,
+                           scale_coords, xyxy2xywh, strip_optimizer, set_logging, increment_path,
+                           BackgroundForegroundColors,
+                           colorstr)
 from utils.plots import plot_one_box
 from utils.torch_utils import select_device, time_synchronized, TracedModel
 import os
 import threading
-from multiprocessing import Process
-from multiprocessing import Queue as quee
+
 import logging
 from queue import Queue
 from utils.ffmpeg_ import FFMPEG_recorder
@@ -303,7 +301,8 @@ def Thread4(que3: Queue, end2end: models.yolo.ONNX_Engine.end2end, breakQue: boo
         if view >= 1:
             for x in pred:
                 textColor, bboxColor = BFC.getval(index=x['id'])
-                ori[x['batch_id']] = plot_one_box(x['box'], img=ori[x['batch_id']], txtColor=textColor, bboxColor=bboxColor,
+                ori[x['batch_id']] = plot_one_box(x['box'], img=ori[x['batch_id']], txtColor=textColor,
+                                                  bboxColor=bboxColor,
                                                   label=f"{x['name']} {round(x['score'], 2)}")
             print(f'drawing time: {time_synchronized() - tt}')
             for img in ori:
@@ -349,7 +348,8 @@ def inferWithDynamicBatch(enginePath, opt, save=''):
                                args=(dataset, que1, model.preProcessFeed, source_type == 'stream', breakingque))
     thread2 = threading.Thread(target=Thread2, name='Thread-2', args=(que1, que2, model.concat, model.batch_size))
     thread3 = threading.Thread(target=Thread3, name='Thread-3', args=(que2, que3, model))
-    thread4 = threading.Thread(target=Thread4, name='Thread-4', args=(que3, model.end2end, breakingque, opt.view_img, model.names, model.xyxy2xywh, BFC))
+    thread4 = threading.Thread(target=Thread4, name='Thread-4',
+                               args=(que3, model.end2end, breakingque, opt.view_img, model.names, model.xyxy2xywh, BFC))
     print(f'Starting...\n')
     t0 = time_synchronized()
     thread1.start()
@@ -361,6 +361,7 @@ def inferWithDynamicBatch(enginePath, opt, save=''):
     thread3.join()
     thread4.join()
     print(f'finish all: {time_synchronized() - t0}')
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

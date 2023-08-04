@@ -17,6 +17,7 @@ import torch.nn.functional as functional
 from torch.optim import Optimizer
 
 from utils.general import check_requirements, colorstr, gb2mb
+from utils.default import ACT_LIST
 
 try:
     import thop  # for FLOPS computation
@@ -38,13 +39,13 @@ def torch_distributed_zero_first(local_rank: int):
 
 
 def date_modified(path=__file__):
-    # return human-readable file modification date, i.e. '2021-3-26'
+    """return human-readable file modification date, i.e. '2021-3-26'"""
     t = datetime.datetime.fromtimestamp(Path(path).stat().st_mtime)
     return f'{t.year}-{t.month}-{t.day}'
 
 
 def git_describe(path=Path(__file__).parent):  # path must be a directory
-    # return human-readable git description, i.e. v5.0-5-g3e25f1e https://git-scm.com/docs/git-describe
+    """return human-readable git description, i.e. v5.0-5-g3e25f1e https://git-scm.com/docs/git-describe"""
     s = f'git -C {path} describe --tags --long --always'
     try:
         return subprocess.check_output(s, shell=True, stderr=subprocess.STDOUT).decode()[:-1]
@@ -265,7 +266,7 @@ def initialize_weights(model):
         elif isinstance(m, (nn.BatchNorm2d, nn.BatchNorm3d)):
             m.eps = 1e-3
             m.momentum = 0.03
-        elif t in [nn.Hardswish, nn.LeakyReLU, nn.ReLU, nn.ReLU6, nn.SiLU, nn.Sigmoid]:
+        elif t in ACT_LIST:
             m.inplace = True
 
 

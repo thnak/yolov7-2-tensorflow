@@ -7,6 +7,7 @@ from utils.general import colorstr
 import argparse
 from pathlib import Path
 
+
 def Re_parameterization(inputWeightPath='v7-tiny-training.pt',
                         outputWeightPath='yolov7.pt',
                         device=None):

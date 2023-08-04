@@ -1,0 +1,19 @@
+lr0: 0.00229
+lrf: 0.144
+momentum: 0.928
+weight_decay: 0.00059
+warmup_epochs: 3.11
+warmup_momentum: 0.95
+warmup_bias_lr: 0.0674
+
+# argument
+ChannelDropout: 0.1
+HorizontalFlip: 0.2
+VerticalFlip: 0.2
+brightness_limit: 0.2
+contrast_limit: 0.2
+saturation_limit: 0.1
+toGray: 0.1
+degrees: 45
+rotate: 0.1
+FrameDrop: 0.05

@@ -8,7 +8,7 @@ from utils.google_utils import attempt_download
 
 
 class CrossConv(nn.Module):
-    # Cross Convolution Downsample
+    """Cross Convolution Downsample"""
     def __init__(self, c1, c2, k=3, s=1, g=1, e=1.0, shortcut=False):
         # ch_in, ch_out, kernel, stride, groups, expansion, shortcut
         super(CrossConv, self).__init__()

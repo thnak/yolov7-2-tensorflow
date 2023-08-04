@@ -10,8 +10,6 @@ try:
 except Exception as e:
     print('Import onnx_graphsurgeon failure: %s' % e)
 
-import logging
-
 
 class RegisterNMS(object):
     def __init__(self, logger, onnx_model_path: str, precision: str = "fp32", prefix=''):

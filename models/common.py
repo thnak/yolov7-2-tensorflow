@@ -4,17 +4,14 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import warnings
+
+from utils.default import ACT_LIST
 from utils.general import non_max_suppression, check_requirements, autopad
-from utils.activations import SiLU, Hardswish
 
 try:
     from timm.models.layers import DropPath, to_2tuple
 except ImportError:
     pass
-
-ACT_LIST = (nn.LeakyReLU, nn.Hardswish, Hardswish, nn.ReLU, nn.ReLU6,
-            nn.SiLU, SiLU, nn.Tanh, nn.Sigmoid, nn.ELU, nn.PReLU,
-            nn.Softmax, nn.Hardsigmoid, nn.GELU, nn.Softsign, nn.Softplus)
 
 
 class MP(nn.Module):

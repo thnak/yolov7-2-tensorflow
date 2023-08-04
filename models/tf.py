@@ -4,12 +4,10 @@ from keras.layers import Layer
 import inspect
 from typing import Optional
 from models.yolo import *
-from models.common import ACT_LIST
+from utils.default import ACT_LIST, UP_SAMPLE_MODES, ROOT
 from utils.activations import SiLU, Hardswish
-from utils.general import make_divisible, colorstr, autopad, UPSAMPLEMODE
+from utils.general import make_divisible, colorstr, autopad
 
-FILE = Path(__file__).resolve()
-ROOT = FILE.parents[1]  # YOLOv5 root directory
 if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))  # add ROOT to PATH
 logger = logging.getLogger(__name__)
@@ -572,7 +570,7 @@ class TFModel:
             m = eval(m) if isinstance(m, str) else m  # eval strings
             for j, a in enumerate(args):
                 try:
-                    args[j] = a if a in UPSAMPLEMODE else (eval(a) if isinstance(a, str) else a)
+                    args[j] = a if a in UP_SAMPLE_MODES else (eval(a) if isinstance(a, str) else a)
                 except Exception as ex:
                     logger.info(ex)
 

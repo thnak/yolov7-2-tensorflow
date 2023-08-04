@@ -10,7 +10,8 @@ from tqdm import tqdm
 from models.common import *
 from models.experimental import *
 from utils.autoanchor import check_anchor_order
-from utils.general import check_file, set_logging, colorstr, make_divisible, UPSAMPLEMODE
+from utils.general import check_file, set_logging, colorstr, make_divisible
+from utils.default import UP_SAMPLE_MODES
 from utils.general import check_requirements
 from utils.torch_utils import (time_synchronized, fuse_conv_and_bn, fuse_linear_and_bn, model_info, scale_img,
                                initialize_weights,
@@ -756,7 +757,7 @@ class Model(nn.Module):
             m = eval(m) if isinstance(m, str) else m  # eval strings
             for j, a in enumerate(args):
                 try:
-                    args[j] = a if a in UPSAMPLEMODE else (eval(a) if isinstance(a, str) else a)
+                    args[j] = a if a in UP_SAMPLE_MODES else (eval(a) if isinstance(a, str) else a)
                 except Exception as ex:
                     logger.error(f'def parse: {ex}')
 

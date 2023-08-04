@@ -7,7 +7,7 @@ import os
 import sys
 from pathlib import Path
 import random
-ROOT = os.getcwd()
+from utils.default import ROOT
 if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))
 

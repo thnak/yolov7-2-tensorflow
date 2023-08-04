@@ -18,53 +18,28 @@ import numpy as np
 import psutil
 import torch
 import torchvision
-import torch.nn.functional as F
+from torch.nn.functional import interpolate
 from PIL import Image, ExifTags
 from termcolor import colored
 from torch.utils.data import DataLoader, Dataset, dataloader, distributed
 from tqdm import tqdm
 from torchvision import transforms
+import torchvision.transforms.functional as F
+
 from utils.general import (check_requirements, xyxy2xywh, xywh2xyxy, xywhn2xyxy, xyn2xy, segment2box, segments2boxes,
-                           resample_segments, clean_str, colorstr, TQDM_BAR_FORMAT, gb2mb, IMG_FORMATS, VID_FORMATS)
+                           resample_segments, clean_str, colorstr, gb2mb)
+from utils.default import IMG_FORMATS, VID_FORMATS, TQDM_BAR_FORMAT, HELP_URL, RANK, YOUTUBE
 from utils.torch_utils import torch_distributed_zero_first
 
-# from pycocotools import mask as maskUtils
-# from torchvision.utils import save_image
-# from torchvision.ops import roi_pool, roi_align, ps_roi_pool, ps_roi_align
-
 # Parameters
-HELP_URL = 'https://github.com/ultralytics/yolov5/wiki/Train-Custom-Data'
 
 logger = logging.getLogger(__name__)
-RANK = int(os.getenv('RANK', -1))
 TORCH_PIN_MEMORY = False
-YOUTUBE = ('www.youtube.com', 'youtube.com', 'youtu.be', 'https://youtu.be')
+
 # Get orientation exif tag
 for orientation in ExifTags.TAGS.keys():
     if ExifTags.TAGS[orientation] == 'Orientation':
         break
-
-
-def get_hash(files):
-    # Returns a single hash value of a list of files
-    return sum(os.path.getsize(f) for f in files if os.path.isfile(f))
-
-
-def exif_size(img):
-    # Returns exif-corrected PIL size
-    s = img.size  # (width, height)
-    with contextlib.suppress(Exception):
-        rotation = dict(img._getexif().items())[orientation]
-        if rotation in [6, 8]:  # rotation 270 or 90
-            s = (s[1], s[0])
-    return s
-
-
-def seed_worker(worker_id):
-    # Set dataloader worker seed https://pytorch.org/docs/stable/notes/randomness.html#dataloader
-    worker_seed = torch.initial_seed() % 2 ** 32
-    np.random.seed(worker_seed)
-    random.seed(worker_seed)
 
 
 def create_dataloader(path, imgsz, batch_size, stride, opt, hyp=None, augment=False, cache='', pad=0.0, rect=False,
@@ -88,11 +63,12 @@ def create_dataloader(path, imgsz, batch_size, stride, opt, hyp=None, augment=Fa
                                       prefix=prefix)
 
     batch_size = min(batch_size, len(dataset))
+
     nd_dml = None
     try:
         import torch_directml
         nd_dml = torch_directml.device_count()
-    except Exception:
+    except ImportError:
         pass
     nd = nd_dml if nd_dml else torch.cuda.device_count()
     nw = min(
@@ -101,22 +77,21 @@ def create_dataloader(path, imgsz, batch_size, stride, opt, hyp=None, augment=Fa
     loader = DataLoader if image_weights else InfiniteDataLoader
     generator = torch.Generator()
     generator.manual_seed(6148914691236517205 + seed + RANK)
-    if dataset.pin_memory:
-        print(f'{prefix} PyTorch {torch.__version__} with pin_memory is enable, it will use your RAM')
-    dataloader = loader(dataset,
-                        batch_size=batch_size,
-                        num_workers=nw,
-                        sampler=sampler,
-                        pin_memory=dataset.pin_memory,
-                        shuffle=shuffle and sampler is None,
-                        worker_init_fn=seed_worker,
-                        collate_fn=LoadImagesAndLabels.collate_fn4 if quad else LoadImagesAndLabels.collate_fn,
-                        generator=generator,
-                        prefetch_factor=nw,
-                        persistent_workers=True,
-                        pin_memory_device='cuda' if dataset.pin_memory else '')
 
-    return dataloader, dataset
+    dataloader_ = loader(dataset,
+                         batch_size=batch_size,
+                         num_workers=nw,
+                         sampler=sampler,
+                         pin_memory=dataset.pin_memory,
+                         shuffle=shuffle and sampler is None,
+                         worker_init_fn=seed_worker,
+                         collate_fn=LoadImagesAndLabels.collate_fn4 if quad else LoadImagesAndLabels.collate_fn,
+                         generator=generator,
+                         prefetch_factor=nw,
+                         persistent_workers=True,
+                         pin_memory_device='cuda' if dataset.pin_memory else '')
+
+    return dataloader_, dataset
 
 
 class InfiniteDataLoader(dataloader.DataLoader):
@@ -429,13 +404,14 @@ def img2label_paths(img_paths):
     return ['txt'.join(x.replace(sa, sb, 1).rsplit(x.split('.')[-1], 1)) for x in img_paths]
 
 
-# start for image classify model
+# start for images/videos classify model
 
 def create_dataloader_cls(dataset, batch_size,
                           rank=-1, world_size=1, workers=8,
                           prefix='', shuffle=True, seed=0):
     batch_size = min(batch_size, len(dataset))
     nd_dml = None
+
     try:
         import torch_directml
         nd_dml = torch_directml.device_count()
@@ -466,8 +442,8 @@ class LoadSampleAndTarget(torchvision.datasets.ImageFolder):
     version = 0.1
     image_8bit = True
     minimum_size = 100
-    std = np.array([1., 1., 1.])
-    mean = np.array([0., 0., 0.])
+    std = [1., 1., 1.]
+    mean = [0., 0., 0.]
 
     def __init__(self, root, hyp=None, augment=True, cache=True, prefix="", backend='pyav'):
         super().__init__(root=root)
@@ -496,7 +472,7 @@ class LoadSampleAndTarget(torchvision.datasets.ImageFolder):
         pbar = tqdm(range(max_number), total=max_number)
         psum = torch.tensor([0.0, 0.0, 0.0])
         psum_sq = torch.tensor([0.0, 0.0, 0.0])
-        for x in pbar:
+        for x in enumerate(pbar):
             img = self.loadImage(x)[0]
             img = cv2.resize(img, imgsz, interpolation=cv2.INTER_NEAREST)
             img = img[:, :, ::-1].astype(np.float32)  # BGR to RGB
@@ -511,7 +487,7 @@ class LoadSampleAndTarget(torchvision.datasets.ImageFolder):
             # task.append(img)
             pbar.set_description(f"{prefix}Collecting data to calculate mean, std...")
             if x >= max_number - 10:
-                count = max_number * self.imgsz * self.imgsz
+                count = (x + 1) * self.imgsz * self.imgsz
                 # mean and std
                 total_mean = psum / count
                 total_var = (psum_sq / count) - (total_mean ** 2)
@@ -622,7 +598,7 @@ class LoadSampleAndTarget(torchvision.datasets.ImageFolder):
 
 # start for video classify model
 
-class LoadSampleforVideoClassify(Dataset):
+class Load_Sample_for_Video_Classify(Dataset):
     VID_FORMATS = ['.asf', '.mov', '.avi', '.mp4', '.mpg', '.mpeg', '.m4v', '.wmv', '.mkv',
                    '.gif']  # acceptable video suffixes
     mean = (0., 0., 0.)
@@ -630,6 +606,7 @@ class LoadSampleforVideoClassify(Dataset):
     use_BGR = False
 
     def __init__(self, root, hyp=None, augment=True, cache=True, prefix="", backend='pyav'):
+        self.transform_2 = None
         self.transform = None
         self.root = root = Path(root) if isinstance(root, str) else root
         if augment:
@@ -672,24 +649,34 @@ class LoadSampleforVideoClassify(Dataset):
         compose = []
         if self.augment:
             augment = self.augment
-            ranDropChannel = augment['ChannelDropout']
-            h_flip, v_flip = augment['HorizontalFlip'], augment['VerticalFlip']
-            bright, contrast, satu = augment['brightness_limit'], augment['contrast_limit'], augment['saturation_limit']
-            gray = augment["toGray"]
-            # from torchvision.transforms.v2 import ColorJitter as VidColorJitter
-            torchvision.disable_beta_transforms_warning()
-            compose.extend([transforms.Lambda(lambd=lambda x: self.randomDropChannel(x, ranDropChannel)),
-                            transforms.Lambda(lambd=lambda x: self.randomDropFrame(x, 0.05)),
-                            transforms.Lambda(lambd=lambda x: self.h_flip(x, h_flip)),
-                            transforms.Lambda(lambd=lambda x: self.v_flip(x, v_flip)),
-                            # VidColorJitter(brightness=bright, contrast=contrast, saturation=satu, hue=None),
-                            transforms.Lambda(lambd=lambda x: self.rgb_2_gray(x, gray))])
+            ranDropChannel = augment.get('ChannelDropout', 0)
+            ranDropFrame = augment.get("FrameDrop", 0)
+            h_flip, v_flip = augment.get("HorizontalFlip", 0), augment.get("VerticalFlip", 0)
+            bright, contrast = augment.get("brightness_limit"), augment.get("contrast_limit", 0)
+            satu = augment.get("saturation_limit", 0)
+            gray = augment.get("toGray", 0)
+            rotate = augment.get("degrees", 0)
+            randomRotate = augment.get("rotate", 0)
+            channelShuffle = augment.get("channelShuffle", 0)
+
+            compose.extend([transforms.Lambda(lambd=lambda x: self.randomDropChannel(x, p=ranDropChannel)),
+                            transforms.Lambda(lambd=lambda x: self.randomDropFrame(x, p=ranDropFrame)),
+                            transforms.Lambda(lambd=lambda x: self.channelShuffle(x, p=channelShuffle)),
+                            transforms.Lambda(lambd=lambda x: self.h_flip(x, p=h_flip)),
+                            transforms.Lambda(lambd=lambda x: self.v_flip(x, p=v_flip)),
+                            transforms.Lambda(lambd=lambda x: self.RandomRotate(x, rotate, p=randomRotate)),
+                            transforms.Lambda(lambd=lambda x: self.ColorJitter(x, bright,
+                                                                               contrast, satu,
+                                                                               hue=0, p=0.1)),
+                            transforms.Lambda(lambd=lambda x: self.rgb_2_gray(x, p=gray))])
+        self.transform_2 = transforms.Compose(compose)
         compose.extend([transforms.Lambda(lambd=lambda x: self.normalize(x, self.mean, self.std))])
         self.transform = transforms.Compose(compose)
 
         logger.info(
             f"{self.prefix}total {len(self.samples)} samples with {len(self.classes)} classes, "
             f"frame length: {self.sample_length}, step frame: {self.sampling_rate}")
+        logger.info(self.prefix + ', '.join(f'{x}'.replace('always_apply=False, ', '') for x in compose if x.p))
 
     def dataset_analysis(self):
         """for now only return number of frame per classes"""
@@ -718,7 +705,7 @@ class LoadSampleforVideoClassify(Dataset):
             psum_sq += (video ** 2).sum(axis=[0, 2, 3])
             pbar.set_description(f"{self.prefix}Collecting data to calculate mean, std...")
             if i >= len(samples) - 10:
-                count = len(samples) * self.sample_length * self.imgsz * self.imgsz
+                count = (i + 1) * self.sample_length * self.imgsz * self.imgsz
                 total_mean = psum / count
                 total_var = (psum_sq / count) - (total_mean ** 2)
                 total_std = torch.sqrt(total_var)
@@ -737,7 +724,7 @@ class LoadSampleforVideoClassify(Dataset):
         return video, target
 
     def loadSample(self, path=None, transform=None, dtype=torch.uint8) -> tuple[torch.Tensor, str]:
-        """choice a random sample to plot"""
+        """load sample and apply transform"""
         target = 0
         resize_transform = transforms.Compose([transforms.Resize((self.imgsz, self.imgsz), antialias=False)])
         if path is None:
@@ -761,16 +748,11 @@ class LoadSampleforVideoClassify(Dataset):
         return video, self.classes[target]
 
     @staticmethod
-    def collect_fn(batch):
-        videos, target = zip(*batch)
-        return torch.stack(videos, 0), torch.tensor(target, dtype=torch.long)
-
-    @staticmethod
-    def rgb_2_gray(inputs: torch.Tensor, p=0.5) -> torch.Tensor:
+    def rgb_2_gray(inputs: torch.Tensor, always_apply=False, p=0.5) -> torch.Tensor:
         """convert multiple rgb image to gray"""
         gray = inputs.float()
         n_shape = inputs.dim()
-        if random.random() <= p:
+        if random.random() <= p or always_apply:
             if n_shape == 4:
                 for i, rgb in enumerate(gray):
                     r, g, b = rgb[0, ...], rgb[1, ...], rgb[2, ...]
@@ -785,54 +767,69 @@ class LoadSampleforVideoClassify(Dataset):
         return gray.round().to(torch.uint8)
 
     @staticmethod
-    def randomDropFrame(inputs: torch.Tensor, p=0.5) -> torch.Tensor:
-        if random.random() <= p:
+    def randomDropFrame(inputs: torch.Tensor, always_apply=False, p=0.5) -> torch.Tensor:
+        if random.random() <= p or always_apply:
             n_dims = inputs.dim()
+            fill_value = random.uniform(0, 255)
             if n_dims == 4:
                 frame_idx = random.randint(0, inputs.shape[0] - 1)
-                inputs[frame_idx, ...] = 0
+                inputs[frame_idx, ...] = int(fill_value)
             else:
-                inputs[...] = 0
+                inputs[...] = int(fill_value)
         return inputs
 
     @staticmethod
-    def randomDropChannel(inputs: torch.Tensor, p=0.5) -> torch.Tensor:
-        if random.random() <= p:
+    def randomDropChannel(inputs: torch.Tensor, always_apply=False, p=0.5) -> torch.Tensor:
+        if random.random() <= p or always_apply:
             channel = random.randint(0, 2)
             n_dims = inputs.dim()
+            fill_value = random.uniform(0, 10)
             if n_dims == 4:
-                inputs[:, channel, ...] = 0
+                inputs[:, channel, ...] = int(fill_value)
             else:
-                inputs[channel, ...] = 0
+                inputs[channel, ...] = int(fill_value)
 
         return inputs
 
     @staticmethod
-    def v_flip(inputs: torch.Tensor, p=0.5) -> torch.Tensor:
-        n_dims = len(inputs.shape)
-        if random.random() <= p:
-            if n_dims == 4:
-                inputs = torch.flip(inputs, dims=[2])
-            else:
-                inputs = torch.flip(inputs, dims=[1])
+    def v_flip(inputs: torch.Tensor, always_apply=False, p=0.5) -> torch.Tensor:
+        if random.random() <= p or always_apply:
+            inputs = F.hflip(inputs)
         return inputs
 
     @staticmethod
-    def h_flip(inputs: torch.Tensor, p=0.5) -> torch.Tensor:
-        n_dims = inputs.dim()
-        if random.random() <= p:
-            if n_dims == 4:
-                inputs = torch.flip(inputs, dims=[3])
+    def h_flip(inputs: torch.Tensor, always_apply=False, p=0.5) -> torch.Tensor:
+        if random.random() <= p or always_apply:
+            inputs = F.vflip(inputs)
+        return inputs
+
+    @staticmethod
+    def channelShuffle(inputs: torch.Tensor, always_apply=False, p=0.5) -> torch.Tensor:
+        if random.random() <= p or always_apply:
+            n_dims = inputs.dim()
+            if n_dims >= 4:
+                r, g, b = inputs[..., 0, :, :], inputs[..., 1, :, :], inputs[..., 2, :, :]
+                r, g, b = r.unsqueeze(0), g.unsqueeze(0), b.unsqueeze(0)
+                shuffled = [r, g, b]
+                random.shuffle(shuffled)
+                inputs = torch.concat(shuffled, 0)
+                inputs = inputs.permute([1, 0, 2, 3])
             else:
-                inputs = torch.flip(inputs, dims=[2])
+                r, g, b = inputs[0, ...], inputs[1, ...], inputs[2, ...]
+                r, g, b = r.unsqueeze(0), g.unsqueeze(0), b.unsqueeze(0)
+                shuffled = [r, g, b]
+                random.shuffle(shuffled)
+                inputs = torch.concat(shuffled, 0)
+                inputs = inputs.permute([1, 0, 2])
+
         return inputs
 
     @staticmethod
     def normalize(inputs: torch.Tensor,
-                  mean: tuple[float, float, float],
-                  std: tuple[float, float, float],
+                  mean: tuple[float, float, float] | tuple[float],
+                  std: tuple[float, float, float] | tuple[float],
                   pixel_max_value=255.) -> torch.FloatTensor:
-        """input float tensor in NCHW or CHW format and return the same format"""
+        """input int tensor in NCHW or CHW format and return the same format"""
         n_dims = inputs.dim()
         inputs = inputs.float()
         inputs /= pixel_max_value
@@ -841,18 +838,65 @@ class LoadSampleforVideoClassify(Dataset):
             assert c == len(mean), f"len of mean ({len(mean)}) must be equal to image channel ({c})"
             for n in range(n_dept):
                 for x in range(c):
-                    inputs[n, x, ...] = (inputs[n, x, ...] - mean[x]) / (std[x])
+                    inputs[n, x, ...] = (inputs[n, x, ...] - mean[x]) / std[x]
         elif n_dims == 3:
             c, h, w = inputs.shape
             assert c == len(mean), f"len of mean ({len(mean)}) must be equal to image channel ({c})"
             for x in range(c):
-                inputs[x, ...] = (inputs[x, ...] - mean[x]) / (std[x])
+                inputs[x, ...] = (inputs[x, ...] - mean[x]) / std[x]
         else:
             raise f"inputs tensor must be 3 or 4 dimension, got {n_dims}"
         return inputs
 
+    @staticmethod
+    def ColorJitter(inputs: torch.Tensor,
+                    brightness=0.2,
+                    contrast=0.2, saturation=0.2, hue=0.2,
+                    always_apply=False, p=0.5):
+        """
+        value = brightness = contrast = saturation = 1 is origin image
+        0 < value < 1 is lower
+        value > 1 is higher
+        for hue must in range [-0.5, 0.5]
+
+        always_apply=True use this augment for all the time
+        """
+        brightness = max(brightness, 0)
+        contrast = max(contrast, 0)
+        saturation = max(saturation, 0)
+        hue = min(hue, 0.5)
+        hue = max(hue, 0)
+
+        assert 0 <= p <= 1, f'Probability must in range [0, 1]'
+
+        if random.random() <= p or always_apply:
+            brightness = random.uniform(1 - brightness, 1 + brightness)
+            if brightness != 1:
+                inputs = F.adjust_brightness(inputs, brightness)
+
+            contrast = random.uniform(1 - contrast, 1 + contrast)
+            if contrast != 1:
+                inputs = F.adjust_contrast(inputs, contrast)
+
+            saturation = random.uniform(1 - saturation, 1 + saturation)
+            if saturation != 1:
+                inputs = F.adjust_saturation(inputs, saturation)
+
+            hue = random.uniform(-hue, hue)
+            if hue != 0:
+                inputs = F.adjust_hue(inputs, hue)
+        return inputs
+
+    @staticmethod
+    def RandomRotate(inputs: torch.Tensor, angle: float, always_apply=False, p=0.5):
+        if random.random() <= p or always_apply:
+            angle = random.uniform(0, angle)
+            inputs = F.rotate(inputs, angle)
+        return inputs
+
 
 # end for video classify model
+
 
 class LoadImagesAndLabels(Dataset):  # for training/testing
     version = 0.1
@@ -1207,7 +1251,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         for i in range(n):  # zidane torch.zeros(16,3,720,1280)  # BCHW
             i *= 4
             if random.random() < 0.5:
-                im = F.interpolate(img[i].unsqueeze(0).float(), scale_factor=2., mode='bilinear', align_corners=False)[
+                im = interpolate(img[i].unsqueeze(0).float(), scale_factor=2., mode='bilinear', align_corners=False)[
                     0].type(img[i].type())
                 l = label[i]
             else:
@@ -1427,7 +1471,6 @@ def copy_paste(img, labels, segments, probability=0.5):
 def remove_background(img, labels, segments):
     # Implement Copy-Paste augmentation https://arxiv.org/abs/2012.07177, labels as nx5 np.array(cls, xyxy)
     n = len(segments)
-    h, w, c = img.shape  # height, width, channels
     im_new = np.zeros(img.shape, np.uint8)
     img_new = np.ones(img.shape, np.uint8) * 114
     for j in range(n):
@@ -1838,3 +1881,25 @@ def autosplit(path='../coco', weights=(0.9, 0.1, 0.0), annotated_only=False):
 def load_segmentations(self, index):
     key = '/work/handsomejw66/coco17/' + self.img_files[index]
     return self.segs[key]
+
+
+def seed_worker(worker_id):
+    """Set dataloader worker seed https://pytorch.org/docs/stable/notes/randomness.html#dataloader"""
+    worker_seed = torch.initial_seed() % 2 ** 32
+    np.random.seed(worker_seed)
+    random.seed(worker_seed)
+
+
+def get_hash(files):
+    """Returns a single hash value of a list of files"""
+    return sum(os.path.getsize(f) for f in files if os.path.isfile(f))
+
+
+def exif_size(img):
+    """Returns exif-corrected PIL size"""
+    s = img.size  # (width, height)
+    with contextlib.suppress(Exception):
+        rotation = dict(img._getexif().items())[orientation]
+        if rotation in [6, 8]:  # rotation 270 or 90
+            s = (s[1], s[0])
+    return s

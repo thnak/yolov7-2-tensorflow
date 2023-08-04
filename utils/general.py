@@ -1,3 +1,5 @@
+from utils.default import IMG_FORMATS, VID_FORMATS, ROOT
+
 import glob
 import logging
 import math
@@ -12,35 +14,14 @@ from pathlib import Path
 import random
 import cv2
 import numpy as np
-import pandas as pd
 import torch
 import torchvision
 import yaml
 import pkg_resources as pkg
 import torch.backends.cudnn as cudnn
+
 from utils.google_utils import gsutil_getsize
 from utils.metrics import fitness
-
-# Settings
-torch.set_printoptions(linewidth=320, precision=5, profile='long')
-np.set_printoptions(linewidth=320, formatter={'float_kind': '{:11.5g}'.format})  # format short g, %precision=5
-pd.options.display.max_columns = 10
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
-IMG_FORMATS = ['.bmp', '.jpg', '.jpeg', '.png', '.tif', '.tiff', '.dng', '.webp', '.mpo',
-               '.pfm']  # acceptable image suffixes
-VID_FORMATS = ['.asf', '.mov', '.avi', '.mp4', '.mpg', '.mpeg', '.m4v', '.wmv', '.mkv',
-               '.gif']  # acceptable video suffixes
-IMG_EXTENSIONS = (".jpg", ".jpeg", ".png", ".ppm", ".bmp", ".pgm", ".tif", ".tiff", ".webp")  # from torchvision
-IMG_FORMATS.extend(IMG_EXTENSIONS)
-UPSAMPLEMODE = ['nearest', 'linear', 'bilinear', 'bicubic']
-
-FILE = Path(__file__).resolve()
-ROOT = FILE.parents[1]  # YOLOv7 root directory
-TQDM_BAR_FORMAT = '{l_bar}{bar:10}{r_bar}'  # tqdm bar format
-ONNX_OPSET = [x for x in range(11, 19)]
-ONNX_OPSET_TARGET = ONNX_OPSET
-CUDA = torch.cuda.is_available()
-MAX_DET = 300  # topk objects for every images
 
 
 def set_logging(rank=-1, filename=None, filemode=None):

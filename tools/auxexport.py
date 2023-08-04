@@ -3,16 +3,14 @@ import sys
 import warnings
 
 from models.experimental import End2End
-from utils.general import check_requirements, check_version, colorstr, ONNX_OPSET, ONNX_OPSET_TARGET
+from utils.general import check_requirements, check_version, colorstr
+from utils.default import ONNX_OPSET, ONNX_OPSET_TARGET
 import os
 import subprocess
 import yaml
 from pathlib import Path
 import re
 import torch
-import platform
-
-MACOS = platform.system() == 'Darwin'  # macOS environment
 
 
 def yaml_save(file='data.yaml', data=None):
@@ -149,7 +147,7 @@ def export_tflite(keras_model, im, file, int8, data=None, nms=False, agnostic_nm
     converter.optimizations = [tf.lite.Optimize.DEFAULT]
     if int8:
         from utils.datasets import LoadImages
-        from utils.general import check_dataset, check_yaml
+        from utils.general import check_yaml
         from models.tf import representative_dataset_gen
         from yaml.loader import SafeLoader
         assert data, f'quantization need data for calibration'

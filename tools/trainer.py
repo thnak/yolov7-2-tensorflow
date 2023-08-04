@@ -23,7 +23,8 @@ from utils.autoanchor import check_anchors
 from utils.datasets import create_dataloader, create_dataloader_cls
 
 from utils.general import (colorstr, init_seeds, check_dataset, check_img_size, one_cycle, labels_to_class_weights,
-                           labels_to_image_weights, TQDM_BAR_FORMAT, strip_optimizer, parse_path)
+                           labels_to_image_weights, strip_optimizer, parse_path)
+from utils.default import TQDM_BAR_FORMAT
 from utils.google_utils import attempt_download
 from utils.loss import SmartLoss
 from utils.metrics import fitness
@@ -41,7 +42,7 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None, use3D=Fal
         Path(opt.save_dir), opt.epochs, opt.batch_size, opt.total_batch_size, opt.weights, opt.global_rank, opt.freeze
     if use3D:
         from models.commond3D import Model3D as Model
-        from utils.datasets import LoadSampleforVideoClassify as LoadSampleAndTarget
+        from utils.datasets import Load_Sample_for_Video_Classify as LoadSampleAndTarget
     else:
         from utils.datasets import LoadSampleAndTarget
         from models.yolo import Model
@@ -194,22 +195,17 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None, use3D=Fal
     nbs = 64  # nominal batch size
     # Image sizes
     gs = int(model.stride.max())  # grid size (max stride)
-    imgsz, imgsz_test = [check_img_size(x, gs) for x in opt.imgsz]
+    imgsz, imgsz_test = [x for x in opt.imgsz]
     for _ in range(3):
         try:
-            imgsz, imgsz_test = [check_img_size(x, gs) for x in opt.imgsz]
             if use3D:
-                dataset.sampling_rate = val_dataset.sampling_rate = step
-                dataset.sample_length = val_dataset.sample_length = clip_len
-                model.input_shape = [input_channel, clip_len, imgsz, imgsz] if isinstance(imgsz, int) else [
+                input_shape = [input_channel, clip_len, imgsz, imgsz] if isinstance(imgsz, int) else [
                     input_channel, clip_len, *imgsz]
             else:
-                model.input_shape = [input_channel, imgsz, imgsz] if isinstance(imgsz, int) else [input_channel, *imgsz]
-            y = model(torch.zeros([1, *model.input_shape], device=device))
-            del y
+                input_shape = [input_channel, imgsz, imgsz] if isinstance(imgsz, int) else [input_channel, *imgsz]
+            model(torch.zeros([1, *input_shape], device=device))
         except:
-            gs += gs
-            model.stride = torch.tensor([gs], device=device)
+            imgsz += 8
             logger.warn(f"trying to get larger input shape")
 
     dataset.imgsz = imgsz
@@ -222,13 +218,9 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None, use3D=Fal
     std = model.yaml.get("std", [1, 1, 1])
     dataset.std = val_dataset.std = std
     dataset.mean = val_dataset.mean = mean
-
-    if tb_writer and hasattr(dataset, "loadSample"):
-        logger.info(f"{colorstr('Train: ')}Plotting samples to Tensorboard.")
-        opt.plot_samples = min(opt.plot_samples, len(dataset))
-        for x in range(opt.plot_samples):
-            tb_writer.add_figure("Samples/train", plotSample(*dataset.loadSample()), x)
-            tb_writer.add_figure("Samples/val", plotSample(*dataset.loadSample()), x)
+    if use3D:
+        dataset.sampling_rate = val_dataset.sampling_rate = step
+        dataset.sample_length = val_dataset.sample_length = clip_len
 
     if use3D:
         model.info(verbose=True,
@@ -268,6 +260,15 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None, use3D=Fal
                 data_loader["val_dataloader"] = val_dataloader
             else:
                 val_dataloader = data_loader['val_dataloader']
+
+        if tb_writer and hasattr(dataset, "loadSample"):
+            logger.info(f"{colorstr('Train: ')}Plotting samples to Tensorboard.")
+            opt.plot_samples = min(opt.plot_samples, len(dataset))
+            for x in range(opt.plot_samples):
+                tb_writer.add_figure("Samples/train",
+                                     plotSample(*dataset.loadSample(transform=dataset.transform_2)), x)
+                tb_writer.add_figure("Samples/val",
+                                     plotSample(*val_dataset.loadSample(transform=val_dataset.transform_2)), x)
 
     model.yaml['mean'] = dataset.mean
     model.yaml['std'] = dataset.std
