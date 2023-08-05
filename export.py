@@ -307,10 +307,9 @@ if __name__ == '__main__':
                 from tools.auxexport import export_openvino
 
                 logging.info(f'{prefix} Starting export...')
-                outputpath, _ = export_openvino(
-                    file_=weight, metadata=meta, half=True, prefix=prefix)
-                logging.info(f'{prefix} export success✅, saved as: {outputpath}')
-                filenames.append(outputpath)
+                output_path, _ = export_openvino(file_=weight, metadata=meta, half=True, prefix=prefix)
+                logging.info(f'{prefix} export success✅, saved as: {output_path}')
+                filenames.append(output_path)
             except Exception as e:
                 logging.info(f'{prefix} export failure❌:\n{e}')
 
@@ -348,18 +347,18 @@ if __name__ == '__main__':
                 try:
                     from tools.auxexport import export_tflite, add_tflite_metadata
 
-                    outputpath = export_tflite(s_models, img, weight,
-                                               int8=opt.int8,
-                                               data=opt.data, nms=opt.nms,
-                                               agnostic_nms=opt.agnostic_nms,
-                                               stride=gs,
-                                               prefix=prefix)[0]
-                    logging.info(f'{prefix} export success✅, saved as {outputpath}')
-                    filenames.append(outputpath)
+                    output_path = export_tflite(s_models, img, weight,
+                                                int8=opt.int8,
+                                                data=opt.data, nms=opt.nms,
+                                                agnostic_nms=opt.agnostic_nms,
+                                                stride=gs,
+                                                prefix=prefix)[0]
+                    logging.info(f'{prefix} export success✅, saved as {output_path}')
+                    filenames.append(output_path)
                     logging.info(f'{prefix} adding metadata...')
                     meta = MetaData
                     meta["stride"] = max(MetaData["stride"])
-                    add_tflite_metadata(outputpath, metadata=meta, num_outputs=len(s_models.outputs))
+                    add_tflite_metadata(output_path, metadata=meta, num_outputs=len(s_models.outputs))
                 except Exception as e:
                     logging.info(f'{prefix} export failure❌:\n{e}')
 

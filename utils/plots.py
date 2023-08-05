@@ -466,10 +466,12 @@ def plot_dataset(data: dict, names: list, title="dataset"):
     return fig
 
 
-def plotSample(samples, target):
+def plotSample(dpi: any = None, *args):
     """plot all samples -> an fig x for per sample"""
+    samples, target = args
+    plt.close('all')
     frames, _, _, _ = samples.shape
-    fig = plt.figure()
+    fig = plt.figure(dpi=dpi)
     plt.title(f"{target}")
     row = math.sqrt(frames)
     row = math.ceil(row)

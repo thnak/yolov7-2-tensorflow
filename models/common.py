@@ -6,7 +6,7 @@ import torch.nn.functional as F
 import warnings
 
 from utils.default import ACT_LIST
-from utils.general import non_max_suppression, check_requirements, autopad
+from utils.general import non_max_suppression, check_requirements, autopad, fix_problem_with_reuse_activation_funtion
 
 try:
     from timm.models.layers import DropPath, to_2tuple
@@ -121,6 +121,8 @@ class Conv1D(nn.Module):
                  dilation: int = 1,
                  groups: int = 1, act: any = False):
         super(Conv1D, self).__init__()
+
+        act= fix_problem_with_reuse_activation_funtion(act)
         self.conv = nn.Conv1d(in_channel, out_channel,
                               kernel_size=kernel_size,
                               stride=stride,
@@ -143,9 +145,10 @@ class Conv(nn.Module):
 
     def __init__(self, c1, c2, k=1, s=1, p=None, g=1, d=1, act=True, dropout=0):
         super(Conv, self).__init__()
-        if isinstance(d, ACT_LIST):
+        if isinstance(d, ACT_LIST):  # Try to be compatible with models from other repo
             act = d
             d = 1
+        act = fix_problem_with_reuse_activation_funtion(act)
         assert 0 <= dropout <= 1, f"dropout rate must be 0 <= dropout <= 1, your {dropout}"
         self.conv = nn.Conv2d(c1, c2, k, s, autopad(k, p, d), groups=g, dilation=d, bias=False)
         self.bn = nn.BatchNorm2d(c2)

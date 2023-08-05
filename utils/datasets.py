@@ -544,9 +544,10 @@ class LoadSampleAndTarget(torchvision.datasets.ImageFolder):
         return mem_2_caching
 
     def prepare(self):
-        self.calculatingMeanSTD(len(self.samples), self.prefix)
+        if sum(self.mean) == 0 and sum(self.std) == 3:
+            self.calculatingMeanSTD(len(self.samples), self.prefix)
         if self.cache:
-            pbar = tqdm(range(0, self.total_caching), desc="%33s" % (""), total=self.total_caching)
+            pbar = tqdm(range(0, self.total_caching), desc="%33s" % "", total=self.total_caching)
             gb = 0
             for i, x in enumerate(pbar):
                 self.samples[x][3] = self.loadImage(x)[0]
@@ -639,7 +640,7 @@ class Load_Sample_for_Video_Classify(Dataset):
 
     def prepare(self):
         """prepare dataset"""
-        if sum(self.mean) == 0 and sum(self.std) == 1:
+        if sum(self.mean) == 0 and sum(self.std) == 3:
             self.calculateMeanStd()
         else:
             logger.info(f"{self.prefix}Using mean: {self.mean}, std: {self.std} from model.yaml for this dataset.")
@@ -669,14 +670,14 @@ class Load_Sample_for_Video_Classify(Dataset):
                                                                                contrast, satu,
                                                                                hue=0, p=0.1)),
                             transforms.Lambda(lambd=lambda x: self.rgb_2_gray(x, p=gray))])
-        self.transform_2 = transforms.Compose(compose)
-        compose.extend([transforms.Lambda(lambd=lambda x: self.normalize(x, self.mean, self.std))])
-        self.transform = transforms.Compose(compose)
+            logger.info(f"{self.prefix}Using {augment}")
+            self.transform_2 = transforms.Compose(compose)
+        compose2 = compose + [transforms.Lambda(lambd=lambda x: self.normalizeInputs(x, self.mean, self.std))]
+        self.transform = transforms.Compose(compose2)
 
         logger.info(
             f"{self.prefix}total {len(self.samples)} samples with {len(self.classes)} classes, "
             f"frame length: {self.sample_length}, step frame: {self.sampling_rate}")
-        logger.info(self.prefix + ', '.join(f'{x}'.replace('always_apply=False, ', '') for x in compose if x.p))
 
     def dataset_analysis(self):
         """for now only return number of frame per classes"""
@@ -697,7 +698,7 @@ class Load_Sample_for_Video_Classify(Dataset):
         psum_sq = torch.tensor([0.0, 0.0, 0.0])
         pbar = tqdm(samples, total=len(samples))
         transform = transforms.Compose([
-            transforms.Lambda(lambd=lambda x: self.normalize(x, mean=self.mean, std=self.std))])
+            transforms.Lambda(lambd=lambda x: self.normalizeInputs(x, mean=[0.]*3, std=[1.]*3))])
 
         for i, (path, _) in enumerate(pbar):
             video, _ = self.loadSample(path, transform=transform, dtype=torch.float32)
@@ -825,10 +826,10 @@ class Load_Sample_for_Video_Classify(Dataset):
         return inputs
 
     @staticmethod
-    def normalize(inputs: torch.Tensor,
-                  mean: tuple[float, float, float] | tuple[float],
-                  std: tuple[float, float, float] | tuple[float],
-                  pixel_max_value=255.) -> torch.FloatTensor:
+    def normalizeInputs(inputs: torch.Tensor,
+                        mean: tuple[float, float, float] | tuple[float],
+                        std: tuple[float, float, float] | tuple[float],
+                        pixel_max_value=255.) -> torch.FloatTensor:
         """input int tensor in NCHW or CHW format and return the same format"""
         n_dims = inputs.dim()
         inputs = inputs.float()
@@ -891,7 +892,8 @@ class Load_Sample_for_Video_Classify(Dataset):
     def RandomRotate(inputs: torch.Tensor, angle: float, always_apply=False, p=0.5):
         if random.random() <= p or always_apply:
             angle = random.uniform(0, angle)
-            inputs = F.rotate(inputs, angle)
+            fill_val = int(random.uniform(0, 255))
+            inputs = F.rotate(inputs, angle, fill=fill_val)
         return inputs
 
 

@@ -194,9 +194,9 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None, use3D=Fal
     # Optimizer
     nbs = 64  # nominal batch size
     # Image sizes
-    gs = int(model.stride.max())  # grid size (max stride)
     imgsz, imgsz_test = [x for x in opt.imgsz]
-    for _ in range(3):
+    for _ in range(10):
+        model.eval()
         try:
             if use3D:
                 input_shape = [input_channel, clip_len, imgsz, imgsz] if isinstance(imgsz, int) else [
@@ -204,9 +204,9 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None, use3D=Fal
             else:
                 input_shape = [input_channel, imgsz, imgsz] if isinstance(imgsz, int) else [input_channel, *imgsz]
             model(torch.zeros([1, *input_shape], device=device))
-        except:
+        except Exception as ex:
             imgsz += 8
-            logger.warn(f"trying to get larger input shape")
+            logger.warn(f"trying to get larger input shape, {ex}")
 
     dataset.imgsz = imgsz
     val_dataset.imgsz = imgsz_test
@@ -260,15 +260,34 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None, use3D=Fal
                 data_loader["val_dataloader"] = val_dataloader
             else:
                 val_dataloader = data_loader['val_dataloader']
+        if not opt.resume:
+            if tb_writer and hasattr(dataset, "loadSample"):
+                opt.plot_samples = min(opt.plot_samples, len(dataset))
+                pbar = tqdm(range(opt.plot_samples), total=opt.plot_samples, desc=f"{colorstr('Train: ')}Plotting")
+                for x in pbar:
+                    pbar.desc = f"{colorstr('Train: ')}Plotting to Tensorboard"
+                    tb_writer.add_figure("Samples/train",
+                                         plotSample(None,
+                                                    *dataset.loadSample(transform=dataset.transform_2)), x)
+                    tb_writer.add_figure("Samples/val",
+                                         plotSample(None,
+                                                    *val_dataset.loadSample(transform=val_dataset.transform_2)), x)
 
-        if tb_writer and hasattr(dataset, "loadSample"):
-            logger.info(f"{colorstr('Train: ')}Plotting samples to Tensorboard.")
-            opt.plot_samples = min(opt.plot_samples, len(dataset))
-            for x in range(opt.plot_samples):
-                tb_writer.add_figure("Samples/train",
-                                     plotSample(*dataset.loadSample(transform=dataset.transform_2)), x)
-                tb_writer.add_figure("Samples/val",
-                                     plotSample(*val_dataset.loadSample(transform=val_dataset.transform_2)), x)
+            elif hasattr(dataset, "loadSample"):
+                save_ = save_dir / f"Samples"
+                save_.mkdir(exist_ok=True)
+                pbar = tqdm(range(opt.plot_samples), total=opt.plot_samples, desc=f"{colorstr('Train: ')}Plotting")
+                for x in pbar:
+                    pbar.desc = f"{colorstr('Train: ')}Plotting samples to {save_dir.as_posix()}"
+                    save = save_ / f"train_sample_{x}.jpg"
+                    fig = plotSample(300, *dataset.loadSample(transform=dataset.transform_2))
+                    fig.savefig(save.as_posix())
+                    fig.clf()
+
+                    save = save_ / f"val_sample_{x}.jpg"
+                    fig = plotSample(300, *val_dataset.loadSample(transform=val_dataset.transform_2))
+                    fig.savefig(save.as_posix())
+                    fig.clf()
 
     model.yaml['mean'] = dataset.mean
     model.yaml['std'] = dataset.std

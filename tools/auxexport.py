@@ -276,7 +276,7 @@ def TryExport_ONNX(weight: Path, model, feed: torch.Tensor, map_device, logging,
     except ImportError:
         pass
 
-    if kwargs["onnx_opset"] not in ONNX_OPSET_TARGET and dml:
+    if kwargs["onnx_opset"] not in ONNX_OPSET and dml:
         logging.warn(
             f'{prefix} onnx opset tested for version {ONNX_OPSET_TARGET}, '
             f'newer version may have poor performance for ONNXRUNTIME in DmlExecutionProvider')

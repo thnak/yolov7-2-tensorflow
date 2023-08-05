@@ -9,9 +9,9 @@ warmup_bias_lr: 0.0674
 # argument
 ChannelDropout: 0.1
 HorizontalFlip: 0.2
-VerticalFlip: 0.2
+VerticalFlip: 0.0
 brightness_limit: 0.2
-contrast_limit: 0.2
+contrast_limit: 0.1
 saturation_limit: 0.1
 toGray: 0.1
 degrees: 45

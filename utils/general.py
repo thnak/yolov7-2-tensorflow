@@ -19,7 +19,7 @@ import torchvision
 import yaml
 import pkg_resources as pkg
 import torch.backends.cudnn as cudnn
-
+from torch import nn
 from utils.google_utils import gsutil_getsize
 from utils.metrics import fitness
 
@@ -1210,3 +1210,15 @@ def autopad(kernel_size: int | tuple[int] | list[int], pad_size=None, dilation=1
     if pad_size is None:
         pad_size = kernel_size // 2 if isinstance(kernel_size, int) else [x // 2 for x in kernel_size]  # auto-pad
     return pad_size
+
+
+def fix_problem_with_reuse_activation_funtion(act):
+    """to fix problem with thop when reuse activation funtion"""
+    if isinstance(act, bool):
+        return act
+    act = str(act)
+    act = f"nn.{act}" if "nn." not in act else act
+    if not ("(" in act and ")" in act):
+        act = f"{act}()"
+    act = eval(act)
+    return act
