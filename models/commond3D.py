@@ -266,6 +266,8 @@ class residual_block_2(nn.Module):
 
 
 class SlowFast(nn.Module):
+    export = False
+
     def __init__(self, in_channel, time_keeper=4, nc=1000, act=nn.ReLU()):
         super(SlowFast, self).__init__()
         self.time_keeper = time_keeper
@@ -405,7 +407,7 @@ class Model3D(nn.Module):
         # Build strides
         m = self.model[-1]  # Detect()
         m.inplace = self.inplace
-        self.is_Classify = isinstance(m, Classify3D)
+        self.is_Classify = True
         self.stride = torch.tensor([8])
         initialize_weights(self)
 
@@ -563,7 +565,7 @@ if __name__ == '__main__':
     model = Model3D(opt.cfg, nc=101).to(device)
     model.eval()
     model.fuse()
-    img = torch.rand(1, 3, 32, 256, 256).to(device)
+    img = torch.rand(1, 3, 32, 224, 224).to(device)
     # model_jit = torch.jit.trace(model, img)
     # torch.jit.save(model_jit, 'jitmodel.pt')
     # model.info(img_size=img.shape[1:], verbose=True)

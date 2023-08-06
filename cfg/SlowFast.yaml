@@ -4,11 +4,13 @@ depth_multiple: 1.0  # model depth multiple
 width_multiple: 1.0  # layer channel multiple
 p5: True
 ch: 3
-sub_sample: 32
-step: 2
-head_dim: 1024
+sample_length: 16
+sampling_rate: 5
+head_dim: 2048
+mean: [0.389, 0.379, 0.341] # UCF101
+std: [0.279, 0.273, 0.275] # UCF101
 low_frame_rate: 4
-
+Classify3D: True
 backbone:
   # [from, number, module, args] c2, k=1, s=1, p=None, g=1, d=1, act=True
   [ [ -1, 1, SlowFast, [ low_frame_rate, nc, nn.LeakyReLU(0.1) ] ] ]

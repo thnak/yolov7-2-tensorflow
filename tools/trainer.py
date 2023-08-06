@@ -205,7 +205,7 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None, use3D=Fal
                 input_shape = [input_channel, imgsz, imgsz] if isinstance(imgsz, int) else [input_channel, *imgsz]
             model(torch.zeros([1, *input_shape], device=device))
         except Exception as ex:
-            imgsz += 8
+            imgsz += model.stride.max()
             logger.warn(f"trying to get larger input shape, {ex}")
 
     dataset.imgsz = imgsz
@@ -260,34 +260,33 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None, use3D=Fal
                 data_loader["val_dataloader"] = val_dataloader
             else:
                 val_dataloader = data_loader['val_dataloader']
-        if not opt.resume:
-            if tb_writer and hasattr(dataset, "loadSample"):
-                opt.plot_samples = min(opt.plot_samples, len(dataset))
-                pbar = tqdm(range(opt.plot_samples), total=opt.plot_samples, desc=f"{colorstr('Train: ')}Plotting")
-                for x in pbar:
-                    pbar.desc = f"{colorstr('Train: ')}Plotting to Tensorboard"
-                    tb_writer.add_figure("Samples/train",
-                                         plotSample(None,
-                                                    *dataset.loadSample(transform=dataset.transform_2)), x)
-                    tb_writer.add_figure("Samples/val",
-                                         plotSample(None,
-                                                    *val_dataset.loadSample(transform=val_dataset.transform_2)), x)
+        if tb_writer and hasattr(dataset, "loadSample") and opt.resume is False:
+            opt.plot_samples = min(opt.plot_samples, len(dataset))
+            pbar = tqdm(range(opt.plot_samples), total=opt.plot_samples, desc=f"{colorstr('Train: ')}Plotting")
+            for x in pbar:
+                pbar.desc = f"{colorstr('Train: ')}Plotting to Tensorboard"
+                tb_writer.add_figure("Samples/train",
+                                     plotSample(None,
+                                                *dataset.loadSample(transform=dataset.transform_2)), x)
+                tb_writer.add_figure("Samples/val",
+                                     plotSample(None,
+                                                *val_dataset.loadSample(transform=val_dataset.transform_2)), x)
 
-            elif hasattr(dataset, "loadSample"):
-                save_ = save_dir / f"Samples"
-                save_.mkdir(exist_ok=True)
-                pbar = tqdm(range(opt.plot_samples), total=opt.plot_samples, desc=f"{colorstr('Train: ')}Plotting")
-                for x in pbar:
-                    pbar.desc = f"{colorstr('Train: ')}Plotting samples to {save_dir.as_posix()}"
-                    save = save_ / f"train_sample_{x}.jpg"
-                    fig = plotSample(300, *dataset.loadSample(transform=dataset.transform_2))
-                    fig.savefig(save.as_posix())
-                    fig.clf()
+        elif hasattr(dataset, "loadSample") and opt.resume is False:
+            save_ = save_dir / f"Samples"
+            save_.mkdir(exist_ok=True)
+            pbar = tqdm(range(opt.plot_samples), total=opt.plot_samples, desc=f"{colorstr('Train: ')}Plotting")
+            for x in pbar:
+                pbar.desc = f"{colorstr('Train: ')}Plotting samples to {save_dir.as_posix()}"
+                save = save_ / f"train_sample_{x}.jpg"
+                fig = plotSample(300, *dataset.loadSample(transform=dataset.transform_2))
+                fig.savefig(save.as_posix())
+                fig.clf()
 
-                    save = save_ / f"val_sample_{x}.jpg"
-                    fig = plotSample(300, *val_dataset.loadSample(transform=val_dataset.transform_2))
-                    fig.savefig(save.as_posix())
-                    fig.clf()
+                save = save_ / f"val_sample_{x}.jpg"
+                fig = plotSample(300, *val_dataset.loadSample(transform=val_dataset.transform_2))
+                fig.savefig(save.as_posix())
+                fig.clf()
 
     model.yaml['mean'] = dataset.mean
     model.yaml['std'] = dataset.std
