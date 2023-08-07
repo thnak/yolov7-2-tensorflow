@@ -35,19 +35,29 @@ def export_openvino(file_, metadata, half, prefix='OpenVINO:'):
     return f, None
 
 
-def export_tfjs(file_, names, prefix='TensorFlow.js:'):
+def export_tfjs(file_, names, int8=True, prefix='TensorFlow.js:'):
     check_requirements('tensorflowjs')
     import tensorflowjs as tfjs
     print(f'\n{prefix} starting export with tensorflowjs {tfjs.__version__}...')
     file = Path(file_)
     f_web = str(file).replace('.pt', '_web_model')  # js dir
+
+    if Path(f_web).exists():
+        for xx in Path(f_web).iterdir():
+            xx.unlink()
     f_pb = str(file).replace('.pt', '.pb')  # *.pb path
     f_json = f'{f_web}/model.json'  # *.json path
     f_labels = f'{f_web}/labels.txt'
 
-    cmd = f'tensorflowjs_converter --input_format=tf_frozen_model ' \
-          f'--output_node_names=Identity,Identity_1,Identity_2,Identity_3 {f_pb} {f_web}'
-    subprocess.run(cmd.split())
+    cmd = [
+        'tensorflowjs_converter',
+        '--input_format=tf_frozen_model',
+        '--quantize_uint8' if int8 else '',
+        '--output_node_names=Identity,Identity_1,Identity_2,Identity_3',
+        str(f_pb),
+        str(f_web), ]
+
+    subprocess.run([x for x in cmd if x])
 
     json = Path(f_json).read_text()
     with open(f_json, 'w') as j:  # sort JSON Identity_* in ascending order
@@ -221,7 +231,7 @@ def add_tflite_metadata(file, metadata, num_outputs):
 
 
 def TryExport_ONNX(weight: Path, model, feed: torch.Tensor, map_device, logging,
-                   MetaData: dict = {}, start_points_2_break: list = [], end_points_2_break: list = [],
+                   MetaData: dict = {}, rknn=False,
                    prefix: str = colorstr('ONNX:'), **kwargs):
     check_requirements(('onnx', 'onnxmltools'))
     import onnx
@@ -284,18 +294,21 @@ def TryExport_ONNX(weight: Path, model, feed: torch.Tensor, map_device, logging,
     if feed.dtype != torch.float16 and kwargs["trace"]:
         model = torch.jit.trace(model, feed).eval()
         logging.info(f'{prefix} Traced model!')
+    if rknn:
+        if model.is_p5():
+            m = model.model[0]
+            model.model = model.model[1:]
+            feed = m(feed)
     torch.onnx.export(model,
                       feed, f, verbose=kwargs["v"],
                       opset_version=kwargs["onnx_opset"],
                       input_names=['images'],
-                      output_names=output_names,
+                      output_names=None if rknn else output_names,
                       training=torch.onnx.TrainingMode.EVAL,
                       dynamic_axes=dynamic_axes,
                       keep_initializers_as_inputs=True)
 
-    if sum([len(start_points_2_break), len(end_points_2_break)]) > 1:
-        onnx.utils.extract_model(input_path=f, output_path=f, input_names=start_points_2_break,
-                                 output_names=end_points_2_break)
+
     # Checks
     onnx_model = onnx.load(f)  # load onnx model
     onnx.checker.check_model(onnx_model)  # check onnx model

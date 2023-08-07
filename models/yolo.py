@@ -67,6 +67,7 @@ class Detect(nn.Module):
     include_nms = False
     concat = False
     dynamic = False  # https://github.com/WongKinYiu/yolov7/pull/1270
+    rknn = False
 
     def __init__(self, nc=80, anchors=(), ch=(), inplace=True):  # detection layer
         super(Detect, self).__init__()
@@ -84,11 +85,13 @@ class Detect(nn.Module):
         self.inplace = inplace
 
     def forward(self, x):
-        # x = x.copy()  # for profiling
         z = []  # inference output
         self.training |= self.export
         for i in range(self.nl):
             x[i] = self.m[i](x[i])  # conv
+            if self.rknn:
+                z.append(x[i])
+                continue
             bs, _, ny, nx = x[i].shape  # x(bs,255,20,20) to x(bs,3,20,20,85)
             x[i] = x[i].view(bs, self.na, self.no, ny, nx).permute(0, 1, 3, 4, 2).contiguous()
 
@@ -107,7 +110,9 @@ class Detect(nn.Module):
                     y = torch.cat((xy, wh, conf), 4)
                 z.append(y.view(bs, self.na * nx * ny, self.no))
 
-        if self.training:
+        if self.rknn:
+            out = z
+        elif self.training:
             out = x
         elif self.end2end or self.concat:
             out = torch.cat(z, 1)

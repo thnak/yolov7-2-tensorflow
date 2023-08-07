@@ -26,6 +26,19 @@ from utils.torch_utils import select_device
 
 sys.path.append('./')  # to run '$ python *.py' files in subdirectories
 
+
+def run(**kwargs):
+    weight_model = kwargs['weight']
+    weight_model = Path(weight_model) if isinstance(weight_model, str) else weight_model
+    save_dir = weight_model.parent / weight_model.stem
+    if save_dir.exists():
+        for _ in save_dir.iterdir():
+            _.unlink()
+    else:
+        save_dir.mkdir()
+
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Export your pytorch model to another format")
     parser.add_argument('--weights', nargs='+', type=str, default=['./best.pt'], help='weights path')
@@ -131,11 +144,13 @@ if __name__ == '__main__':
                 else:
                     input_shape = [3, 640, 640] if model.is_p5() else [3, 1280, 1280]
                     logging.info(
-                        f'{exPrefix} using default input shape. to export with special input shape please use --imgsz arg arg')
+                        f'{exPrefix} using default input shape. to export with special input '
+                        f'shape please use --imgsz arg arg')
                 if any([tensorFlowjs, tensorFlowLite, saved_Model, graphDef]):
                     input_shape = [3, max(input_shape), max(input_shape)]
                     logging.info(
-                        f"{exPrefix} switching to square shape... input_shape: {input_shape}. since some format does not support rectangle shape")
+                        f"{exPrefix} switching to square shape... input_shape: {input_shape}. "
+                        f"since some format does not support rectangle shape")
         else:
             input_shape = model.input_shape
             tensorFlowjs = tensorFlowLite = coreML = RKNN = graphDef = saved_Model = openVINO = False
@@ -154,18 +169,9 @@ if __name__ == '__main__':
 
         img = torch.zeros(opt.batch_size, *input_shape, device=map_device)
 
-        # Update model
-        end_points_2_break = []
-        start_points_2_break = 0
         for k, m in model.named_modules():
-            end_points_2_break.append(k)
             m._non_persistent_buffers_set = set()  # pytorch 1.6.0 compatibility
-            if isinstance(m, ReOrg):
-                start_points_2_break = []
             if isinstance(m, Conv):
-                if isinstance(start_points_2_break, list):
-                    if not len(start_points_2_break):
-                        start_points_2_break.append(f'/model.0/Concat_output_0')
                 if isinstance(m.act, SiLU):
                     m.act = nn.SiLU()
 
@@ -182,24 +188,18 @@ if __name__ == '__main__':
                         logging.info(f"{exPrefix} re-parameter finished, exporting...\n")
                         ckpt = torch.load(re_paramDir, map_location=map_device)
                         model = ckpt["model"].eval().float().fuse()
-                        end_points_2_break = []
+                        # end_points_2_break = []
                         for m_ in model.parameters():
                             m_.requires_grad = False
-                        for x, y in model.named_modules():
-                            end_points_2_break.append(x)
+                        # for x, y in model.named_modules():
+                        #     end_points_2_break.append(x)
                     else:
                         for m_ in model.parameters():
                             m_.requires_grad = False
                         model = model.fuse()
                         break
 
-        if RKNN:
-            end_points_2_break = end_points_2_break[-len(model.yaml['anchors']):]
-            for i, x in enumerate(end_points_2_break):
-                from_modul, modul_idx, attr, idx = x.split('.')
-                end_points_2_break[i] = f'/{from_modul}.{modul_idx}/{attr}.{idx}/Conv_output_0'
-        else:
-            end_points_2_break = start_points_2_break = []
+# run will put here
 
         model_Gflops = model.info(verbose=False, img_size=input_shape)
         logging.info(model_Gflops)
@@ -219,6 +219,7 @@ if __name__ == '__main__':
         # set Detect() layer grid export
         model.model[-1].export = True if any([coreML, is_3D, model.is_Classify]) and not opt.end2end else False
         model.model[-1].include_nms = True if opt.include_nms else False
+        model.model[-1].rknn = RKNN
 
         # metadata
         anchors = anchor_grid = None
@@ -252,9 +253,6 @@ if __name__ == '__main__':
         filenames = []
         if RKNN:
             prefix = colorstr('RKNN:')
-            if isinstance(start_points_2_break, int):
-                start_points_2_break = ['images']
-            logging.info(f'{prefix} input name: {start_points_2_break} output name: {end_points_2_break}')
             ONNX = True
         # TorchScript export
         if torchScript:
@@ -291,8 +289,7 @@ if __name__ == '__main__':
 
                 f = TryExport_ONNX(weight=weight, model=model, feed=img,
                                    map_device=map_device, logging=logging,
-                                   start_points_2_break=start_points_2_break,
-                                   end_points_2_break=end_points_2_break,
+                                   rknn=RKNN,
                                    MetaData=MetaData,
                                    prefix=prefix, **opt.__dict__)
                 filenames.append(f)
@@ -338,8 +335,7 @@ if __name__ == '__main__':
                     from tools.auxexport import export_pb
 
                     f = export_pb(s_models, weight, prefix=prefix)[0]
-                    logging.info(
-                        f'{prefix} export success✅, saved as {f}')
+                    logging.info(f'{prefix} export success✅, saved as {f}')
                     filenames.append(f)
                 except Exception as e:
                     logging.info(f'{prefix} export failure❌:\n{e}')
@@ -371,6 +367,7 @@ if __name__ == '__main__':
 
                 f = export_tfjs(file_=weight,
                                 names=labels,
+                                int8=opt.int8,
                                 prefix=prefix)
                 logging.info(f'{prefix} export success✅, saved as {f}')
                 filenames.append(f)
