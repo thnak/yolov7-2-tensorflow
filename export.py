@@ -140,6 +140,8 @@ if __name__ == '__main__':
             input_shape = model.input_shape
             tensorFlowjs = tensorFlowLite = coreML = RKNN = graphDef = saved_Model = openVINO = False
             logging.info(f"{exPrefix} Exporting for Video Classify model. ")
+            if opt.imgsz != -1:
+                input_shape[2:] = opt.imgsz if len(opt.imgsz) == 2 else [opt.imgsz] * 2
 
         model_version = model.model_version if hasattr(model, 'model_version') else 0
         model.best_fitness = best_fitness

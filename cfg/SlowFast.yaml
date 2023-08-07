@@ -4,8 +4,8 @@ depth_multiple: 1.0  # model depth multiple
 width_multiple: 1.0  # layer channel multiple
 p5: True
 ch: 3
-sample_length: 16
-sampling_rate: 5
+sample_length: 32
+sampling_rate: 2
 head_dim: 2048
 mean: [0.389, 0.379, 0.341] # UCF101
 std: [0.279, 0.273, 0.275] # UCF101

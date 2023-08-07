@@ -575,7 +575,7 @@ if __name__ == '__main__':
 
     from onnxsim import simplify
 
-    torch.onnx.export(model, img, "3dmodel.onnx")
+    torch.onnx.export(model, torch.rand(1, 3, 32, 256, 256).to(device), "3dmodel.onnx")
     model = onnx.load("3dmodel.onnx")
     model, c = simplify(model)
     onnx.save(model, "3dmodel.onnx")
