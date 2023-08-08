@@ -11,16 +11,15 @@ from pathlib import Path
 import numpy as np
 import torch
 import torch.nn as nn
-from torch.utils.mobile_optimizer import optimize_for_mobile
 
 from models.common import (ReOrg, Conv)
 from models.commond3D import Model3D
-from models.experimental import attempt_load, End2End
+from models.experimental import attempt_load
 from models.yolo import (IDetect, Detect, IAuxDetect)
 
 from utils.activations import SiLU
-from utils.general import (set_logging, check_img_size, check_requirements, colorstr)
-from utils.default import ONNX_OPSET, ONNX_OPSET_TARGET, MAX_DET
+from utils.general import (set_logging, check_img_size, colorstr)
+from utils.default import MAX_DET
 from utils.re_parameteration import Re_parameterization
 from utils.torch_utils import select_device
 

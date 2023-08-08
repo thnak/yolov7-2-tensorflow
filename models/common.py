@@ -5,6 +5,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import warnings
 
+from torch import nn
+
 from utils.default import ACT_LIST
 from utils.general import non_max_suppression, check_requirements, autopad, fix_problem_with_reuse_activation_funtion
 
@@ -113,6 +115,25 @@ class FullyConnected(nn.Module):
         return self.act(self.linear(inputs))
 
 
+class ESN(nn.Module):
+    """https://tyagi-bhaumik.medium.com/liquid-neural-networks-revolutionizing-ai-with-dynamic-information-flow
+    -30e27f1cc912"""
+
+    def __init__(self, in_channels, reservoir_size, out_channels):
+        super(ESN, self).__init__()
+        self.reservoir_size = reservoir_size
+        self.W_in = FullyConnected(in_channels, reservoir_size, act=False)
+        self.W_res = FullyConnected(reservoir_size, reservoir_size, act=False)
+        self.W_out = FullyConnected(reservoir_size, out_channels, act=False)
+
+    def forward(self, inputs):
+        reservoir = torch.zeros((inputs.size(0), self.reservoir_size))
+        for i in range(inputs.size(1)):
+            input_t = inputs[:, i, :]
+            reservoir = torch.tanh(self.W_in(input_t) + self.W_res(reservoir))
+        return self.W_out(reservoir)
+
+
 class Conv1D(nn.Module):
     def __init__(self, in_channel: int, out_channel: int,
                  kernel_size: int = 1,
@@ -122,7 +143,7 @@ class Conv1D(nn.Module):
                  groups: int = 1, act: any = False):
         super(Conv1D, self).__init__()
 
-        act= fix_problem_with_reuse_activation_funtion(act)
+        act = fix_problem_with_reuse_activation_funtion(act)
         self.conv = nn.Conv1d(in_channel, out_channel,
                               kernel_size=kernel_size,
                               stride=stride,
@@ -1707,14 +1728,15 @@ class OREPA_3x3_RepConv(nn.Module):
 
         weight_rbr_1x1_kxk = torch.einsum('oihw,o->oihw', weight_rbr_1x1_kxk, self.vector[3, :])
 
-        weight_rbr_gconv = self.dwsc2full(self.weight_rbr_gconv_dw, self.weight_rbr_gconv_pw, self.in_channels)
+        weight_rbr_gconv = self.dwsc_2_full(self.weight_rbr_gconv_dw, self.weight_rbr_gconv_pw, self.in_channels)
         weight_rbr_gconv = torch.einsum('oihw,o->oihw', weight_rbr_gconv, self.vector[4, :])
 
         weight = weight_rbr_origin + weight_rbr_avg + weight_rbr_1x1_kxk + weight_rbr_pfir + weight_rbr_gconv
 
         return weight
 
-    def dwsc2full(self, weight_dw, weight_pw, groups):
+    @staticmethod
+    def dwsc_2_full(weight_dw, weight_pw, groups):
 
         t, ig, h, w = weight_dw.size()
         o, _, _, _ = weight_pw.size()
@@ -2586,4 +2608,191 @@ class ST2CSPC(nn.Module):
         y2 = self.cv2(x)
         return self.cv4(torch.cat((y1, y2), dim=1))
 
+
 ##### end of swin transformer v2 #####
+class Conv3D(nn.Module):
+    """Standard convolution"""
+
+    def __init__(self, c1: int, c2: int,
+                 k: int | tuple[int, int, int] | list[int, int, int] = 1,
+                 s: int | tuple[int, int, int] = 1,
+                 p: any = None,
+                 g: int | tuple[int, int, int] = 1,
+                 d: int | tuple[int, int, int] = 1,
+                 act: any = True,
+                 dropout: float = 0.0):
+        super(Conv3D, self).__init__()
+        act = fix_problem_with_reuse_activation_funtion(act)
+        k = [k] * 3 if isinstance(k, int) else k
+        p = [p] * 3 if isinstance(p, int) else p
+        d = [d] * 3 if isinstance(d, int) else d
+
+        pad = [autopad(k_, p_, d_) for k_, p_, d_ in zip(k, p, d)]
+        self.conv = nn.Conv3d(c1, c2,
+                              kernel_size=k,
+                              stride=s,
+                              padding=tuple(pad),
+                              groups=g if isinstance(g, int) else g[0],
+                              dilation=d,
+                              bias=False)
+        self.bn = nn.BatchNorm3d(c2)
+        self.drop = nn.Dropout(p=dropout)
+        self.act = nn.SiLU() if act is True else (act if isinstance(act, nn.Module) else nn.Identity())
+
+    def forward(self, x):
+        return self.drop(self.act(self.bn(self.conv(x))))
+
+    def fuseforward(self, x):
+        return self.act(self.conv(x))
+
+
+class Conv2Plus1D(nn.Module):
+    def __init__(self, c1, c2, k=(1, 1, 1), s=(1, 1, 1), p=(None, None, None), g=(1,), d=(1,), act=True,
+                 dropout=0):
+        super(Conv2Plus1D, self).__init__()
+        act = fix_problem_with_reuse_activation_funtion(act)
+        k = (k, k, k) if isinstance(k, int) else k
+        p = (p, p, p) if isinstance(p, int) else p
+        d = (d, d, d) if isinstance(d, int) else d
+        pad = (autopad(k_, p_, d_) for k_, p_, d_ in zip((1, k[1], k[2]), p, d))
+        pad2 = (autopad(k_, p_, d_) for k_, p_, d_ in zip((k[0], 1, 1), p, d))
+        g1 = g if isinstance(g, int) else g[0]
+        self.conv0 = nn.Conv3d(c1, c2,
+                               kernel_size=(1, k[1], k[2]),
+                               stride=1,
+                               padding=pad,
+                               groups=g1,
+                               dilation=d,
+                               bias=False)
+        self.bn0 = nn.BatchNorm3d(c2)
+
+        self.conv1 = nn.Conv3d(c2, c2,
+                               kernel_size=(k[0], 1, 1),
+                               stride=s,
+                               padding=pad2,
+                               groups=g if isinstance(g, int) else g[0],
+                               dilation=d,
+                               bias=False)
+        self.bn1 = nn.BatchNorm3d(c2)
+        self.drop = nn.Dropout(p=dropout)
+        self.act = nn.SiLU() if act is True else (act if isinstance(act, nn.Module) else nn.Identity())
+
+    def forward(self, inputs: torch.Tensor):
+        inputs = self.conv0(inputs)
+        inputs = self.bn0(inputs)
+        inputs = self.conv1(inputs)
+        inputs = self.bn1(inputs)
+        return self.drop(self.act(inputs))
+
+    def fuseforward(self, inputs: torch.Tensor):
+        return self.act(self.conv1(self.conv0(inputs)))
+
+
+class MP3D(nn.Module):
+    def __init__(self, k=2):
+        super(MP3D, self).__init__()
+        self.m = nn.MaxPool3d(kernel_size=(1, k, k), stride=(1, k, k))
+
+    def forward(self, x):
+        return self.m(x)
+
+
+class SP3D(nn.Module):
+    def __init__(self, k=3, s=1):
+        super(SP3D, self).__init__()
+        k = (k, k, k) if isinstance(k, int) else k
+        s = (s, s, s) if isinstance(s, int) else s
+        pad = [x // 2 for x in k]
+        self.m = nn.MaxPool3d(kernel_size=k,
+                              stride=s,
+                              padding=tuple(pad),
+                              dilation=1)
+
+    def forward(self, x):
+        return self.m(x)
+
+
+class ReOrg3D(nn.Module):
+    """https://arxiv.org/pdf/2101.00745.pdf"""
+
+    def __init__(self):
+        super(ReOrg3D, self).__init__()
+
+    @staticmethod
+    def forward(out):  # x(b, n,c,w,h) -> y(b, n,4c,w/2,h/2)
+        out = torch.cat([out[:, :, :, ::2, ::2], out[:, :, :, 1::2, ::2],
+                         out[:, :, :, ::2, 1::2], out[:, :, :, 1::2, 1::2]], dim=1)
+        return out
+
+
+class globalsubWay(nn.Module):
+    def __init__(self, in_channels: int, out_channel: int,
+                 kernel_size: int | tuple[int, int, int] = 1,
+                 stride: int | tuple[int, int, int] = 1,
+                 pad: int | tuple[int, int, int] = 1, groups: int = 1,
+                 dia: int | tuple[int, int, int] = 1):
+        super(globalsubWay, self).__init__()
+        self.conv = Conv3D(in_channels, out_channel, kernel_size, stride, pad, in_channels, dia, act=None)
+        self.m = nn.Sequential(nn.AdaptiveAvgPool3d(1),
+                               Conv3D(out_channel, 8, 1, 1, 0, 1, 1, act=nn.ReLU()),
+                               Conv3D(8, out_channel, 1, 1, 0, 1, 1, act=nn.Sigmoid()))
+        self.post_act = nn.SiLU()
+
+    def forward(self, x):
+        out = self.conv(x)
+        return self.post_act(out * self.m(out))
+
+
+class subway(nn.Module):
+    def __init__(self, in_channels, out_channel, kernel_size=1, stride=1, pad=1, groups=1, dia=1, act=True,
+                 dropout=0):
+        super(subway, self).__init__()
+        mid_channels = int(in_channels * 2 + in_channels / 4)
+        self.m = nn.Sequential(Conv3D(in_channels, mid_channels, kernel_size, stride, pad,
+                                      groups, dia, act=nn.ReLU(), dropout=dropout),
+                               Conv3D(mid_channels, mid_channels, 3, 1, 1,
+                                      mid_channels, 1, act=nn.SiLU(), dropout=dropout),
+                               Conv3D(mid_channels, out_channel, kernel_size, stride, pad,
+                                      groups, dia, act=None, dropout=dropout))
+        self.post_act = nn.ReLU()
+
+    def forward(self, x):
+        return self.post_act(x + self.m(x))
+
+
+class ConvPathway1(nn.Module):
+    def __init__(self, in_channels, out_channel, kernel_size=1, stride=1, pad=1, groups=1, dia=1, act=True,
+                 dropout=0):
+        super(ConvPathway1, self).__init__()
+        mid_channels = int(in_channels * 2 + in_channels / 4) * kernel_size
+
+        self.conv1 = Conv3D(in_channels, mid_channels, 1, 1, 0, 1, 1, act=nn.ReLU())
+        self.res = globalsubWay(mid_channels, mid_channels, 3, (1, 2, 2), 1, 1, 1)
+        self.conv3 = Conv3D(mid_channels, out_channel, 1, (1, 1, 1), 0, 1, 1, act=None)
+
+        self.conv2 = Conv3D(in_channels, out_channel, 1, (1, 2, 2), 0, 1, 1, act=None)
+        self.post_act = nn.ReLU()
+
+    def forward(self, x):
+        out1 = self.conv1(x)
+        out2 = self.conv2(x)
+        out1 = self.res(out1)
+        out1 = self.conv3(out1)
+        return self.post_act(out1 + out2)
+
+
+class ConvPathway2(nn.Module):
+    def __init__(self, in_channels, out_channel, kernel_size=1, stride=1, pad=1, groups=1, dia=1, act=True,
+                 dropout=0):
+        super(ConvPathway2, self).__init__()
+        mid_channels = int(in_channels * 2 + in_channels / 4)
+        self.conv1 = Conv3D(in_channels, mid_channels, 1, 1, 0, 1, 1, act=nn.ReLU())
+        self.res = globalsubWay(mid_channels, mid_channels, (3, 3, 3), 1, 1, 1, 1)
+        self.conv3 = Conv3D(mid_channels, out_channel, 1, (1, 1, 1), 0, 1, 1, act=None)
+        self.post_act = nn.ReLU()
+
+    def forward(self, x):
+        out1 = self.conv1(x)
+        out1 = self.res(out1)
+        out1 = self.conv3(out1)
+        return self.post_act(out1 + x)
