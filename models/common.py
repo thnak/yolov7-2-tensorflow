@@ -127,7 +127,7 @@ class ESN(nn.Module):
         self.W_out = FullyConnected(reservoir_size, out_channels, act=False)
 
     def forward(self, inputs):
-        reservoir = torch.zeros((inputs.size(0), self.reservoir_size))
+        reservoir = torch.zeros((inputs.size(0), self.reservoir_size), device=inputs.device)
         for i in range(inputs.size(1)):
             input_t = inputs[:, i, :]
             reservoir = torch.tanh(self.W_in(input_t) + self.W_res(reservoir))

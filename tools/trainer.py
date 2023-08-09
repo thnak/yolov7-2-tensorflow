@@ -195,8 +195,9 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None, use3D=Fal
     nbs = 64  # nominal batch size
     # Image sizes
     imgsz, imgsz_test = [x for x in opt.imgsz]
+    model.to(device)
+    model.eval()
     for _ in range(10):
-        model.eval()
         try:
             if use3D:
                 input_shape = [input_channel, clip_len, imgsz, imgsz] if isinstance(imgsz, int) else [
@@ -204,6 +205,7 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None, use3D=Fal
             else:
                 input_shape = [input_channel, imgsz, imgsz] if isinstance(imgsz, int) else [input_channel, *imgsz]
             model(torch.zeros([1, *input_shape], device=device))
+            break
         except Exception as ex:
             imgsz += model.stride.max()
             logger.warn(f"trying to get larger input shape, {ex}")

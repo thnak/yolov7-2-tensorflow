@@ -250,16 +250,17 @@ if __name__ == '__main__':
     model.eval()
     model.fuse()
     img = torch.rand(1, 3, 32, 224, 224).to(device)
-    # model_jit = torch.jit.trace(model, img)
-    # torch.jit.save(model_jit, 'jitmodel.pt')
-    # model.info(img_size=img.shape[1:], verbose=True)
-
-    y = model(img, profile=True)
-    print(y.shape)
-
-    from onnxsim import simplify
-
-    torch.onnx.export(model, torch.rand(1, 3, 32, 256, 256).to(device), "3dmodel.onnx")
-    model = onnx.load("3dmodel.onnx")
-    model, c = simplify(model)
-    onnx.save(model, "3dmodel.onnx")
+    model_jit = torch.jit.trace(model, img)
+    torch.jit.save(model_jit, 'jitmodel.pt')
+    model.info(img_size=img.shape[1:], verbose=True)
+    #
+    # y = model(img, profile=True)
+    # print(y.shape)
+    #
+    # from onnxsim import simplify
+    #
+    # torch.onnx.export(model, torch.rand(1, 3, 32, 256, 256).to(device), "3dmodel.onnx")
+    # model = onnx.load("3dmodel.onnx")
+    # model, c = simplify(model)
+    # onnx.save(model, "3dmodel.onnx")
+    # print('export finished')

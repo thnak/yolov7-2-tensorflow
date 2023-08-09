@@ -1,8 +1,6 @@
 import argparse
 import datetime
-import json
 import logging
-import pathlib
 import sys
 import time
 import warnings
