@@ -3,6 +3,7 @@ import sys
 import warnings
 
 from models.experimental import End2End
+from models.common import Blank_Space
 from utils.general import check_requirements, check_version, colorstr
 from utils.default import ONNX_OPSET, ONNX_OPSET_TARGET
 import os
@@ -295,9 +296,11 @@ def TryExport_ONNX(weight: Path, model, feed: torch.Tensor, map_device, logging,
         model = torch.jit.trace(model, feed).eval()
         logging.info(f'{prefix} Traced model!')
     if rknn:
-        if model.is_p5():
+        if not model.is_p5():
             m = model.model[0]
-            model.model = model.model[1:]
+            m_ = Blank_Space()
+            m_.i, m_.f, m_.type, m_.np = m.i, m.f, m.type, m.np
+            model.model[0] = m_
             feed = m(feed)
     torch.onnx.export(model,
                       feed, f, verbose=kwargs["v"],
@@ -307,7 +310,6 @@ def TryExport_ONNX(weight: Path, model, feed: torch.Tensor, map_device, logging,
                       training=torch.onnx.TrainingMode.EVAL,
                       dynamic_axes=dynamic_axes,
                       keep_initializers_as_inputs=True)
-
 
     # Checks
     onnx_model = onnx.load(f)  # load onnx model

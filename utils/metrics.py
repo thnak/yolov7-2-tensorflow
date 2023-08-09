@@ -211,7 +211,8 @@ class ConfuseMatrix_cls:
             plot_named = [x for x in names]
         else:
             plot_named = [x for x in range(self.nc)]
-        fig, ax = plt.subplots(figsize=(self.nc, self.nc))
+        plt.close('all')
+        fig, ax = plt.subplots(dpi=300)
         metrics.ConfusionMatrixDisplay.from_predictions(datas, labels, ax=ax,
                                                         cmap=self.plot_color,
                                                         normalize='true')

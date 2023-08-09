@@ -445,6 +445,7 @@ def train_cls(hyp, opt, tb_writer=None, data_loader=None, logger=None, use3D=Fal
                             save_.mkdir(exist_ok=True)
                             save_ = save_ / f"Val {epoch}.jpg"
                             fig.savefig(save_.as_posix())
+                        fig.clf()
                     if best_fitness < top1:
                         model.best_fitness = best_fitness = top1
                         model.metrics = {"top1": top1, "top5": top5}

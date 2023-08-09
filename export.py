@@ -34,6 +34,10 @@ def run(**kwargs):
     else:
         save_dir.mkdir()
 
+    if kwargs['onnx']:
+        from tools.auxexport import TryExport_ONNX
+        TryExport_ONNX()
+
 
 
 if __name__ == '__main__':
@@ -76,8 +80,7 @@ if __name__ == '__main__':
     set_logging()
     logging.info(f'\n{opt}\n')
 
-    opt.include = [x.lower() for x in opt.include] if isinstance(
-        opt.include, list) else [opt.include.lower()]
+    opt.include = [x.lower() for x in opt.include] if isinstance(opt.include, list) else [opt.include.lower()]
 
     torchScript = any(x in ['torchscript', 'coreml', "torchscriptlite"] for x in opt.include)
     torchScriptLite = any(x in ["torchscriptlite"] for x in opt.include)
@@ -185,11 +188,9 @@ if __name__ == '__main__':
                         logging.info(f"{exPrefix} re-parameter finished, exporting...\n")
                         ckpt = torch.load(re_paramDir, map_location=map_device)
                         model = ckpt["model"].eval().float().fuse()
-                        # end_points_2_break = []
                         for m_ in model.parameters():
                             m_.requires_grad = False
-                        # for x, y in model.named_modules():
-                        #     end_points_2_break.append(x)
+
                     else:
                         for m_ in model.parameters():
                             m_.requires_grad = False

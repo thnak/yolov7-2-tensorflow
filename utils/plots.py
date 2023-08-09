@@ -381,8 +381,7 @@ def profile_idetection(start=0, stop=0, labels=(), save_dir=''):
                     a.plot(t, results[i], marker='.', label=label, linewidth=1, markersize=5)
                     a.set_title(s[i])
                     a.set_xlabel('time (s)')
-                    # if fi == len(files) - 1:
-                    #     a.set_ylim(bottom=0)
+
                     for side in ['top', 'right']:
                         a.spines[side].set_visible(False)
                 else:

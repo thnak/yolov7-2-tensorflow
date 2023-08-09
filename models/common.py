@@ -16,6 +16,16 @@ except ImportError:
     pass
 
 
+class Blank_Space(nn.Module):
+    """A placeholder identity operator that is argument-insensitive."""
+    def __init__(self):
+        super(Blank_Space, self).__init__()
+        self.m = nn.Identity()
+
+    def forward(self, inputs):
+        return self.m(inputs)
+
+
 class MP(nn.Module):
     def __init__(self, k=2):
         super(MP, self).__init__()
