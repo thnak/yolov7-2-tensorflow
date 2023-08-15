@@ -54,18 +54,18 @@ class SlowFast(nn.Module):
         self.slow_branch_res0 = residual_block_2(slow_output_channel, 256, 64, [1] * 3, [1] * 3, act=act)
         self.fast_branch_res0 = residual_block_2(fast_output_channel, 32, fast_output_channel, (3, 1, 1), [1] * 3,
                                                  act=act)
-        slow_branch_res1 = [residual_block_1(256, 256, 64, [1] * 3, act=act)] * 2
+        slow_branch_res1 = [residual_block_1(256, 256, 64, [1] * 3, act=act) for _ in range(2)]
         self.slow_branch_res1 = nn.Sequential(*slow_branch_res1)
-        fast_branch_res1 = [residual_block_1(32, 32, 8, (3, 1, 1), act=act)] * 2
+        fast_branch_res1 = [residual_block_1(32, 32, 8, (3, 1, 1), act=act) for _ in range(2)]
         self.fast_branch_res1 = nn.Sequential(*fast_branch_res1)
         # ---
         self.conv_fast_to_slow1 = Conv3D(32, 64, (7, 1, 1), (4, 1, 1), [None] * 3, act=act)
         # ---
         self.slow_branch_res2 = residual_block_2(320, 512, 128, [1] * 3, (1, 2, 2), act=act)
         self.fast_branch_res2 = residual_block_2(32, 64, 16, (3, 1, 1), (1, 2, 2), act=act)
-        slow_branch_res3 = [residual_block_1(512, 512, 128, [1] * 3, act=act)] * 3
+        slow_branch_res3 = [residual_block_1(512, 512, 128, [1] * 3, act=act) for _ in range(3)]
         self.slow_branch_res3 = nn.Sequential(*slow_branch_res3)
-        slow_branch_res4 = [residual_block_1(64, 64, 16, (3, 1, 1), act=act)] * 3
+        slow_branch_res4 = [residual_block_1(64, 64, 16, (3, 1, 1), act=act) for _ in range(3)]
         self.fast_branch_res3 = nn.Sequential(*slow_branch_res4)
 
         # ---
@@ -73,18 +73,18 @@ class SlowFast(nn.Module):
         # ---
         self.slow_branch_res4 = residual_block_2(640, 1024, 256, (3, 1, 1), (1, 2, 2), act=act)
         self.fast_branch_res4 = residual_block_2(64, 128, 32, (3, 1, 1), (1, 2, 2), act=act)
-        slow_branch_res5 = [residual_block_1(1024, 1024, 256, (3, 1, 1), act=act)] * 5
+        slow_branch_res5 = [residual_block_1(1024, 1024, 256, (3, 1, 1), act=act) for _ in range(5)]
         self.slow_branch_res5 = nn.Sequential(*slow_branch_res5)
-        fast_branch_res5 = [residual_block_1(128, 128, 32, (3, 1, 1), act=act)] * 5
+        fast_branch_res5 = [residual_block_1(128, 128, 32, (3, 1, 1), act=act) for _ in range(5)]
         self.fast_branch_res5 = nn.Sequential(*fast_branch_res5)
         # ---
         self.conv_fast_to_slow3 = Conv3D(128, 256, (7, 1, 1), (4, 1, 1), [None] * 3, act=act)
         # ---
         self.slow_branch_res6 = residual_block_2(1280, 2048, 512, [1] * 3, (1, 2, 2), act=act)
         self.fast_branch_res6 = residual_block_2(128, 256, 64, (3, 1, 1), (1, 2, 2), act=act)
-        slow_branch_res7 = [residual_block_1(2048, 2048, 512, (3, 1, 1), act=act)] * 2
+        slow_branch_res7 = [residual_block_1(2048, 2048, 512, (3, 1, 1), act=act) for _ in range(2)]
         self.slow_branch_res7 = nn.Sequential(*slow_branch_res7)
-        fast_branch_res7 = [residual_block_1(256, 256, 64, (3, 1, 1), act=act)] * 2
+        fast_branch_res7 = [residual_block_1(256, 256, 64, (3, 1, 1), act=act) for _ in range(2)]
         self.fast_branch_res7 = nn.Sequential(*fast_branch_res7)
         if use_liquid:
             self.fully = ESN(2304, 2500, nc)

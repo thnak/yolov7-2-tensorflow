@@ -192,7 +192,7 @@ def add_tflite_metadata(file, metadata, num_outputs):
         from tflite_support import metadata as _metadata
         from tflite_support import metadata_schema_py_generated as _metadata_fb
 
-        tmp_file = Path('/tmp/meta.txt')
+        tmp_file = Path('meta.txt')
 
         with open(tmp_file, 'w') as meta_f:
             meta_f.write(json.dumps(metadata))
