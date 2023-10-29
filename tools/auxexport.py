@@ -247,7 +247,7 @@ def TryExport_ONNX(weight: Path, model, feed: torch.Tensor, map_device, logging,
         dynamic_axes = {'images': {0: 'batch', 2: 'height', 3: 'width'},  # size(1,3,640,640)
                         'output': {0: 'batch', 2: 'y', 3: 'x'}}
     if kwargs["dynamic_batch"]:
-        kwargs.batch_size = 'batch'
+        # kwargs.batch_size = 'batch'
         dynamic_axes = {
             'images': {
                 0: 'batch',
@@ -337,7 +337,7 @@ def TryExport_ONNX(weight: Path, model, feed: torch.Tensor, map_device, logging,
     for index, key in enumerate(MetaData):
         metadata = onnx_model.metadata_props.add()
         metadata.key = key
-        metadata.value = str(MetaData[key])
+        metadata.value = json.dumps(MetaData[key])
 
     onnxmltools.utils.save_model(onnx_model, f)
 

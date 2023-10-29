@@ -308,6 +308,7 @@ def Thread4(que3: Queue, end2end: models.yolo.ONNX_Engine.end2end, breakQue: boo
             for img in ori:
                 cv2.namedWindow("aa", cv2.WINDOW_NORMAL)
                 cv2.imshow("aa", img)
+
                 if cv2.waitKey(view) == 27:
                     breakQue = True
                     break

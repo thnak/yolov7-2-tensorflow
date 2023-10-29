@@ -113,7 +113,8 @@ class FullyConnected(nn.Module):
     def __init__(self, in_channel: int, out_channel: int, act=False):
         """Linear + BatchNorm + Act
         act = False -> nn.Identity() otherwise nn.Act"""
-        super(FullyConnected, self).__init__()
+        super().__init__()
+        act = fix_problem_with_reuse_activation_funtion(act)
         self.linear = nn.Linear(in_channel, out_channel, bias=False)
         self.bn = nn.BatchNorm1d(out_channel)
         self.act = nn.SiLU() if act is True else (act if isinstance(act, nn.Module) else nn.Identity())

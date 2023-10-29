@@ -925,11 +925,12 @@ class ONNX_Engine(object):
         self.best_fitness = meta['best_fitness'] if 'best_fitness' in meta else -1.
         self.best_fitness = self.best_fitness if isinstance(self.best_fitness, (float, int)) else -1
         self.export_gitstatus = str(meta['export_gitstatus']) if 'export_gitstatus' in meta else 'unknow'
-        self.stride = int(meta['stride']) if 'stride' in meta else 32
+        self.stride = eval(meta['stride']) if 'stride' in meta else 32
         self.names = eval(meta['names']) if 'names' in meta else ['nonamed'] * 1000
-        self.nc = int(meta['nc']) if 'nc' in meta else len(self.names)
+        self.nc = eval(meta['nc']) if 'nc' in meta else len(self.names)
         self.export_date = str(meta['export_date']) if 'export_date' in meta else 'YYYY-MM-DD#hh:mm:ss.0000'
-        self.exporting_opt = eval(meta['exporting_opt']) if 'exporting_opt' in meta else None
+        stringfix = meta['exporting_opt'].replace("false", "False").replace("true","True")
+        self.exporting_opt = eval(stringfix) if 'exporting_opt' in meta else None
         self.model_version = eval(meta['model_version']) if 'model_version' in meta else -1
         self.training_results = str(meta['training_results']) if 'training_results' in meta else '-1'
         self.wandb_id = str(meta['wandb_id']) if 'wandb_id' in meta else '---'
@@ -980,14 +981,15 @@ class ONNX_Engine(object):
     @staticmethod
     def xyxy2xywh(x, dim):
         y = [0] * 4
-        y[0] = ((x[0] + x[2]) / 2) / dim[1]  # x center
-        y[1] = ((x[1] + x[3]) / 2) / dim[0]  # y center
-        y[2] = (x[2] - x[0]) / dim[1]  # width
-        y[3] = (x[3] - x[1]) / dim[0]  # height
+        y[0] = ((x[0] + x[2]) / 2)   # x center
+        y[1] = ((x[1] + x[3]) / 2)   # y center
+        y[2] = (x[2] - x[0])   # width
+        y[3] = (x[3] - x[1])   # height
+        print(y, dim)
         return y
 
     @staticmethod
-    def end2end(outputs, ori_images, dwdh, ratio, names, xyxy2xywh, confThres=0.2, ):
+    def end2end(outputs, ori_images, dwdh, ratio, names, xyxy2xywh, confThres=0.2):
         """
         @param confThres: minimum score allowed
         @param outputs: outputs of prediction
@@ -1014,9 +1016,13 @@ class ONNX_Engine(object):
             if image[batch_id] is None:
                 image[batch_id] = ori_images[batch_id]
             box = np.array([x0, y0, x1, y1])
+
             box -= np.array(dwdhs[batch_id] * 2)
+
             box /= ratios[batch_id][0]
+
             box = box.round().astype(np.int32).tolist()
+
             cls_id = int(cls_id)
             name = names[cls_id]
             bbox[batch_id] = xyxy2xywh(box, image[batch_id].shape[:2])
