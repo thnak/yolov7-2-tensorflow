@@ -726,8 +726,8 @@ def train(hyp, opt, tb_writer=None,
     model.info(verbose=True,
                img_size=[input_channel, imgsz, imgsz] if isinstance(imgsz, int) else [input_channel, *imgsz])
     logger.info('')
-    if tb_writer:
-        tb_writer.add_graph(model, torch.zeros([1, input_channel, imgsz, imgsz], device=device))
+    # if tb_writer:
+    #     tb_writer.add_graph(model, torch.zeros([1, input_channel, imgsz, imgsz], device=device))
     # accumulate loss before optimizing
     accumulate = max(round(nbs / total_batch_size), 1)
     hyp['weight_decay'] *= total_batch_size * accumulate / nbs  # scale weight_decay
