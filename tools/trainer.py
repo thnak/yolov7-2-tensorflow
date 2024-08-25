@@ -11,7 +11,7 @@ import numpy as np
 import torch
 import yaml
 from torch import nn as nn, distributed as dist, autocast
-from torch.cuda.amp import GradScaler
+from torch.amp import GradScaler
 from torch.nn import functional as functional
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.nn.utils import clip_grad_norm_
