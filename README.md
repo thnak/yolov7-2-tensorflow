@@ -2,7 +2,7 @@
 <div align="left"></div>
 <h1>YOLOv7 supported for tfjs, tflite, saved model, openvino, onnx, rknn.</br>Support for WINDOWS and LINUX</h1>
 <h1>Train</h1>
-    <p>python train.py --batch 4 --epochs 10 --data 'data/mydataset.yaml' --cache-images disk  --cfg 'cfg/yolov7-tiny.yaml'  --device dml:0 --img-size 640 --weight yolov7.pt</p>
+    <p>!python train.py --batch 4 --epochs 10 --data 'data/coco.yaml' --cache_images disk --cfg 'cfg/yolov7-tiny.yaml' --device dml:0 --imgsz 640</p>
 dml:0 to set dml device (windows), cuda:0 to set cuda device, cache-images for faster training disk/ram/no
 <h1>Export</h1>
     <p>python export.py --weights "yolov7.pt" --include tfjs/onnx/saved_model/openvino/tflite</p>
