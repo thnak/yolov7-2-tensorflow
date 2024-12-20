@@ -211,24 +211,37 @@ class ONNX_TRT(nn.Module):
 
 
 class End2End(nn.Module):
-    """export onnx or tensorrt model with NMS operation."""
+    """Export ONNX or TensorRT model with NMS operation and optional FP16 support."""
 
-    def __init__(self, model, max_obj=100, iou_thres=0.45, score_thres=0.25, max_wh=None, device=None, n_classes=80):
+    def __init__(self, model, max_obj=100, iou_thres=0.45, score_thres=0.25, max_wh=None, device=None, n_classes=80, use_fp16=False):
         super().__init__()
         device = device if device else torch.device('cpu')
         assert isinstance(max_wh, int) or max_wh is None
+        
         self.model = model.to(device)
+        self.use_fp16 = use_fp16
         self.is_Classify = False
         self.stride = model.stride
         self.model.model[-1].end2end = True
+
         self.patch_model = ONNX_TRT if max_wh is None else ONNX_ORT
         self.end2end = self.patch_model(max_obj, iou_thres, score_thres, max_wh, device, n_classes)
+        
+        if self.use_fp16:
+            self.model.half()       # Convert model weights to FP16
+            self.end2end.half()     # Convert NMS module to FP16
+
         self.end2end.eval()
 
     def forward(self, x):
+        if self.use_fp16:
+            x = x.to(torch.float16)  # Convert input to FP16 before passing it to the model
+        
         x = self.model(x)
         x = self.end2end(x)
+        
         return x
+
 
 
 class Ensemble(nn.ModuleList):
