@@ -265,9 +265,12 @@ def TryExport_ONNX(weight: Path, model, feed: torch.Tensor, map_device, logging,
         if kwargs["end2end"]:
             x = 'TensorRT' if not kwargs["max_hw"] else 'ONNXRUNTIME'
             logging.info(f'{prefix} Starting export end2end model for {colorstr(x)}')
+            model.float()
+            feed = feed.float()
+            
             model = End2End(model, kwargs["topk_all"], kwargs["iou_thres"],
                             kwargs["conf_thres"], max(model.input_shape) if kwargs["max_hw"] else None, map_device,
-                            len(model.names))
+                            len(model.names), kwargs["fp16"])
             if kwargs["end2end"] and not kwargs["max_hw"]:
                 output_names = ['num_dets', 'det_boxes',
                                 'det_scores', 'det_classes']
@@ -277,9 +280,9 @@ def TryExport_ONNX(weight: Path, model, feed: torch.Tensor, map_device, logging,
                 output_names = ['output']
         else:
             model.model[-1].concat = True
-    if kwargs["onnx_opset"] not in ONNX_OPSET:
-        logging.info(f'{prefix} onnx opset must be in {ONNX_OPSET}, switching to 12')
-        kwargs["onnx_opset"] = ONNX_OPSET_TARGET
+    # if kwargs["onnx_opset"] not in ONNX_OPSET:
+    #     logging.info(f'{prefix} onnx opset must be in {ONNX_OPSET}, switching to 12')
+    #     kwargs["onnx_opset"] = ONNX_OPSET_TARGET
     dml = False
     try:
         import torch_directml
@@ -287,10 +290,10 @@ def TryExport_ONNX(weight: Path, model, feed: torch.Tensor, map_device, logging,
     except ImportError:
         pass
 
-    if kwargs["onnx_opset"] not in ONNX_OPSET and dml:
-        logging.warn(
-            f'{prefix} onnx opset tested for version {ONNX_OPSET_TARGET}, '
-            f'newer version may have poor performance for ONNXRUNTIME in DmlExecutionProvider')
+    # if kwargs["onnx_opset"] not in ONNX_OPSET and dml:
+    #     logging.warn(
+    #         f'{prefix} onnx opset tested for version {ONNX_OPSET_TARGET}, '
+    #         f'newer version may have poor performance for ONNXRUNTIME in DmlExecutionProvider')
     torch.onnx.disable_log()
     if feed.dtype != torch.float16 and kwargs["trace"]:
         model = torch.jit.trace(model, feed).eval()
