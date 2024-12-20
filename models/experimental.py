@@ -78,7 +78,7 @@ class ORT_NMS(torch.autograd.Function):
                 score_threshold=torch.tensor([0.25])):
         device = boxes.device
         batch = scores.shape[0]
-        num_det = random.randint(0, 1)
+        num_det = min(1, scores.shape[1])
         batches = torch.randint(0, batch, (num_det,), device=device).sort()[0]
         idxs = torch.arange(100, 100 + num_det, device=device)
         zeros = torch.zeros((num_det,), dtype=torch.int64, device=device)
@@ -164,7 +164,7 @@ class ONNX_ORT(nn.Module):
         else:
             scores *= conf  # conf = obj_conf * cls_conf
         boxes @= self.convert_matrix
-        max_score, category_id = scores.max(2, keepdim=True)
+        max_score, category_id = scores.topk(1, dim=2, largest=True, sorted=False)
         dis = category_id.float() * self.max_wh
         nmsbox = boxes + dis
         max_score_tp = max_score.transpose(1, 2).contiguous()
