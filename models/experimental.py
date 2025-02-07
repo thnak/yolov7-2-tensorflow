@@ -149,11 +149,12 @@ class ONNX_ORT(nn.Module):
         self.iou_threshold = torch.tensor([iou_thres]).to(device)
         self.score_threshold = torch.tensor([score_thres]).to(device)
         self.max_wh = max_wh  # if max_wh != 0 : non-agnostic else : agnostic
-        self.convert_matrix = torch.tensor([[1, 0, 1, 0], [0, 1, 0, 1], [-0.5, 0, 0.5, 0], [0, -0.5, 0, 0.5]],
-                                           dtype=torch.float32,
-                                           device=self.device)
+        self.register_buffer("convert_matrix", torch.tensor([[1, 0, 1, 0], [0, 1, 0, 1], [-0.5, 0, 0.5, 0], [0, -0.5, 0, 0.5]], device=self.device))
         self.n_classes = n_classes
 
+    # def Convert2Half(self):
+      # self.convert_matrix = self.convert_matrix.to(dtype=torch.float16)
+  
     def forward(self, x):
         boxes = x[:, :, :4]
         conf = x[:, :, 4:5]
@@ -164,7 +165,10 @@ class ONNX_ORT(nn.Module):
         else:
             scores *= conf  # conf = obj_conf * cls_conf
         boxes @= self.convert_matrix
+     
+        # Use TopK to get the top 1 value (maximum) and its index
         max_score, category_id = scores.topk(1, dim=2, largest=True, sorted=False)
+      
         dis = category_id.float() * self.max_wh
         nmsbox = boxes + dis
         max_score_tp = max_score.transpose(1, 2).contiguous()
@@ -225,11 +229,14 @@ class End2End(nn.Module):
         self.model.model[-1].end2end = True
 
         self.patch_model = ONNX_TRT if max_wh is None else ONNX_ORT
+        
         self.end2end = self.patch_model(max_obj, iou_thres, score_thres, max_wh, device, n_classes)
         
         if self.use_fp16:
             self.model.half()       # Convert model weights to FP16
             self.end2end.half()     # Convert NMS module to FP16
+            # if(max_wh):
+              # self.end2end.Convert2Half()
 
         self.end2end.eval()
 
